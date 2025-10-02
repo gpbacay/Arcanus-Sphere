@@ -1,20 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Arcanus Sphere",
-  description: "Arcanus Sphere Data Visualization Program",
+  title: "Arcanus-Sphere",
+  description: "A 3D sphere visualization",
 };
 
 export default function RootLayout({
@@ -23,10 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        
-      >
+    <html lang="en" suppressHydrationWarning>
+      <body>
         {children}
       </body>
     </html>
