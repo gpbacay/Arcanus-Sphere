@@ -7,11 +7,12 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
-const SphereScene: React.FC = () => {
+interface SphereSceneProps {
+  frequencyData: Uint8Array | null;
+}
+
+const SphereScene: React.FC<SphereSceneProps> = ({ frequencyData }) => {
   const mountRef = useRef<HTMLDivElement>(null);
-  // Removed as they are no longer needed
-  // const outerPositionsRef = useRef<Float32Array>(new Float32Array());
-  // const outerGeometryRef = useRef<THREE.BufferGeometry>(new THREE.BufferGeometry());
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -19,12 +20,12 @@ const SphereScene: React.FC = () => {
     let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, ringGroup1: THREE.Group, innerParticleGroup: THREE.Group, composer: typeof EffectComposer, controls: typeof OrbitControls;
     let animationId: number;
     let time = 0;
-    const particleCount = 1000; // Fewer particles for the ring
-    const innerParticleCount = 2000; // Fewer for inner sphere
+    const particleCount = 1000;
+    const innerParticleCount = 2000;
 
-    const ringRadius = 0.5; // Radius of the ring, slightly larger than inner sphere
-    const ringTube = 0.01; // Thickness of the ring
-    const ringArc = Math.PI * 2; // Full circle for the ring
+    const ringRadius = 0.5;
+    const ringTube = 0.01;
+    const ringArc = Math.PI * 2;
 
     let ringGroup2: THREE.Group, ringGroup3: THREE.Group;
 
@@ -42,7 +43,6 @@ const SphereScene: React.FC = () => {
       controls.enablePan = false;
       camera.position.z = 5;
 
-      // Inner particle system (static sphere)
       const innerPositionsArray = new Float32Array(innerParticleCount * 3);
       const innerColors = new Float32Array(innerParticleCount * 3);
 
@@ -59,9 +59,9 @@ const SphereScene: React.FC = () => {
         innerPositionsArray[i * 3 + 1] = y;
         innerPositionsArray[i * 3 + 2] = z;
 
-        innerColors[i * 3] = 0.0 + Math.random() * 0.1; // Low red
-        innerColors[i * 3 + 1] = 0.6 + Math.random() * 0.2; // Medium-high green
-        innerColors[i * 3 + 2] = 0.0 + Math.random() * 0.1; // Low blue
+        innerColors[i * 3] = 0.0 + Math.random() * 0.1;
+        innerColors[i * 3 + 1] = 0.6 + Math.random() * 0.2;
+        innerColors[i * 3 + 2] = 0.0 + Math.random() * 0.1;
       }
 
       const innerGeometry = new THREE.BufferGeometry();
@@ -80,32 +80,27 @@ const SphereScene: React.FC = () => {
       const innerParticles = new THREE.Points(innerGeometry, innerMaterial);
       innerParticleGroup = new THREE.Group();
       innerParticleGroup.add(innerParticles);
-      scene.add(innerParticleGroup); // Add inner sphere directly to scene
+      scene.add(innerParticleGroup);
 
-      // Outer curved ring
       const outerRingPositions = new Float32Array(particleCount * 3);
       const outerRingColors = new Float32Array(particleCount * 3);
 
       for (let i = 0; i < particleCount; i++) {
-        const u = (i / particleCount) * ringArc; // Angle along the arc
-        // const v = Math.random() * Math.PI * 2; // Angle around the tube
+        const u = (i / particleCount) * ringArc;
 
         const x = ringRadius * Math.cos(u);
         const y = ringRadius * Math.sin(u);
-        const z = (Math.random() - 0.5) * ringTube; // Small thickness for the ring
+        const z = (Math.random() - 0.5) * ringTube;
 
-        // Position the ring at the origin, rotation handled by particleGroup
         const position = new THREE.Vector3(x, y, z);
-        // Remove explicit rotation here, let the group handle it
-        // position.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2); // Rotate to face inner sphere
 
         outerRingPositions[i * 3] = position.x;
         outerRingPositions[i * 3 + 1] = position.y;
         outerRingPositions[i * 3 + 2] = position.z;
 
-        outerRingColors[i * 3] = 0.6 + Math.random() * 0.2; // Medium-high red
-        outerRingColors[i * 3 + 1] = 0.0 + Math.random() * 0.1; // Low green
-        outerRingColors[i * 3 + 2] = 0.9 + Math.random() * 0.1; // High blue
+        outerRingColors[i * 3] = 0.6 + Math.random() * 0.2;
+        outerRingColors[i * 3 + 1] = 0.0 + Math.random() * 0.1;
+        outerRingColors[i * 3 + 2] = 0.9 + Math.random() * 0.1;
       }
 
       const outerRingGeometry = new THREE.BufferGeometry();
@@ -122,11 +117,10 @@ const SphereScene: React.FC = () => {
       });
 
       const outerRingParticles = new THREE.Points(outerRingGeometry, outerRingMaterial);
-      ringGroup1 = new THREE.Group(); // This group will now represent the rotating ring
+      ringGroup1 = new THREE.Group();
       ringGroup1.add(outerRingParticles);
       scene.add(ringGroup1);
 
-      // Second outer ring
       const outerRingPositions2 = new Float32Array(particleCount * 3);
       const outerRingColors2 = new Float32Array(particleCount * 3);
 
@@ -139,9 +133,9 @@ const SphereScene: React.FC = () => {
         outerRingPositions2[i * 3] = position.x;
         outerRingPositions2[i * 3 + 1] = position.y;
         outerRingPositions2[i * 3 + 2] = position.z;
-        outerRingColors2[i * 3] = 0.6 + Math.random() * 0.2; // Medium-high red
-        outerRingColors2[i * 3 + 1] = 0.0 + Math.random() * 0.1; // Low green
-        outerRingColors2[i * 3 + 2] = 0.9 + Math.random() * 0.1; // High blue
+        outerRingColors2[i * 3] = 0.6 + Math.random() * 0.2;
+        outerRingColors2[i * 3 + 1] = 0.0 + Math.random() * 0.1;
+        outerRingColors2[i * 3 + 2] = 0.9 + Math.random() * 0.1;
       }
 
       const outerRingGeometry2 = new THREE.BufferGeometry();
@@ -162,7 +156,6 @@ const SphereScene: React.FC = () => {
       ringGroup2.add(outerRingParticles2);
       scene.add(ringGroup2);
 
-      // Third outer ring
       const outerRingPositions3 = new Float32Array(particleCount * 3);
       const outerRingColors3 = new Float32Array(particleCount * 3);
 
@@ -175,9 +168,9 @@ const SphereScene: React.FC = () => {
         outerRingPositions3[i * 3] = position.x;
         outerRingPositions3[i * 3 + 1] = position.y;
         outerRingPositions3[i * 3 + 2] = position.z;
-        outerRingColors3[i * 3] = 0.6 + Math.random() * 0.2; // Medium-high red
-        outerRingColors3[i * 3 + 1] = 0.0 + Math.random() * 0.1; // Low green
-        outerRingColors3[i * 3 + 2] = 0.9 + Math.random() * 0.1; // High blue
+        outerRingColors3[i * 3] = 0.6 + Math.random() * 0.2;
+        outerRingColors3[i * 3 + 1] = 0.0 + Math.random() * 0.1;
+        outerRingColors3[i * 3 + 2] = 0.9 + Math.random() * 0.1;
       }
 
       const outerRingGeometry3 = new THREE.BufferGeometry();
@@ -228,18 +221,43 @@ const SphereScene: React.FC = () => {
     const render = () => {
       time += 0.016;
       animationId = requestAnimationFrame(render);
-      
+
       controls.update();
-      
+
+      // Calculate average amplitude from frequencyData
+      let averageAmplitude = 0;
+      if (frequencyData) {
+        for (let i = 0; i < frequencyData.length; i++) {
+          averageAmplitude += frequencyData[i];
+        }
+        averageAmplitude /= frequencyData.length;
+      }
+
+      // Normalize amplitude to a smaller range for scaling (e.g., 0 to 1)
+      const normalizedAmplitude = averageAmplitude / 255; // Max value for Uint8Array is 255
+      const scaleFactor = 1 + normalizedAmplitude * 0.5; // Adjust 0.5 for desired visual effect
+
+      // Apply scaling to inner sphere and rings
+      if (innerParticleGroup) {
+        innerParticleGroup.scale.setScalar(scaleFactor);
+      }
+      if (ringGroup1) {
+        ringGroup1.scale.setScalar(scaleFactor);
+      }
+      if (ringGroup2) {
+        ringGroup2.scale.setScalar(scaleFactor);
+      }
+      if (ringGroup3) {
+        ringGroup3.scale.setScalar(scaleFactor);
+      }
+
       // Animate the outer curved ring around the inner sphere
-      const orbitRadius = 0.6; // This should be similar to the inner sphere's radius
+      const orbitRadius = 0.6;
       ringGroup1.position.x = Math.cos(time * 0.5) * orbitRadius * 0.5;
       ringGroup1.position.z = Math.sin(time * 0.5) * orbitRadius * 0.5;
 
-      // Make the ring always face the center of the inner sphere (0,0,0)
       ringGroup1.lookAt(new THREE.Vector3(0, 0, 0));
 
-      // Optional: Add a subtle up and down movement for realism
       ringGroup1.position.y = Math.sin(time * 1.5) * 0.1;
 
       // Animate second ring
@@ -254,10 +272,6 @@ const SphereScene: React.FC = () => {
       ringGroup3.position.z = Math.sin(time * 0.9) * orbitRadius * 0.7;
       ringGroup3.lookAt(new THREE.Vector3(0, 0, 0));
 
-      // Inner sphere: No updates, just part of the scene
-      
-      // particleGroup.scale.setScalar(1 + Math.sin(time * 1.5) * 0.05); // Removed subtle breathing scale
-      
       composer.render();
     };
 
@@ -276,7 +290,7 @@ const SphereScene: React.FC = () => {
       renderer.domElement.remove();
       window.removeEventListener("resize", onResize);
     };
-  }, []);
+  }, [frequencyData]);
 
   return <div ref={mountRef} style={{ width: '100vw', height: '100vh', overflow: 'hidden' }} />;
 };
