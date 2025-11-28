@@ -167,7 +167,7 @@ export default function Home() {
               animation: isPlaying ? 'pulse 2s ease-in-out infinite' : 'none'
             }} />
             <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, letterSpacing: '1.2px', color: '#fff' }}>
-              ARCANUS PLAYER
+              ARCANUS SPHERE
             </h1>
           </div>
           <div style={{
