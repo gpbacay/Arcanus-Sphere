@@ -19,11 +19,11 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "three/addons/*": ["./node_modules/three/examples/jsm/*"],
-      "three/examples/jsm/*": ["./node_modules/three/examples/jsm/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "src/app/three-types.d.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "src/declarations.d.ts"],
   "exclude": ["node_modules"]
 }
