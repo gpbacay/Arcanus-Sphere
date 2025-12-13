@@ -31,12 +31,29 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     const particleCount = 1000;
     const innerParticleCount = 2000;
 
+    // Lightning effect variables
+    const lightningBolts: THREE.Mesh[] = [];
+    const maxLightningConnections = 50;
+    const lightningThickness = 0.002; // Thinner
+    const boltLife: number[] = new Array(maxLightningConnections).fill(0);
+    const boltMaxLifes: number[] = new Array(maxLightningConnections).fill(1);
+    const boltTrackData: { startIdx: number; endIdx: number; startLayer: 'inner' | 'middle'; endLayer: 'inner' | 'middle' }[] = new Array(maxLightningConnections).fill(null);
+
+    // Chain reaction state
+    const lastChainPos = { current: null as THREE.Vector3 | null };
+    const lastTargetLayer = { current: 'inner' as 'inner' | 'middle' }; // The layer the LAST bolt ended on
+    const lastTargetIdx = { current: -1 }; // Track index for chain continuity
+
     const ringRadius = 0.5;
     const ringTube = 0.01;
     const ringArc = Math.PI * 2;
 
     let ringGroup2: THREE.Group, ringGroup3: THREE.Group;
     let middleRingGroup1: THREE.Group, middleRingGroup2: THREE.Group;
+
+    // To store geometries for access in render loop
+    let middleGeometry: THREE.BufferGeometry;
+    let innerGeometry: THREE.BufferGeometry;
 
     // Reusable array for frequency data to avoid garbage collection
     const dataArray = new Uint8Array(256);
@@ -89,7 +106,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         middleColors[i * 3 + 2] = 0.0 + Math.random() * 0.1;
       }
 
-      const middleGeometry = new THREE.BufferGeometry();
+      middleGeometry = new THREE.BufferGeometry();
       middleGeometry.setAttribute('position', new THREE.BufferAttribute(middlePositionsArray, 3));
       middleGeometry.setAttribute('color', new THREE.BufferAttribute(middleColors, 3));
 
@@ -128,7 +145,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         innerColors[i * 3 + 2] = 0.0 + Math.random() * 0.1;
       }
 
-      const innerGeometry = new THREE.BufferGeometry();
+      innerGeometry = new THREE.BufferGeometry();
       innerGeometry.setAttribute('position', new THREE.BufferAttribute(innerPositionsArray, 3));
       innerGeometry.setAttribute('color', new THREE.BufferAttribute(innerColors, 3));
 
@@ -348,6 +365,26 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         0.3
       );
       composer.addPass(bloomPass);
+
+      // Setup Lightning Bolts (using Cylinders for thickness)
+      const boltHeight = 1;
+      const boltGeometry = new THREE.CylinderGeometry(lightningThickness, lightningThickness, boltHeight, 6);
+
+      for (let i = 0; i < maxLightningConnections; i++) {
+        // Individual material for each bolt to allow independent fading
+        const boltMaterial = new THREE.MeshBasicMaterial({
+          color: 0xaecbe8,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending
+        });
+
+        const bolt = new THREE.Mesh(boltGeometry, boltMaterial);
+        bolt.visible = false;
+        scene.add(bolt);
+        lightningBolts.push(bolt);
+      }
+
     };
 
     const resizeShape = (forceRender = true) => {
@@ -523,6 +560,139 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         // Add rotation
         middleRingGroup2.rotation.x += middleRing2RotationSpeed + bass * 0.02;
       }
+
+      // Update Lightning Effect
+      if (middleParticleGroup && innerParticleGroup && middleGeometry && innerGeometry) {
+        const middlePositions = middleGeometry.attributes.position.array as Float32Array;
+        const innerPositions = innerGeometry.attributes.position.array as Float32Array;
+
+        middleParticleGroup.updateMatrixWorld();
+        innerParticleGroup.updateMatrixWorld();
+
+        const activeConnections = Math.floor(Math.min(maxLightningConnections, 10 + bass * 100));
+
+        for (let i = 0; i < maxLightningConnections; i++) {
+          const bolt = lightningBolts[i];
+          if (!bolt) continue;
+
+          // Update active bolts (Dynamic Length)
+          if (boltLife[i] > 0 && boltTrackData[i]) {
+            boltLife[i]--;
+            // Faster fade: use squared falloff or faster life decay
+            const lifeRatio = boltLife[i] / (boltMaxLifes[i] || 1);
+            const opacity = Math.pow(lifeRatio, 1.5) * 0.8; // Quicker fade
+            (bolt.material as THREE.MeshBasicMaterial).opacity = opacity;
+
+            // Recalculate positions!
+            const data = boltTrackData[i];
+            const v1 = new THREE.Vector3();
+            const v2 = new THREE.Vector3();
+
+            // Get Start Pos
+            const startArr = data.startLayer === 'inner' ? innerPositions : middlePositions;
+            const startGroup = data.startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+            v1.set(startArr[data.startIdx * 3], startArr[data.startIdx * 3 + 1], startArr[data.startIdx * 3 + 2]);
+            v1.applyMatrix4(startGroup.matrixWorld);
+
+            // Get End Pos
+            const endArr = data.endLayer === 'inner' ? innerPositions : middlePositions;
+            const endGroup = data.endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+            v2.set(endArr[data.endIdx * 3], endArr[data.endIdx * 3 + 1], endArr[data.endIdx * 3 + 2]);
+            v2.applyMatrix4(endGroup.matrixWorld);
+
+            // Update Mesh
+            const distance = v1.distanceTo(v2);
+            const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+            bolt.position.copy(midpoint);
+            bolt.lookAt(v2);
+            bolt.rotateX(Math.PI / 2);
+            bolt.scale.set(1, distance, 1);
+            bolt.visible = true;
+          }
+
+          // Spawn new bolt if dead
+          if (i < activeConnections && boltLife[i] <= 0) {
+
+            // Sustain chance
+            if (Math.random() > 0.1) {
+
+              // Chain Logic
+              let useChain = lastTargetIdx.current !== -1 && Math.random() < 0.8;
+
+              let startIdx = 0;
+              let endIdx = 0;
+              let startLayer: 'inner' | 'middle' = 'inner';
+              let endLayer: 'inner' | 'middle' = 'inner';
+
+              if (useChain) {
+                // Start from previous end
+                startIdx = lastTargetIdx.current;
+                startLayer = lastTargetLayer.current; // The layer we ended on is now start layer
+                // Target opposite
+                endLayer = startLayer === 'inner' ? 'middle' : 'inner';
+              } else {
+                // Random Start on Middle
+                startIdx = Math.floor(Math.random() * (middlePositions.length / 3));
+                startLayer = 'middle';
+                endLayer = 'inner';
+              }
+
+              // Pick random end index on target layer
+              if (endLayer === 'inner') {
+                endIdx = Math.floor(Math.random() * (innerPositions.length / 3));
+              } else {
+                endIdx = Math.floor(Math.random() * (middlePositions.length / 3));
+              }
+
+              // Save Track Data
+              boltTrackData[i] = { startIdx, endIdx, startLayer, endLayer };
+
+              // Update Chain State
+              lastTargetIdx.current = endIdx;
+              lastTargetLayer.current = endLayer;
+
+              // Faster life: 10-40 frames (0.16s - 0.6s)
+              const newLife = Math.floor(Math.random() * 30) + 10;
+              boltLife[i] = newLife;
+              boltMaxLifes[i] = newLife;
+
+              // Initial update will happen next frame (or we can duplicate update logic here to prevent 1-frame flickering, but simple is ok)
+              // Actually, let's force an update now to ensure it appears in correct spot immediately
+              const v1 = new THREE.Vector3();
+              const v2 = new THREE.Vector3();
+
+              const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
+              const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+              v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
+              v1.applyMatrix4(startGroup.matrixWorld);
+
+              const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
+              const endGroup = endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+              v2.set(endArr[endIdx * 3], endArr[endIdx * 3 + 1], endArr[endIdx * 3 + 2]);
+              v2.applyMatrix4(endGroup.matrixWorld);
+
+              const distance = v1.distanceTo(v2);
+              const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+              bolt.position.copy(midpoint);
+              bolt.lookAt(v2);
+              bolt.rotateX(Math.PI / 2);
+              bolt.scale.set(1, distance, 1);
+              bolt.visible = true;
+              (bolt.material as THREE.MeshBasicMaterial).opacity = 1.0;
+
+            } else {
+              // Stay invisible
+              bolt.visible = false;
+              boltLife[i] = Math.floor(Math.random() * 10) + 5;
+            }
+          } else if (i >= activeConnections) {
+            bolt.visible = false;
+            boltLife[i] = 0;
+          }
+
+        }
+      }
+
 
       // Pulse bloom intensity
       if (bloomPass) {
