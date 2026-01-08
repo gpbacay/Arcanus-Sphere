@@ -20,6 +20,8 @@ export default function Home() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const [volume, setVolume] = useState<number>(1.0);
 
   useEffect(() => {
     if (audioFile) {
@@ -68,12 +70,17 @@ export default function Home() {
       newAnalyser.fftSize = 512;
       newAnalyser.smoothingTimeConstant = 0.8;
 
+      const newGainNode = newAudioContext.createGain();
+      newGainNode.gain.value = volume;
+
       const source = newAudioContext.createMediaElementSource(audioRef.current);
       source.connect(newAnalyser);
-      newAnalyser.connect(newAudioContext.destination);
+      newAnalyser.connect(newGainNode);
+      newGainNode.connect(newAudioContext.destination);
 
       audioContextRef.current = newAudioContext;
       sourceRef.current = source;
+      gainNodeRef.current = newGainNode;
       setAnalyser(newAnalyser);
     } else if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
@@ -109,6 +116,14 @@ export default function Home() {
         }
       }
       setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVolume = parseFloat(e.target.value);
+    setVolume(newVolume);
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = newVolume;
     }
   };
 
@@ -307,6 +322,43 @@ export default function Home() {
               {isPlaying ? 'PAUSE' : 'PLAY'}
             </button>
 
+            {/* Volume Control */}
+            {audioFile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 4px' }}>
+                <span style={{ fontSize: '16px', filter: 'grayscale(100%) opacity(0.7)' }}>
+                  {volume === 0 ? '🔇' : (volume > 1.0 ? '🔊' : '🔉')}
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  value={volume}
+                  onChange={handleVolumeChange}
+                  style={{
+                    flex: 1,
+                    height: '4px',
+                    borderRadius: '2px',
+                    background: `linear-gradient(to right, #6e8efb ${(volume / 2) * 100}%, rgba(255, 255, 255, 0.1) ${(volume / 2) * 100}%)`,
+                    outline: 'none',
+                    cursor: 'pointer',
+                    WebkitAppearance: 'none',
+                    appearance: 'none'
+                  }}
+                  className="volume-slider"
+                />
+                <span style={{
+                  fontSize: '0.75rem',
+                  width: '36px',
+                  textAlign: 'right',
+                  color: 'rgba(255,255,255,0.5)',
+                  fontVariantNumeric: 'tabular-nums'
+                }}>
+                  {Math.round(volume * 100)}%
+                </span>
+              </div>
+            )}
+
             {/* Status Indicator */}
             {audioFile && (
               <div style={{
@@ -372,6 +424,37 @@ export default function Home() {
         }
 
         .audio-slider::-moz-range-thumb:hover {
+          transform: scale(1.2);
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #fff;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+          transition: transform 0.2s ease;
+        }
+
+        .volume-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.2);
+        }
+
+        .volume-slider::-moz-range-thumb {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #fff;
+          cursor: pointer;
+          border: none;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+          transition: transform 0.2s ease;
+        }
+
+        .volume-slider::-moz-range-thumb:hover {
           transform: scale(1.2);
         }
       `}</style>

@@ -35,16 +35,17 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
 
     // Lightning effect variables
     const lightningBolts: THREE.Mesh[] = [];
-    const maxLightningConnections = 60; // Increased slightly for branching
+    const maxLightningConnections = 60;
     const lightningThickness = 0.002;
     const boltLife: number[] = new Array(maxLightningConnections).fill(0);
     const boltMaxLifes: number[] = new Array(maxLightningConnections).fill(1);
-    const boltTrackData: { startIdx: number; endIdx: number; startLayer: 'inner' | 'middle'; endLayer: 'inner' | 'middle' }[] = new Array(maxLightningConnections).fill(null);
+    const boltTrackData: { startIdx: number; endIdx: number; startLayer: 'core' | 'inner' | 'middle'; endLayer: 'inner' | 'middle' }[] = new Array(maxLightningConnections).fill(null);
 
     // Chain reaction state
     const lastTargetIdx = { current: -1 };
     const lastTargetLayer = { current: 'inner' as 'inner' | 'middle' };
     const branchCounter = { current: 0 }; // How many bolts can spawn from the current tip
+    const lastTargetTime = { current: 0 };
 
     // To store geometries for access in render loop
     let middleGeometry: THREE.BufferGeometry;
@@ -315,15 +316,13 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
           // Update active bolts
           if (boltLife[i] > 0 && boltTrackData[i]) {
             if (!shouldSpike) {
-              // If we stopped speaking/expanding, kill bolts faster?
-              boltLife[i] -= 2; // Decay faster
+              boltLife[i] -= 2; 
             } else {
               boltLife[i]--;
             }
 
             if (boltLife[i] <= 0) {
               bolt.visible = false;
-              // Don't continue here, let the spawn block handle reuse if needed, or let it stay dead
             } else {
               // Fade
               const lifeRatio = boltLife[i] / (boltMaxLifes[i] || 1);
@@ -335,15 +334,27 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
               const v1 = new THREE.Vector3();
               const v2 = new THREE.Vector3();
 
-              const startArr = data.startLayer === 'inner' ? innerPositions : middlePositions;
-              const startGroup = data.startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-              v1.set(startArr[data.startIdx * 3], startArr[data.startIdx * 3 + 1], startArr[data.startIdx * 3 + 2]);
-              v1.applyMatrix4(startGroup.matrixWorld);
-
+              // End Position (Target Particle)
               const endArr = data.endLayer === 'inner' ? innerPositions : middlePositions;
               const endGroup = data.endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
               v2.set(endArr[data.endIdx * 3], endArr[data.endIdx * 3 + 1], endArr[data.endIdx * 3 + 2]);
               v2.applyMatrix4(endGroup.matrixWorld);
+
+              // Start Position
+              if (data.startLayer === 'core') {
+                // Core Surface
+                let coreRadius = 0.15;
+                if (innerSphere) {
+                  coreRadius = 0.15 * innerSphere.scale.x;
+                }
+                v1.copy(v2).normalize().multiplyScalar(coreRadius);
+              } else {
+                // Particle -> Particle
+                const startArr = data.startLayer === 'inner' ? innerPositions : middlePositions;
+                const startGroup = data.startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+                v1.set(startArr[data.startIdx * 3], startArr[data.startIdx * 3 + 1], startArr[data.startIdx * 3 + 2]);
+                v1.applyMatrix4(startGroup.matrixWorld);
+              }
 
               const distance = v1.distanceTo(v2);
               const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
@@ -353,49 +364,44 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
               bolt.scale.set(1, distance, 1);
               bolt.visible = true;
 
-              continue; // Done with this bolt for this frame
+              continue; 
             }
           }
 
           // Spawn Block
-          // Only spawn if valid condition and slot is available
           if (i < activeConnections && boltLife[i] <= 0 && shouldSpike) {
-
-            // Chance to spawn
-            // If we have high bass, higher chance
             if (Math.random() > 0.05) {
 
-              // Branching Logic
-              // If branchCounter > 0, we MUST use the previous target to start.
-              // If NOT, we can decide to start a new chain or continue normally.
+              // Decide if chain reaction
+              const timeSinceLast = time - lastTargetTime.current;
+              const isFresh = timeSinceLast < 0.15; // 150ms window
 
-              let useChain = (branchCounter.current > 0) || (lastTargetIdx.current !== -1 && Math.random() < 0.8);
-              let isBranchingEvent = false;
+              // If stale, strictly reset state to force Core start
+              if (!isFresh) {
+                branchCounter.current = 0;
+                lastTargetIdx.current = -1;
+              }
 
-              // Start / End Setup
+              // Lower probability to 0.2 to ensure mostly CORE starts, with occasional chains
+              const useChain = (branchCounter.current > 0) || (lastTargetIdx.current !== -1 && Math.random() < 0.2);
+
+              let startLayer: 'core' | 'inner' | 'middle' = 'core';
               let startIdx = 0;
-              let endIdx = 0;
-              let startLayer: 'inner' | 'middle' = 'inner';
               let endLayer: 'inner' | 'middle' = 'inner';
+              let endIdx = 0;
 
               if (useChain && lastTargetIdx.current !== -1) {
-                // Continue from last
+                // Continue form last
                 startIdx = lastTargetIdx.current;
                 startLayer = lastTargetLayer.current;
                 endLayer = startLayer === 'inner' ? 'middle' : 'inner';
 
-                // If we are consuming a branch count
-                if (branchCounter.current > 0) {
-                  branchCounter.current--;
-                }
-
+                if (branchCounter.current > 0) branchCounter.current--;
               } else {
-                // New random start
-                startIdx = Math.floor(Math.random() * (middlePositions.length / 3));
-                startLayer = 'middle';
-                endLayer = 'inner';
-
-                // Reset branching for this new chain
+                // NEW CHAIN -> Start from CORE
+                startLayer = 'core';
+                startIdx = 0; // dummy
+                endLayer = Math.random() > 0.5 ? 'inner' : 'middle';
                 branchCounter.current = 0;
               }
 
@@ -406,37 +412,42 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
                 endIdx = Math.floor(Math.random() * (middlePositions.length / 3));
               }
 
-              // Check if this new link causes a branching burst for FUTURE links
-              // High energy = high branching possibility
-              // If bass is high, we set branchCounter
-              if (bass > 0.3 && Math.random() < 0.3) {
-                // Next 2-4 bolts will use THIS endIdx as start
+              // Check for branching burst
+              if (bass > 0.3 && Math.random() < 0.15) {
                 const extraBranches = Math.floor(Math.random() * 3) + 2;
                 branchCounter.current = extraBranches;
               }
 
-              // Update State
               boltTrackData[i] = { startIdx, endIdx, startLayer, endLayer };
+              // Update tracking for next link
               lastTargetIdx.current = endIdx;
               lastTargetLayer.current = endLayer;
+              lastTargetTime.current = time;
 
-              // Init Life
               const newLife = Math.floor(Math.random() * 30) + 10;
               boltLife[i] = newLife;
               boltMaxLifes[i] = newLife;
 
-              // Instant Position Set (Prevent flicker)
-              const v1 = new THREE.Vector3();
+              // Instant Position Set
               const v2 = new THREE.Vector3();
-              const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
-              const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-              v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
-              v1.applyMatrix4(startGroup.matrixWorld);
-
               const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
               const endGroup = endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
               v2.set(endArr[endIdx * 3], endArr[endIdx * 3 + 1], endArr[endIdx * 3 + 2]);
               v2.applyMatrix4(endGroup.matrixWorld);
+
+              const v1 = new THREE.Vector3();
+              if (startLayer === 'core') {
+                let coreRadius = 0.15;
+                if (innerSphere) {
+                  coreRadius = 0.15 * innerSphere.scale.x;
+                }
+                v1.copy(v2).normalize().multiplyScalar(coreRadius);
+              } else {
+                const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
+                const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+                v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
+                v1.applyMatrix4(startGroup.matrixWorld);
+              }
 
               const distance = v1.distanceTo(v2);
               const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
@@ -448,7 +459,6 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
               (bolt.material as THREE.MeshBasicMaterial).opacity = 1.0;
             }
           } else if (!shouldSpike) {
-            // Ensure force hide if shouldSpike is false and not already handled
             if (boltLife[i] <= 0) bolt.visible = false;
           }
         }
