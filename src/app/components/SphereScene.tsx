@@ -36,7 +36,6 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     const bloomMaterialCache: Record<string, THREE.Material | THREE.Material[]> = {};
     let animationId: number;
     let time = 0;
-    const particleCount = 1000;
     const innerParticleCount = 5000;
 
     // Lightning effect variables
@@ -48,9 +47,8 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     const boltTrackData: { startIdx: number; endIdx: number; startLayer: 'core' | 'inner' | 'middle'; endLayer: 'inner' | 'middle' }[] = new Array(maxLightningConnections).fill(null);
 
     // Chain reaction state
-    // Chain reaction state
     type ActiveTip = { idx: number; layer: 'core' | 'inner' | 'middle'; remainingBranches: number; chainDepth: number };
-    let activeTips: ActiveTip[] = [];
+    const activeTips: ActiveTip[] = [];
 
     // To store geometries for access in render loop
     let middleGeometry: THREE.BufferGeometry;
@@ -99,20 +97,27 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     };
 
     const darkenNonBloomed = (obj: THREE.Object3D) => {
-      const renderable = obj as THREE.Mesh | THREE.Points | THREE.LineSegments;
       if (
-        (renderable.isMesh || renderable.isPoints || renderable.isLineSegments) &&
+        (obj instanceof THREE.Mesh ||
+          obj instanceof THREE.Points ||
+          obj instanceof THREE.LineSegments) &&
         bloomLayer.test(obj.layers) === false
       ) {
-        bloomMaterialCache[obj.uuid] = renderable.material;
-        renderable.material = darkMaterial;
+        bloomMaterialCache[obj.uuid] = obj.material;
+        obj.material = darkMaterial;
       }
     };
 
     const restoreBloomMaterial = (obj: THREE.Object3D) => {
       const cached = bloomMaterialCache[obj.uuid];
       if (!cached) return;
-      (obj as THREE.Mesh | THREE.Points | THREE.LineSegments).material = cached;
+      if (
+        obj instanceof THREE.Mesh ||
+        obj instanceof THREE.Points ||
+        obj instanceof THREE.LineSegments
+      ) {
+        obj.material = cached;
+      }
       delete bloomMaterialCache[obj.uuid];
     };
 
@@ -387,11 +392,6 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       (Math.random() - 0.5) * 0.02,
       (Math.random() - 0.5) * 0.02,
       (Math.random() - 0.5) * 0.02
-    );
-    const middleRotVel = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.015,
-      (Math.random() - 0.5) * 0.015,
-      (Math.random() - 0.5) * 0.015
     );
 
     // Smoothed audio — calm particles; snappy core for talk/beat
@@ -766,7 +766,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
 
               const v1 = new THREE.Vector3();
               if (startLayer === 'core') {
-                let coreRadius = 0.08 * (innerSphere ? innerSphere.scale.x : 1);
+                const coreRadius = 0.08 * (innerSphere ? innerSphere.scale.x : 1);
                 v1.copy(v2).normalize().multiplyScalar(coreRadius);
               } else {
                 const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
