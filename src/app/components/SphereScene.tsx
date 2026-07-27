@@ -4,6 +4,7 @@ import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -25,9 +26,14 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
   useEffect(() => {
     if (!mountRef.current) return;
 
-    let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, innerParticleGroup: THREE.Group, middleParticleGroup: THREE.Group, composer: EffectComposer, controls: OrbitControls;
+    let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, innerParticleGroup: THREE.Group, middleParticleGroup: THREE.Group, bloomComposer: EffectComposer, finalComposer: EffectComposer, controls: OrbitControls;
     let bloomPass: UnrealBloomPass;
     let innerSphere: THREE.Mesh;
+    const BLOOM_LAYER = 1;
+    const bloomLayer = new THREE.Layers();
+    bloomLayer.set(BLOOM_LAYER);
+    const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const bloomMaterialCache: Record<string, THREE.Material | THREE.Material[]> = {};
     let animationId: number;
     let time = 0;
     const particleCount = 1000;
@@ -64,6 +70,54 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     // Reusable array for frequency data to avoid garbage collection
     const dataArray = new Uint8Array(256);
 
+    // Crisp circular sprite so Points render as round dots (minimal soft halo)
+    const createCircleTexture = () => {
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      const center = size / 2;
+      const radius = size * 0.42;
+      const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius);
+      gradient.addColorStop(0, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.65, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.85, 'rgba(255,255,255,0.55)');
+      gradient.addColorStop(1, 'rgba(255,255,255,0)');
+
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(center, center, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    };
+
+    const darkenNonBloomed = (obj: THREE.Object3D) => {
+      const renderable = obj as THREE.Mesh | THREE.Points | THREE.LineSegments;
+      if (
+        (renderable.isMesh || renderable.isPoints || renderable.isLineSegments) &&
+        bloomLayer.test(obj.layers) === false
+      ) {
+        bloomMaterialCache[obj.uuid] = renderable.material;
+        renderable.material = darkMaterial;
+      }
+    };
+
+    const restoreBloomMaterial = (obj: THREE.Object3D) => {
+      const cached = bloomMaterialCache[obj.uuid];
+      if (!cached) return;
+      (obj as THREE.Mesh | THREE.Points | THREE.LineSegments).material = cached;
+      delete bloomMaterialCache[obj.uuid];
+    };
+
+    let particleTexture: THREE.CanvasTexture | null = null;
+
     const setupScene = () => {
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -87,6 +141,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         blending: THREE.AdditiveBlending
       });
       innerSphere = new THREE.Mesh(innerSphereGeometry, innerSphereMaterial);
+      innerSphere.layers.enable(BLOOM_LAYER);
       scene.add(innerSphere);
 
       // Palette
@@ -108,6 +163,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         blending: THREE.AdditiveBlending
       });
       wireframeSphere = new THREE.LineSegments(wireframeEdges, wireframeMaterial);
+      wireframeSphere.layers.enable(BLOOM_LAYER);
       scene.add(wireframeSphere);
 
 
@@ -155,13 +211,17 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       middleGeometry.setAttribute('position', new THREE.BufferAttribute(middlePositionsArray, 3));
       middleGeometry.setAttribute('color', new THREE.BufferAttribute(middleColors, 3));
 
+      particleTexture = createCircleTexture();
+
       const middleMaterial = new THREE.PointsMaterial({
-        size: 0.005,
+        size: 0.018,
+        map: particleTexture ?? undefined,
         vertexColors: true,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.85,
-        blending: THREE.AdditiveBlending
+        opacity: 0.75,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
       });
 
       const middleParticles = new THREE.Points(middleGeometry, middleMaterial);
@@ -215,12 +275,14 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       innerGeometry.setAttribute('color', new THREE.BufferAttribute(innerColors, 3));
 
       const innerMaterial = new THREE.PointsMaterial({
-        size: 0.007,
+        size: 0.022,
+        map: particleTexture ?? undefined,
         vertexColors: true,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
       });
 
       const innerParticles = new THREE.Points(innerGeometry, innerMaterial);
@@ -231,16 +293,51 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       const ambientLight = new THREE.AmbientLight(0x101010, 0.1);
       scene.add(ambientLight);
 
-      composer = new EffectComposer(renderer);
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
+      // Selective bloom: only objects on BLOOM_LAYER (core + wireframe)
+      const renderScene = new RenderPass(scene, camera);
       bloomPass = new UnrealBloomPass(
         new THREE.Vector2(window.innerWidth, window.innerHeight),
-        1.2,
-        0.6,
-        0.3
+        1.4,
+        0.55,
+        0.2
       );
-      composer.addPass(bloomPass);
+
+      bloomComposer = new EffectComposer(renderer);
+      bloomComposer.renderToScreen = false;
+      bloomComposer.addPass(renderScene);
+      bloomComposer.addPass(bloomPass);
+
+      const mixPass = new ShaderPass(
+        new THREE.ShaderMaterial({
+          uniforms: {
+            baseTexture: { value: null },
+            bloomTexture: { value: bloomComposer.renderTarget2.texture }
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform sampler2D baseTexture;
+            uniform sampler2D bloomTexture;
+            varying vec2 vUv;
+            void main() {
+              vec4 base = texture2D(baseTexture, vUv);
+              vec4 bloom = texture2D(bloomTexture, vUv);
+              gl_FragColor = vec4(base.rgb + bloom.rgb, base.a);
+            }
+          `
+        }),
+        'baseTexture'
+      );
+      mixPass.needsSwap = true;
+
+      finalComposer = new EffectComposer(renderer);
+      finalComposer.addPass(renderScene);
+      finalComposer.addPass(mixPass);
 
       // Setup Lightning Bolts
       const boltHeight = 1;
@@ -266,8 +363,11 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-      if (composer) {
-        composer.setSize(window.innerWidth, window.innerHeight);
+      if (bloomComposer) {
+        bloomComposer.setSize(window.innerWidth, window.innerHeight);
+      }
+      if (finalComposer) {
+        finalComposer.setSize(window.innerWidth, window.innerHeight);
       }
       if (forceRender) render();
     };
@@ -294,8 +394,19 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
       (Math.random() - 0.5) * 0.015
     );
 
+    // Smoothed audio — calm particles; snappy core for talk/beat
+    let smoothBass = 0;
+    let smoothMid = 0;
+    let smoothTreble = 0;
+    let smoothVocalEnv = 0; // fast open/close for "talking"
+    let vocalFloor = 0; // slow baseline so sustained pads don't lock size open
+    let smoothBeat = 0; // quick bass thump
+
+    const easeToward = (current: number, target: number, attack: number, release: number) =>
+      current + (target - current) * (target > current ? attack : release);
+
     const render = () => {
-      time += 0.01; // Slower time for smoother organic movement
+      time += 0.007 + smoothBass * 0.003 + smoothTreble * 0.004;
       animationId = requestAnimationFrame(render);
 
       controls.update();
@@ -311,56 +422,87 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         treble = getAverage(dataArray, 80, 200) / 255;
       }
 
-      // Dynamic scaling based on frequency bands
-      const bassScale = 1 + bass * 0.8;
-      const vocalScale = 1 + (mid * 0.8 + treble * 0.5);
+      // Softer attack so particle motion stays calm
+      smoothBass = easeToward(smoothBass, bass, 0.22, 0.1);
+      smoothMid = easeToward(smoothMid, mid, 0.18, 0.09);
+      smoothTreble = easeToward(smoothTreble, treble, 0.25, 0.11);
 
-      // Calculate expansion state
-      const currentScale = vocalScale;
-      const scaleDelta = currentScale - prevScaleRef.current;
-      const isExpanding = scaleDelta > 0.001;
-      prevScaleRef.current = currentScale;
+      const bassPunch = smoothBass * 0.85 + bass * 0.15;
+      const treblePunch = smoothTreble * 0.8 + treble * 0.2;
+
+      // --- Center orb: talk (mid/treble) + beat (bass) ---
+      // Vocals/sibilance only — ignore bass so music beds don't permanently inflate it
+      const vocalRaw = mid * 0.72 + treble * 0.48;
+      vocalFloor = easeToward(vocalFloor, vocalRaw, 0.035, 0.018);
+      // Energy above the slow floor = syllables / consonants (opens then closes)
+      const vocalDelta = Math.max(0, vocalRaw - vocalFloor * 0.88);
+      const gatedVocal = vocalDelta > 0.035 ? vocalDelta : vocalDelta * 0.12;
+      // Fast attack AND release so it looks like talking, not just swelling
+      smoothVocalEnv = easeToward(smoothVocalEnv, gatedVocal, 0.58, 0.42);
+
+      // Beat: brief kick pulse, decays quickly between hits
+      const beatTarget = bass > smoothBass + 0.04 ? bass : bass * 0.25;
+      smoothBeat = easeToward(smoothBeat, beatTarget, 0.55, 0.28);
+
+      const talkPulse = smoothVocalEnv * 0.62;
+      const beatPulse = smoothBeat * 0.14;
+      // Returns to ~1.0 between syllables/beats instead of staying large
+      const coreScale = 1 + talkPulse + beatPulse;
+
+      prevScaleRef.current = coreScale;
 
       // Animate inner solid sphere
       if (innerSphere) {
-        innerSphere.scale.setScalar(vocalScale * 0.9);
-        (innerSphere.material as THREE.MeshBasicMaterial).opacity = 0.6 + bass * 0.3;
-        const r = 110 + bass * 100;
-        const g = 142 + mid * 80;
-        const b = 251 - treble * 100;
+        innerSphere.scale.setScalar(coreScale);
+        (innerSphere.material as THREE.MeshBasicMaterial).opacity =
+          0.55 + smoothVocalEnv * 0.35 + smoothBeat * 0.1;
+        const r = 110 + smoothBeat * 80 + smoothVocalEnv * 40;
+        const g = 142 + smoothMid * 70;
+        const b = 251 - smoothTreble * 90;
         (innerSphere.material as THREE.MeshBasicMaterial).color.setRGB(r / 255, g / 255, b / 255);
 
-        innerSphere.rotation.x += innerRotVel.x + (bass * 0.01 * Math.sign(innerRotVel.x));
-        innerSphere.rotation.y += innerRotVel.y + (bass * 0.01 * Math.sign(innerRotVel.y));
-        innerSphere.rotation.z += innerRotVel.z + (bass * 0.01 * Math.sign(innerRotVel.z));
+        innerSphere.rotation.x += innerRotVel.x + (bassPunch * 0.008 * Math.sign(innerRotVel.x));
+        innerSphere.rotation.y += innerRotVel.y + (bassPunch * 0.008 * Math.sign(innerRotVel.y));
+        innerSphere.rotation.z += innerRotVel.z + (bassPunch * 0.008 * Math.sign(innerRotVel.z));
       }
 
-      // Animate Wireframe
+      // Animate Wireframe — follows the same talk/beat mouth motion
       if (wireframeSphere) {
-        wireframeSphere.scale.setScalar(vocalScale * 0.95);
-        wireframeSphere.rotation.x -= 0.005;
-        wireframeSphere.rotation.y += 0.005;
-        wireframeSphere.rotation.z += 0.002;
-        (wireframeSphere.material as THREE.LineBasicMaterial).opacity = 0.3 + mid * 0.4;
+        wireframeSphere.scale.setScalar(coreScale * 1.08);
+        wireframeSphere.rotation.x -= 0.004 + treblePunch * 0.003;
+        wireframeSphere.rotation.y += 0.004 + bassPunch * 0.003;
+        wireframeSphere.rotation.z += 0.0015;
+        (wireframeSphere.material as THREE.LineBasicMaterial).opacity =
+          0.28 + smoothVocalEnv * 0.45 + smoothBeat * 0.15;
       }
 
-      // --- Biologically Inspired Fluctuation (CPU) ---
-      // We update particle positions directly here so lightning can track them.
+      // --- Calm audio-reactive particle motion ---
+      // Bass → gentle radial breath + swirl | Treble → soft shimmer (kept near center)
 
       const updateParticles = (
         geometry: THREE.BufferGeometry,
         originalPos: Float32Array,
         phases: Float32Array,
-        intensity: number,
+        bassAmt: number,
+        trebleAmt: number,
+        midAmt: number,
         speedMod: number,
-        jitterAmount: number
+        freqStart: number,
+        freqEnd: number
       ) => {
         const positions = geometry.attributes.position.array as Float32Array;
         const count = positions.length / 3;
+        const freqSpan = Math.max(1, freqEnd - freqStart);
 
-        // Movement parameters
-        const moveScale = 0.05 + intensity * 0.1;
-        const timeS = time * speedMod;
+        const moveScale = 0.02 + bassAmt * 0.035 + midAmt * 0.015;
+        const speedBoost = 1 + bassAmt * 0.25 + trebleAmt * 0.35;
+        const timeS = time * speedMod * speedBoost;
+        // Keep radial expansion subtle so particles stay near the orb
+        const bassPulse = bassAmt * bassAmt * 0.04 + bassAmt * 0.03;
+        const breatheAmp = 0.012 + bassAmt * 0.025 + midAmt * 0.01;
+        const swirlAmp = 0.008 + bassAmt * 0.02 + midAmt * 0.008;
+        const trebleFlutter = trebleAmt * trebleAmt * 0.015 + trebleAmt * 0.008;
+        const trebleSpeed = 2.2 + trebleAmt * 2.5;
 
         for (let i = 0; i < count; i++) {
           const ix = i * 3;
@@ -369,39 +511,103 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
           const oz = originalPos[ix + 2];
           const phase = phases[i];
 
-          // Organic noise-like movement using sine superposition
-          // "Fluctuation"
-          let dx = Math.sin(timeS + oy * 2.0 + phase) * moveScale;
-          let dy = Math.cos(timeS * 0.8 + oz * 2.0 + phase) * moveScale;
-          let dz = Math.sin(timeS * 1.2 + ox * 2.0 + phase) * moveScale;
+          const bin = freqStart + Math.floor((i / count) * freqSpan);
+          const localEnergy = dataArray[bin] / 255;
+          const localBass = localEnergy * bassAmt;
+          const localTreble = localEnergy * trebleAmt;
 
-          // Twitch/Jitter
-          if (jitterAmount > 0.1) {
-            dx += (Math.random() - 0.5) * jitterAmount * 0.05;
-            dy += (Math.random() - 0.5) * jitterAmount * 0.05;
-            dz += (Math.random() - 0.5) * jitterAmount * 0.05;
+          const t1 = timeS + phase;
+          const t2 = timeS * 0.73 + phase * 1.37;
+          const t3 = timeS * 1.19 + phase * 0.61;
+
+          let dx =
+            Math.sin(t1 + oy * 2.4) * moveScale +
+            Math.sin(t2 + oz * 1.8) * moveScale * 0.45 +
+            Math.cos(t3 + ox * 1.2) * moveScale * 0.25;
+          let dy =
+            Math.cos(t1 * 0.92 + oz * 2.4) * moveScale +
+            Math.cos(t3 + ox * 1.9) * moveScale * 0.45 +
+            Math.sin(t2 + oy * 1.3) * moveScale * 0.25;
+          let dz =
+            Math.sin(t2 + ox * 2.4) * moveScale +
+            Math.sin(t1 * 1.08 + oy * 1.7) * moveScale * 0.45 +
+            Math.cos(t3 + oz * 1.4) * moveScale * 0.25;
+
+          const len = Math.sqrt(ox * ox + oy * oy + oz * oz) || 1;
+          const nx = ox / len;
+          const ny = oy / len;
+          const nz = oz / len;
+
+          // Gentle bass breath — stays close to home radius
+          const pulse =
+            bassPulse * (0.75 + 0.25 * Math.sin(phase * 2.0)) +
+            localBass * 0.02;
+          dx += nx * pulse;
+          dy += ny * pulse;
+          dz += nz * pulse;
+
+          const breathe =
+            Math.sin(timeS * (0.45 + bassAmt * 0.4) + phase) * breatheAmp +
+            Math.sin(timeS * 0.9 + phase * 2.0) * breatheAmp * 0.3;
+          dx += nx * breathe;
+          dy += ny * breathe;
+          dz += nz * breathe;
+
+          // Soft swirl (orbital, not explosive)
+          const swirl = Math.sin(t1 * (0.5 + bassAmt * 0.3)) * swirlAmp;
+          dx += (-oy) * swirl * 0.55;
+          dy += ox * swirl * 0.55;
+          dz += Math.cos(t2 * 0.45) * swirlAmp * 0.25;
+
+          // Soft treble shimmer
+          if (trebleFlutter > 0.0005) {
+            const tf = trebleFlutter + localTreble * 0.01;
+            dx += Math.sin(timeS * trebleSpeed + phase * 2.4) * tf;
+            dy += Math.cos(timeS * (trebleSpeed * 0.9) + phase * 1.8) * tf;
+            dz += Math.sin(timeS * (trebleSpeed * 1.05) + phase * 1.4) * tf;
           }
 
-          // Apply new position
           positions[ix] = ox + dx;
           positions[ix + 1] = oy + dy;
           positions[ix + 2] = oz + dz;
         }
         geometry.attributes.position.needsUpdate = true;
-      }
+      };
 
       if (middleParticleGroup && middleGeometry) {
-        // Rotate the group slowly for global swirl
-        middleParticleGroup.rotation.y += 0.002;
-        middleParticleGroup.rotation.z += 0.001;
-        // Apply individual fluctuations
-        updateParticles(middleGeometry, middleOriginalPositions, middlePhases, bass, 1.0, treble);
+        middleParticleGroup.rotation.y += 0.0008 + bassPunch * 0.004 + treblePunch * 0.0015;
+        middleParticleGroup.rotation.z += 0.0004 + bassPunch * 0.002;
+        middleParticleGroup.rotation.x += treblePunch * 0.001;
+        middleParticleGroup.scale.setScalar(1 + bassPunch * 0.06 + treblePunch * 0.02);
+        updateParticles(
+          middleGeometry,
+          middleOriginalPositions,
+          middlePhases,
+          bassPunch,
+          treblePunch,
+          smoothMid,
+          0.75,
+          0,
+          40
+        );
       }
 
       if (innerParticleGroup && innerGeometry) {
-        innerParticleGroup.rotation.y -= 0.003; // Counter rotation
-        innerParticleGroup.rotation.x += 0.001;
-        updateParticles(innerGeometry, innerOriginalPositions, innerPhases, mid + treble, 1.5, treble);
+        innerParticleGroup.rotation.y -= 0.001 + treblePunch * 0.0035 + bassPunch * 0.002;
+        innerParticleGroup.rotation.x += 0.0005 + treblePunch * 0.0015;
+        innerParticleGroup.rotation.z -= bassPunch * 0.0015;
+        innerParticleGroup.scale.setScalar(1 + bassPunch * 0.08 + treblePunch * 0.03);
+        updateParticles(
+          innerGeometry,
+          innerOriginalPositions,
+          innerPhases,
+          bassPunch * 0.75,
+          treblePunch,
+          smoothMid,
+          0.95,
+          40,
+          200
+        );
       }
 
 
@@ -427,7 +633,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
 
         // Focus on vocal range (Mid/Treble) for "speaking"
         // Bass is usually environmental/beat, not the "voice"
-        const vocalIntensity = mid + treble * 0.7;
+        const vocalIntensity = smoothMid + smoothTreble * 0.7;
         const isSpeaking = vocalIntensity > 0.2; // Higher threshold to strictly catch "speaking"
 
         // Active count based on vocal intensity
@@ -535,7 +741,7 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
               // Propagate Chain
               const maxDepth = 6;
               if (tip.chainDepth < maxDepth) {
-                const branchChance = 0.3 + (bass * 0.4); // More branching with bass
+                const branchChance = 0.3 + (smoothBass * 0.4); // More branching with bass
                 const branches = Math.random() < branchChance ? 2 : 1;
                 activeTips.push({
                   idx: endIdx,
@@ -584,13 +790,17 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         }
       }
 
-      // Pulse bloom intensity
+      // Pulse bloom on core only (particles are excluded via selective bloom)
       if (bloomPass) {
-        bloomPass.strength = 1.2 + bass * 1.5;
-        bloomPass.radius = 0.6 + mid * 0.2;
+        bloomPass.strength = 1.35 + smoothBass * 1.2;
+        bloomPass.radius = 0.5 + smoothMid * 0.15;
       }
 
-      composer.render();
+      // Bloom pass sees only bloom-layer objects; particles stay dark here
+      scene.traverse(darkenNonBloomed);
+      bloomComposer.render();
+      scene.traverse(restoreBloomMaterial);
+      finalComposer.render();
     };
 
     const init = () => {
@@ -605,6 +815,8 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
     return () => {
       cancelAnimationFrame(animationId);
       controls.dispose();
+      darkMaterial.dispose();
+      particleTexture?.dispose();
       renderer.domElement.remove();
       window.removeEventListener("resize", onResize);
     };
