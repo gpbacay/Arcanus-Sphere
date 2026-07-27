@@ -638,6 +638,76 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
 
         // Active count based on vocal intensity
         const activeConnections = isSpeaking ? Math.floor(Math.min(maxLightningConnections, vocalIntensity * 120)) : 0;
+        const freeBoltSlots: number[] = [];
+
+        const placeBolt = (
+          boltIndex: number,
+          startIdx: number,
+          endIdx: number,
+          startLayer: 'core' | 'inner' | 'middle',
+          endLayer: 'inner' | 'middle'
+        ) => {
+          const bolt = lightningBolts[boltIndex];
+          if (!bolt) return;
+
+          boltTrackData[boltIndex] = { startIdx, endIdx, startLayer, endLayer };
+          const newLife = Math.floor(Math.random() * 15) + 10;
+          boltLife[boltIndex] = newLife;
+          boltMaxLifes[boltIndex] = newLife;
+
+          const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
+          const endGroup = endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+          const v2 = new THREE.Vector3(
+            endArr[endIdx * 3],
+            endArr[endIdx * 3 + 1],
+            endArr[endIdx * 3 + 2]
+          );
+          v2.applyMatrix4(endGroup.matrixWorld);
+
+          const v1 = new THREE.Vector3();
+          if (startLayer === 'core') {
+            const coreRadius = 0.08 * (innerSphere ? innerSphere.scale.x : 1);
+            v1.copy(v2).normalize().multiplyScalar(coreRadius);
+          } else {
+            const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
+            const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
+            v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
+            v1.applyMatrix4(startGroup.matrixWorld);
+          }
+
+          const distance = v1.distanceTo(v2);
+          const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+          bolt.position.copy(midpoint);
+          bolt.lookAt(v2);
+          bolt.rotateX(Math.PI / 2);
+          bolt.scale.set(1, distance, 1);
+          bolt.visible = true;
+          (bolt.material as THREE.MeshBasicMaterial).opacity = 1.0;
+
+          // Highlight impact particle
+          const targetGeometry = endLayer === 'inner' ? innerGeometry : middleGeometry;
+          const colors = targetGeometry.attributes.color.array as Float32Array;
+          const cIdx = endIdx * 3;
+          colors[cIdx] = 1.0;
+          colors[cIdx + 1] = 1.0;
+          colors[cIdx + 2] = 1.0;
+          targetGeometry.attributes.color.needsUpdate = true;
+        };
+
+        const pickEndTarget = (avoidIdx: number, avoidLayer: 'core' | 'inner' | 'middle') => {
+          const endLayer: 'inner' | 'middle' = Math.random() > 0.6 ? 'inner' : 'middle';
+          const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
+          const endCount = endArr.length / 3;
+          let endIdx = Math.floor(Math.random() * endCount);
+          // Avoid self-connection when jumping within the same layer
+          if (avoidLayer === endLayer && endCount > 1) {
+            let guard = 0;
+            while (endIdx === avoidIdx && guard++ < 8) {
+              endIdx = Math.floor(Math.random() * endCount);
+            }
+          }
+          return { endLayer, endIdx };
+        };
 
         for (let i = 0; i < maxLightningConnections; i++) {
           const bolt = lightningBolts[i];
@@ -706,43 +776,74 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
               bolt.rotateX(Math.PI / 2);
               bolt.scale.set(1, distance, 1);
               bolt.visible = true;
-
-              continue;
             }
+          } else if (i < activeConnections && isSpeaking) {
+            freeBoltSlots.push(i);
+          } else if (!isSpeaking && boltLife[i] <= 0) {
+            bolt.visible = false;
+          }
+        }
+
+        // Spawn from tips — fan out one-to-many when a bolt jumps onto a particle
+        if (isSpeaking && freeBoltSlots.length > 0) {
+          if (activeTips.length === 0 && Math.random() < 0.12) {
+            // Core seeds multiple outgoing arcs
+            activeTips.push({
+              idx: -1,
+              layer: 'core',
+              remainingBranches: Math.floor(Math.random() * 3) + 2,
+              chainDepth: 0
+            });
           }
 
-          // Spawn Block
-          if (i < activeConnections && boltLife[i] <= 0 && isSpeaking) {
-            // Seed defaults
-            if (activeTips.length === 0 && Math.random() < 0.1) {
-              activeTips.push({ idx: -1, layer: 'core', remainingBranches: Math.floor(Math.random() * 2) + 2, chainDepth: 0 });
-            }
+          const maxDepth = 6;
+          let spawnBudget = Math.min(freeBoltSlots.length, Math.max(2, Math.floor(activeConnections * 0.45)));
 
-            if (activeTips.length > 0) {
-              // Pick a tip
-              const tipIdx = Math.floor(Math.random() * activeTips.length);
-              const tip = activeTips[tipIdx];
+          while (spawnBudget > 0 && activeTips.length > 0 && freeBoltSlots.length > 0) {
+            const tipIdx = Math.floor(Math.random() * activeTips.length);
+            const tip = activeTips[tipIdx];
 
-              const startLayer = tip.layer;
-              const startIdx = tip.idx;
+            // One-to-many: from this particle, fire several forks in the same burst
+            const fanOutChance = tip.layer === 'core'
+              ? 0.55 + vocalIntensity * 0.25
+              : 0.7 + smoothBass * 0.25 + vocalIntensity * 0.15;
+            const maxFan = tip.layer === 'core' ? 3 : 5;
+            const minFan = tip.layer === 'core' ? 1 : 2;
+            const wantFan =
+              Math.random() < fanOutChance
+                ? Math.min(maxFan, tip.remainingBranches, Math.floor(Math.random() * (maxFan - minFan + 1)) + minFan)
+                : 1;
+            const forks = Math.min(wantFan, tip.remainingBranches, freeBoltSlots.length, spawnBudget);
 
-              // Determine target
-              const endLayer = Math.random() > 0.6 ? 'inner' : 'middle'; // Bias slightly to inner
-              const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
-              const endCount = endArr.length / 3;
-              const endIdx = Math.floor(Math.random() * endCount);
+            const usedEnds = new Set<string>();
 
-              boltTrackData[i] = { startIdx, endIdx, startLayer, endLayer };
+            for (let f = 0; f < forks; f++) {
+              const boltIndex = freeBoltSlots.pop();
+              if (boltIndex === undefined) break;
 
-              const newLife = Math.floor(Math.random() * 15) + 10;
-              boltLife[i] = newLife;
-              boltMaxLifes[i] = newLife;
+              let endLayer: 'inner' | 'middle' = 'inner';
+              let endIdx = 0;
+              let attempts = 0;
+              do {
+                const picked = pickEndTarget(tip.idx, tip.layer);
+                endLayer = picked.endLayer;
+                endIdx = picked.endIdx;
+                attempts++;
+              } while (usedEnds.has(`${endLayer}:${endIdx}`) && attempts < 12);
 
-              // Propagate Chain
-              const maxDepth = 6;
+              usedEnds.add(`${endLayer}:${endIdx}`);
+              placeBolt(boltIndex, tip.idx, endIdx, tip.layer, endLayer);
+              tip.remainingBranches--;
+              spawnBudget--;
+
+              // Landed particle becomes a new tip that can fan out further
               if (tip.chainDepth < maxDepth) {
-                const branchChance = 0.3 + (smoothBass * 0.4); // More branching with bass
-                const branches = Math.random() < branchChance ? 2 : 1;
+                const branchChance = 0.55 + smoothBass * 0.35 + vocalIntensity * 0.2;
+                // Prefer multi-branch tips so jumps create one-to-many spreads
+                const branches =
+                  Math.random() < branchChance
+                    ? Math.floor(Math.random() * 3) + 2 // 2–4
+                    : 1;
                 activeTips.push({
                   idx: endIdx,
                   layer: endLayer,
@@ -750,43 +851,19 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
                   chainDepth: tip.chainDepth + 1
                 });
               }
-
-              // Update Tip
-              tip.remainingBranches--;
-              if (tip.remainingBranches <= 0) {
-                activeTips.splice(tipIdx, 1);
-              }
-
-              // Update Visuals Immediate
-              const v2 = new THREE.Vector3();
-              const endGroup = endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-
-              v2.set(endArr[endIdx * 3], endArr[endIdx * 3 + 1], endArr[endIdx * 3 + 2]);
-              v2.applyMatrix4(endGroup.matrixWorld);
-
-              const v1 = new THREE.Vector3();
-              if (startLayer === 'core') {
-                const coreRadius = 0.08 * (innerSphere ? innerSphere.scale.x : 1);
-                v1.copy(v2).normalize().multiplyScalar(coreRadius);
-              } else {
-                const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
-                const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-                v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
-                v1.applyMatrix4(startGroup.matrixWorld);
-              }
-
-              const distance = v1.distanceTo(v2);
-              const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
-              bolt.position.copy(midpoint);
-              bolt.lookAt(v2);
-              bolt.rotateX(Math.PI / 2);
-              bolt.scale.set(1, distance, 1);
-              bolt.visible = true;
-              (bolt.material as THREE.MeshBasicMaterial).opacity = 1.0;
             }
-          } else if (!isSpeaking) {
-            if (boltLife[i] <= 0) bolt.visible = false;
+
+            if (tip.remainingBranches <= 0) {
+              activeTips.splice(tipIdx, 1);
+            }
           }
+
+          // Cap tip queue so chains don't grow forever
+          if (activeTips.length > 24) {
+            activeTips.splice(0, activeTips.length - 24);
+          }
+        } else if (!isSpeaking) {
+          activeTips.length = 0;
         }
       }
 
