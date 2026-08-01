@@ -1,7 +1,12 @@
 "use client";
 
-import SphereScene from './components/SphereScene';
-import { useRef, useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
+import SphereScene from "./components/SphereScene";
+import ChatPanel, {
+  type LiveAgentState,
+  type UiMessage,
+} from "./components/ChatPanel";
+import type { AgentStreamEvent, AgentStep, ChatMessage } from "@/lib/types";
 
 declare global {
   interface Window {
@@ -10,454 +15,385 @@ declare global {
 }
 
 export default function Home() {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(0);
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [activityBoost, setActivityBoost] = useState(0);
+  const [live, setLive] = useState<LiveAgentState | null>(null);
+
+  const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
-  const [volume, setVolume] = useState<number>(1.0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const talkOscRef = useRef<{
+    osc: OscillatorNode;
+    gain: GainNode;
+    lfo: OscillatorNode;
+    lfoGain: GainNode;
+  } | null>(null);
 
   useEffect(() => {
-    if (audioFile) {
-      const url = URL.createObjectURL(audioFile);
-      setAudioUrl(url);
-      return () => URL.revokeObjectURL(url);
-    } else {
-      setAudioUrl(null);
-    }
-  }, [audioFile]);
+    if (isThinking && !isSpeaking) setActivityBoost(0.55);
+    else if (isSpeaking) setActivityBoost(0);
+    else setActivityBoost(0);
+  }, [isThinking, isSpeaking]);
 
-  useEffect(() => {
+  const ensureAudioGraph = useCallback(async () => {
     const audio = audioRef.current;
-    if (!audio) return;
-
-    const updateTime = () => setCurrentTime(audio.currentTime);
-    const updateDuration = () => {
-      if (!isNaN(audio.duration)) {
-        setDuration(audio.duration);
-      }
-    };
-
-    audio.addEventListener('timeupdate', updateTime);
-    audio.addEventListener('loadedmetadata', updateDuration);
-    audio.addEventListener('durationchange', updateDuration);
-
-    // Set initial duration if already loaded
-    if (audio.duration && !isNaN(audio.duration)) {
-      setDuration(audio.duration);
-    }
-
-    return () => {
-      audio.removeEventListener('timeupdate', updateTime);
-      audio.removeEventListener('loadedmetadata', updateDuration);
-      audio.removeEventListener('durationchange', updateDuration);
-    };
-  }, [audioUrl]);
-
-  const setupAudio = () => {
-    if (!audioRef.current) return;
+    if (!audio) return null;
 
     if (!audioContextRef.current) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      const newAudioContext = new AudioContextClass();
-      const newAnalyser = newAudioContext.createAnalyser();
-      newAnalyser.fftSize = 512;
-      newAnalyser.smoothingTimeConstant = 0.8;
+      const ctx = new AudioContextClass();
+      const nextAnalyser = ctx.createAnalyser();
+      nextAnalyser.fftSize = 512;
+      nextAnalyser.smoothingTimeConstant = 0.75;
 
-      const newGainNode = newAudioContext.createGain();
-      newGainNode.gain.value = volume;
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
 
-      const source = newAudioContext.createMediaElementSource(audioRef.current);
-      source.connect(newAnalyser);
-      newAnalyser.connect(newGainNode);
-      newGainNode.connect(newAudioContext.destination);
+      const source = ctx.createMediaElementSource(audio);
+      source.connect(nextAnalyser);
+      nextAnalyser.connect(gain);
+      gain.connect(ctx.destination);
 
-      audioContextRef.current = newAudioContext;
+      audioContextRef.current = ctx;
       sourceRef.current = source;
-      gainNodeRef.current = newGainNode;
-      setAnalyser(newAnalyser);
-    } else if (audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
+      gainNodeRef.current = gain;
+      analyserRef.current = nextAnalyser;
+      setAnalyser(nextAnalyser);
     }
-  };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      setAudioFile(event.target.files[0]);
-      setIsPlaying(false);
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-      setIsCollapsed(false);
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
     }
-  };
+    return audioContextRef.current;
+  }, []);
 
-  const handlePlayPause = async () => {
-    if (audioRef.current) {
-      setupAudio();
-
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          await audioContextRef.current.resume();
-        }
+  const stopTalkOscillator = useCallback(() => {
+    const nodes = talkOscRef.current;
+    if (!nodes) return;
+    try {
+      nodes.gain.gain.setTargetAtTime(0, audioContextRef.current?.currentTime || 0, 0.03);
+      window.setTimeout(() => {
         try {
-          await audioRef.current.play();
-        } catch (err) {
-          console.error("Error playing audio:", err);
+          nodes.osc.stop();
+          nodes.lfo.stop();
+          nodes.osc.disconnect();
+          nodes.lfo.disconnect();
+          nodes.gain.disconnect();
+          nodes.lfoGain.disconnect();
+        } catch {
+          /* already stopped */
         }
+      }, 80);
+    } catch {
+      /* ignore */
+    }
+    talkOscRef.current = null;
+  }, []);
+
+  const startTalkOscillator = useCallback(async () => {
+    const ctx = await ensureAudioGraph();
+    const analyserNode = analyserRef.current;
+    if (!ctx || !analyserNode) return;
+
+    stopTalkOscillator();
+
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = 140;
+
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 4.5;
+
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0.35;
+
+    const talkGain = ctx.createGain();
+    talkGain.gain.value = 0.0001;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(talkGain.gain);
+    osc.connect(talkGain);
+    // Feed analyser so the sphere “hears” speech energy; keep audible level tiny
+    talkGain.connect(analyserNode);
+
+    osc.start();
+    lfo.start();
+    talkGain.gain.setTargetAtTime(0.045, ctx.currentTime, 0.05);
+    talkOscRef.current = { osc, gain: talkGain, lfo, lfoGain };
+
+    // Syllable-like amplitude jitter
+    const jitter = window.setInterval(() => {
+      if (!talkOscRef.current || !audioContextRef.current) return;
+      const g = talkOscRef.current.gain.gain;
+      const now = audioContextRef.current.currentTime;
+      g.cancelScheduledValues(now);
+      g.setTargetAtTime(0.02 + Math.random() * 0.06, now, 0.04);
+      talkOscRef.current.osc.frequency.setTargetAtTime(
+        110 + Math.random() * 80,
+        now,
+        0.05
+      );
+    }, 90);
+
+    return () => window.clearInterval(jitter);
+  }, [ensureAudioGraph, stopTalkOscillator]);
+
+  const speakWithBrowserFallback = useCallback(
+    async (text: string) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      stopTalkOscillator();
+
+      const utter = new SpeechSynthesisUtterance(text.slice(0, 600));
+      utter.rate = 1;
+      utter.pitch = 1;
+      setIsSpeaking(true);
+      setActivityBoost(0);
+
+      const clearJitter = await startTalkOscillator();
+
+      const finish = () => {
+        if (clearJitter) clearJitter();
+        stopTalkOscillator();
+        setIsSpeaking(false);
+        setActivityBoost(0);
+      };
+      utter.onend = finish;
+      utter.onerror = finish;
+      window.speechSynthesis.speak(utter);
+    },
+    [startTalkOscillator, stopTalkOscillator]
+  );
+
+  const speakText = useCallback(
+    async (text: string) => {
+      if (!ttsEnabled || !text.trim()) return;
+
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!res.ok) {
+          await speakWithBrowserFallback(text);
+          return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = audioRef.current;
+        if (!audio) {
+          await speakWithBrowserFallback(text);
+          return;
+        }
+
+        stopTalkOscillator();
+        await ensureAudioGraph();
+        audio.src = url;
+        setIsSpeaking(true);
+        setActivityBoost(0);
+
+        const cleanup = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(url);
+        };
+        audio.onended = cleanup;
+        audio.onerror = () => {
+          cleanup();
+          void speakWithBrowserFallback(text);
+        };
+
+        await audio.play();
+      } catch {
+        await speakWithBrowserFallback(text);
       }
-      setIsPlaying(!isPlaying);
-    }
-  };
+    },
+    [ensureAudioGraph, speakWithBrowserFallback, stopTalkOscillator, ttsEnabled]
+  );
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVolume = parseFloat(e.target.value);
-    setVolume(newVolume);
-    if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = newVolume;
-    }
-  };
+  const onSend = useCallback(
+    async (text: string) => {
+      setError(null);
+      const userMsg: UiMessage = {
+        id: `u_${Date.now()}`,
+        role: "user",
+        content: text,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setIsThinking(true);
+      setLive({ status: "planning", thought: "", answer: "", tools: [] });
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newTime = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-    }
-  };
+      try {
+        const history: ChatMessage[] = messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
 
-  const formatTime = (time: number) => {
-    if (isNaN(time)) return '0:00';
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history, stream: true }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || "Chat request failed");
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response stream");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalReply = "";
+        let finalSteps: AgentStep[] = [];
+        let finalModel = "";
+        let liveThought = "";
+        let liveAnswer = "";
+        const liveTools: { toolName: string; content: string }[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let event: AgentStreamEvent;
+            try {
+              event = JSON.parse(line) as AgentStreamEvent;
+            } catch {
+              continue;
+            }
+
+            if (event.type === "status") {
+              setLive((prev) =>
+                prev
+                  ? { ...prev, status: event.content }
+                  : {
+                      status: event.content,
+                      thought: liveThought,
+                      answer: liveAnswer,
+                      tools: [...liveTools],
+                    }
+              );
+            } else if (event.type === "thought") {
+              liveThought = event.append
+                ? liveThought + event.content
+                : event.content;
+              setLive((prev) => ({
+                status: prev?.status || "thinking",
+                thought: liveThought,
+                answer: liveAnswer,
+                tools: [...liveTools],
+              }));
+            } else if (event.type === "tool") {
+              liveTools.push({
+                toolName: event.toolName,
+                content: event.content,
+              });
+              setLive((prev) => ({
+                status: prev?.status || "tools",
+                thought: liveThought,
+                answer: liveAnswer,
+                tools: [...liveTools],
+              }));
+            } else if (event.type === "answer") {
+              liveAnswer = event.append
+                ? liveAnswer + event.content
+                : event.content;
+              setLive((prev) => ({
+                status: prev?.status || "generating",
+                thought: liveThought,
+                answer: liveAnswer,
+                tools: [...liveTools],
+              }));
+            } else if (event.type === "done") {
+              finalReply = event.reply;
+              finalSteps = event.steps;
+              finalModel = event.model;
+            } else if (event.type === "error") {
+              throw new Error(event.content);
+            }
+          }
+        }
+
+        const thought =
+          finalSteps
+            .filter((s) => s.type === "thought")
+            .map((s) => s.content)
+            .join("\n\n") || liveThought;
+
+        const reply = finalReply || liveAnswer;
+        const assistantMsg: UiMessage = {
+          id: `a_${Date.now()}`,
+          role: "assistant",
+          content: reply,
+          steps: finalSteps.length
+            ? finalSteps
+            : [
+                ...(thought
+                  ? [{ type: "thought" as const, content: thought }]
+                  : []),
+                ...liveTools.map((t) => ({
+                  type: "tool" as const,
+                  toolName: t.toolName,
+                  content: t.content,
+                })),
+                { type: "answer" as const, content: reply },
+              ],
+          model: finalModel,
+          thought,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+        setLive(null);
+        setIsThinking(false);
+        if (reply) await speakText(reply);
+      } catch (err) {
+        setIsThinking(false);
+        setLive(null);
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      }
+    },
+    [messages, speakText]
+  );
+
+  const lastModel =
+    [...messages].reverse().find((m) => m.model)?.model || null;
 
   return (
-    <main style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#000' }}>
-      <div style={{
-        position: 'absolute',
-        top: '20px',
-        left: '20px',
-        zIndex: 10,
-        background: 'rgba(20, 20, 30, 0.85)',
-        backdropFilter: 'blur(20px)',
-        borderRadius: '20px',
-        color: 'white',
-        border: '1px solid rgba(255, 255, 255, 0.15)',
-        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.5)',
-        overflow: 'hidden',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        minWidth: isCollapsed ? '320px' : '360px',
-        maxWidth: '360px'
-      }}>
-        {/* Header */}
-        <div
-          style={{
-            padding: '20px 24px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            borderBottom: isCollapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.1)',
-            cursor: 'pointer'
-          }}
-          onClick={() => setIsCollapsed(!isCollapsed)}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: isPlaying ? 'linear-gradient(135deg, #00ff88, #00d4ff)' : '#555',
-              boxShadow: isPlaying ? '0 0 10px rgba(0, 255, 136, 0.5)' : 'none',
-              animation: isPlaying ? 'pulse 2s ease-in-out infinite' : 'none'
-            }} />
-            <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, letterSpacing: '1.2px', color: '#fff' }}>
-              ARCANUS SPHERE
-            </h1>
-          </div>
-          <div style={{
-            fontSize: '0.8rem',
-            color: 'rgba(255, 255, 255, 0.5)',
-            transform: isCollapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.3s ease'
-          }}>
-            ▼
-          </div>
-        </div>
-
-        {/* Player Content */}
-        <div style={{
-          maxHeight: isCollapsed ? '0' : '400px',
-          opacity: isCollapsed ? 0 : 1,
-          transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
-          overflow: 'hidden'
-        }}>
-          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* File Upload */}
-            <div style={{ position: 'relative' }}>
-              <label
-                htmlFor="audio-upload"
-                style={{
-                  display: 'block',
-                  padding: '14px 18px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1.5px dashed rgba(255, 255, 255, 0.25)',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  fontSize: '0.85rem',
-                  transition: 'all 0.3s ease',
-                  color: '#aaa',
-                  fontWeight: 500
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(110, 142, 251, 0.8)';
-                  e.currentTarget.style.color = '#fff';
-                  e.currentTarget.style.background = 'rgba(110, 142, 251, 0.1)';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)';
-                  e.currentTarget.style.color = '#aaa';
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                }}
-              >
-                {audioFile ? (
-                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>🎵</span>
-                    <span style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      maxWidth: '200px'
-                    }}>
-                      {audioFile.name}
-                    </span>
-                  </span>
-                ) : '📁 Select Audio File'}
-              </label>
-              <input
-                id="audio-upload"
-                type="file"
-                accept="audio/*"
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
-            </div>
-
-            {/* Progress Slider */}
-            {audioFile && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <input
-                  type="range"
-                  min="0"
-                  max={duration || 0}
-                  value={currentTime}
-                  onChange={handleSeek}
-                  style={{
-                    width: '100%',
-                    height: '6px',
-                    borderRadius: '3px',
-                    background: `linear-gradient(to right, #6e8efb ${(currentTime / duration) * 100}%, rgba(255, 255, 255, 0.1) ${(currentTime / duration) * 100}%)`,
-                    outline: 'none',
-                    cursor: 'pointer',
-                    WebkitAppearance: 'none',
-                    appearance: 'none'
-                  }}
-                  className="audio-slider"
-                />
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: '0.75rem',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  fontWeight: 500,
-                  fontVariantNumeric: 'tabular-nums'
-                }}>
-                  <span>{formatTime(currentTime)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Play/Pause Button */}
-            <button
-              onClick={handlePlayPause}
-              disabled={!audioFile}
-              style={{
-                padding: '14px 24px',
-                background: audioFile
-                  ? (isPlaying
-                    ? 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
-                    : 'linear-gradient(135deg, #6e8efb, #a777e3)')
-                  : '#333',
-                color: 'white',
-                border: 'none',
-                borderRadius: '12px',
-                cursor: audioFile ? 'pointer' : 'not-allowed',
-                fontSize: '0.95rem',
-                fontWeight: 600,
-                letterSpacing: '0.8px',
-                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                opacity: audioFile ? 1 : 0.5,
-                boxShadow: audioFile ? '0 4px 20px rgba(110, 142, 251, 0.4)' : 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px'
-              }}
-              onMouseDown={(e) => !e.currentTarget.disabled && (e.currentTarget.style.transform = 'scale(0.97)')}
-              onMouseUp={(e) => !e.currentTarget.disabled && (e.currentTarget.style.transform = 'scale(1)')}
-            >
-              <span style={{ fontSize: '18px' }}>{isPlaying ? '⏸' : '▶'}</span>
-              {isPlaying ? 'PAUSE' : 'PLAY'}
-            </button>
-
-            {/* Volume Control */}
-            {audioFile && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 4px' }}>
-                <span style={{ fontSize: '16px', filter: 'grayscale(100%) opacity(0.7)' }}>
-                  {volume === 0 ? '🔇' : (volume > 1.0 ? '🔊' : '🔉')}
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.01"
-                  value={volume}
-                  onChange={handleVolumeChange}
-                  style={{
-                    flex: 1,
-                    height: '4px',
-                    borderRadius: '2px',
-                    background: `linear-gradient(to right, #6e8efb ${(volume / 2) * 100}%, rgba(255, 255, 255, 0.1) ${(volume / 2) * 100}%)`,
-                    outline: 'none',
-                    cursor: 'pointer',
-                    WebkitAppearance: 'none',
-                    appearance: 'none'
-                  }}
-                  className="volume-slider"
-                />
-                <span style={{
-                  fontSize: '0.75rem',
-                  width: '36px',
-                  textAlign: 'right',
-                  color: 'rgba(255,255,255,0.5)',
-                  fontVariantNumeric: 'tabular-nums'
-                }}>
-                  {Math.round(volume * 100)}%
-                </span>
-              </div>
-            )}
-
-            {/* Status Indicator */}
-            {audioFile && (
-              <div style={{
-                fontSize: '0.75rem',
-                color: isPlaying ? 'rgba(0, 255, 136, 0.8)' : 'rgba(255, 255, 255, 0.4)',
-                textAlign: 'center',
-                fontWeight: 500,
-                letterSpacing: '0.5px',
-                padding: '8px',
-                background: isPlaying ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                borderRadius: '8px',
-                transition: 'all 0.3s ease'
-              }}>
-                {isPlaying ? '● VISUALIZER ACTIVE' : '○ Ready to Play'}
-              </div>
-            )}
-          </div>
-        </div>
+    <main className="app-shell">
+      <div className="app-stage">
+        <SphereScene analyser={analyser} activityBoost={activityBoost} />
       </div>
 
-      {audioUrl && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          onEnded={() => setIsPlaying(false)}
-          style={{ display: 'none' }}
-        />
-      )}
+      <ChatPanel
+        messages={messages}
+        isThinking={isThinking}
+        isSpeaking={isSpeaking}
+        ttsEnabled={ttsEnabled}
+        onToggleTts={() => setTtsEnabled((v) => !v)}
+        onSend={onSend}
+        error={error}
+        modelLabel={lastModel}
+        live={live}
+      />
 
-      <SphereScene analyser={analyser} />
+      <audio ref={audioRef} style={{ display: "none" }} crossOrigin="anonymous" />
 
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.7; transform: scale(1.2); }
-        }
-
-        .audio-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, #6e8efb, #a777e3);
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(110, 142, 251, 0.6);
-          transition: transform 0.2s ease;
-        }
-
-        .audio-slider::-webkit-slider-thumb:hover {
-          transform: scale(1.2);
-        }
-
-        .audio-slider::-moz-range-thumb {
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, #6e8efb, #a777e3);
-          cursor: pointer;
-          border: none;
-          box-shadow: 0 2px 8px rgba(110, 142, 251, 0.6);
-          transition: transform 0.2s ease;
-        }
-
-        .audio-slider::-moz-range-thumb:hover {
-          transform: scale(1.2);
-        }
-
-        .volume-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: #fff;
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-          transition: transform 0.2s ease;
-        }
-
-        .volume-slider::-webkit-slider-thumb:hover {
-          transform: scale(1.2);
-        }
-
-        .volume-slider::-moz-range-thumb {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: #fff;
-          cursor: pointer;
-          border: none;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-          transition: transform 0.2s ease;
-        }
-
-        .volume-slider::-moz-range-thumb:hover {
-          transform: scale(1.2);
-        }
-      `}</style>
+      <div className="stage-label">sphere · audio reactive</div>
     </main>
   );
 }

@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Arcanus Sphere
 
-## Getting Started
+Agentic AI chatbot embodied as an audio-reactive 3D sphere.
 
-First, run the development server:
+## Features
+
+- **Agent loop** with tool calling (`search_knowledge`, `web_search`, `fetch_url`, `get_current_time`, `calculate`)
+- **RAG** over a local knowledge base (HF embeddings + cosine similarity)
+- **TTS** via Hugging Face (browser SpeechSynthesis fallback)
+- **Sphere reacts to voice** through the Web Audio API analyser
+- Model target: `MiniCPM5-1B-Claude-Opus-Fable5-Thinking-Q4_K_M.gguf`
+
+## Setup
+
+1. Copy env file and add your token:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install & run:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Learn More
+## Using the exact GGUF
 
-To learn more about Next.js, take a look at the following resources:
+Inference order:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **`HF_CHAT_ENDPOINT`** — your llama.cpp Space / Endpoint (`hf-space/`)
+2. **Local `node-llama-cpp`** — downloads `MiniCPM5-1B-Claude-Opus-Fable5-Thinking-Q4_K_M.gguf` into `.models/` (~700MB, first run only)
+3. **HF Router fallback** — `Qwen/Qwen3-0.6B:featherless-ai` (also &lt;1B) if local GGUF fails
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+To force router-only while developing:
 
-## Deploy on Vercel
+```env
+HF_DISABLE_LOCAL_GGUF=1
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Security
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Never commit `.env.local`. If a token was pasted into chat or committed, revoke it on Hugging Face and create a new one.

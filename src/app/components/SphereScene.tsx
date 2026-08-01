@@ -10,11 +10,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 interface SphereSceneProps {
   analyser: AnalyserNode | null;
+  /** Soft ambient pulse while Arcanus is thinking (no TTS audio yet). */
+  activityBoost?: number;
 }
 
-const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
+const SphereScene: React.FC<SphereSceneProps> = ({ analyser, activityBoost = 0 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const activityBoostRef = useRef(0);
   // Track previous scale to determine expansion/shrinking
   const prevScaleRef = useRef(1.0);
 
@@ -22,6 +25,10 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
   useEffect(() => {
     analyserRef.current = analyser;
   }, [analyser]);
+
+  useEffect(() => {
+    activityBoostRef.current = Math.max(0, Math.min(1, activityBoost));
+  }, [activityBoost]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -420,6 +427,13 @@ const SphereScene: React.FC<SphereSceneProps> = ({ analyser }) => {
         bass = getAverage(dataArray, 0, 10) / 255;
         mid = getAverage(dataArray, 10, 80) / 255;
         treble = getAverage(dataArray, 80, 200) / 255;
+      } else if (activityBoostRef.current > 0.01) {
+        // Thinking / generating — gentle synthetic pulse so the sphere stays alive
+        const t = time * 2.4;
+        const boost = activityBoostRef.current;
+        bass = (0.18 + 0.12 * Math.sin(t * 0.7)) * boost;
+        mid = (0.28 + 0.2 * Math.sin(t * 1.6 + 0.4)) * boost;
+        treble = (0.22 + 0.18 * Math.sin(t * 2.8 + 1.1)) * boost;
       }
 
       // Softer attack so particle motion stays calm
