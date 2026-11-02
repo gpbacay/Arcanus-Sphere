@@ -1,46 +1,45 @@
 # Arcanus Sphere
 
-Agentic AI chatbot embodied as an audio-reactive 3D sphere.
+A fully local AI assistant embodied as an audio-reactive 3D sphere. Every model runs in your browser on ONNX Runtime Web. There is no server, no API key, and nothing you type leaves the device.
 
-## Features
+## How it thinks
 
-- **Agent loop** with tool calling (`search_knowledge`, `web_search`, `fetch_url`, `get_current_time`, `calculate`)
-- **RAG** over a local knowledge base (HF embeddings + cosine similarity)
-- **TTS** via Hugging Face (browser SpeechSynthesis fallback)
-- **Sphere reacts to voice** through the Web Audio API analyser
-- Model target: `MiniCPM5-1B-Claude-Opus-Fable5-Thinking-Q4_K_M.gguf`
+| Part | Model | Runs on | Job |
+|---|---|---|---|
+| Decide | [ARC 1](https://gpbacay-arcane.vercel.app/docs/arc-1) (1.3M params, 5.5 MB) | main thread, ~10 ms | Routes each message: chat, about Arcanus, time, or math |
+| Remember | [Hippocampus](https://gpbacay-arcane.vercel.app/docs/hippocampus) + [Occipital](https://gpbacay-arcane.vercel.app/docs/occipital) | main thread | Remembered examples vote with ARC 1; also recalls Arcanus's knowledge notes, typo-tolerant |
+| Write | [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct), Q4 (~170 MB) | Web Worker, WebGPU or WASM | Writes replies; can look at an attached image |
+| Speak | [Kokoro-82M](https://github.com/hexgrad/kokoro), q8 (~90 MB) | Web Worker, WASM | Speaks each sentence as soon as it is written |
 
-## Setup
+Time and math are answered by ARC 1's route alone, without the language model. Every reply carries a [Chain of Thought](https://gpbacay-arcane.vercel.app/docs/chain-of-thought) trace of what Arcanus did.
 
-1. Copy env file and add your token:
-
-```bash
-cp .env.example .env.local
-```
-
-2. Install & run:
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 270 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
 
-## Using the exact GGUF
+## Offline
 
-Inference order:
+Arcanus is an offline-first PWA, so you can install it from the browser's address bar. After one online visit it works with no network at all.
 
-1. **`HF_CHAT_ENDPOINT`** — your llama.cpp Space / Endpoint (`hf-space/`)
-2. **Local `node-llama-cpp`** — downloads `MiniCPM5-1B-Claude-Opus-Fable5-Thinking-Q4_K_M.gguf` into `.models/` (~700MB, first run only)
-3. **HF Router fallback** — `Qwen/Qwen3-0.6B:featherless-ai` (also &lt;1B) if local GGUF fails
+- `public/sw.js` serves the page from cache, and refreshes it in the background when online. It also caches the app's code, the ARC 1 weights and the ONNX Runtime files.
+- Transformers.js and kokoro-js keep SmolVLM and Kokoro in their own Cache Storage, which they read before the network. The service worker leaves them alone, so nothing is stored twice.
+- The engines start only after the service worker controls the page, so everything they download is kept. Kokoro speaks one silent sentence at load so its voice file is cached too.
+- The app asks the browser for persistent storage, so the models aren't evicted.
 
-To force router-only while developing:
+The service worker only registers in production builds (`npm run build && npm start`). `npm run dev` unregisters it, so stale caches never hide code changes.
 
-```env
-HF_DISABLE_LOCAL_GGUF=1
-```
+## Where things live
 
-## Security
+- `src/lib/brain.ts` — ARC 1 routing, Hippocampus seeds, knowledge recall, the time and math tools
+- `src/lib/knowledge.ts` — what Arcanus knows about itself
+- `src/lib/engines.ts` — load state for the three engines, the SmolVLM client, Kokoro playback through the analyser
+- `src/workers/` — SmolVLM and Kokoro, each in its own Web Worker
+- `src/lib/arcane/` — ARCANE 5.0, vendored until it is on npm (see its README)
+- `src/app/components/` — the chat panel, the Chain of Thought component, the sphere
 
-Never commit `.env.local`. If a token was pasted into chat or committed, revoke it on Hugging Face and create a new one.
+Teach the router a new phrasing by adding a line to `SEEDS` in `src/lib/brain.ts`. Check the tools with `node src/lib/tools.check.ts`.

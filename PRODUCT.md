@@ -12,35 +12,37 @@ Primary user: the owner (or a small set of power users) using Arcanus as a perso
 
 ## Product Purpose
 
-Arcanus is an agentic AI assistant embodied as an audio-reactive 3D sphere. The user asks questions in chat; Arcanus may plan, call tools (knowledge search, web search, URL fetch, time, calculate), retrieve from a local knowledge base (RAG), answer clearly, and speak the reply while the sphere reacts to the voice.
+Arcanus is a fully local AI assistant embodied as an audio-reactive 3D sphere. The user asks questions in chat (optionally with an image); ARC 1 decides what the message needs, Arcanus answers time and math itself, recalls its own knowledge, writes replies with SmolVLM, and speaks them with Kokoro while the sphere reacts to the voice.
 
 Success: clear, trustworthy answers with reliable tool/RAG behavior, plus a living sphere+voice presence that makes the assistant feel present — not a plain chat box.
 
 ## Positioning
 
-Embodiment, agent competence, and a local/small-model path are one product — none is optional decoration. A neighboring plain LLM chat UI cannot truthfully claim the inseparable combination of: audio-reactive 3D sphere presence with TTS coupling; a tool-using agent loop with RAG; and an inference stack the user controls (local MiniCPM GGUF, optional HF Space/endpoint, env-driven fallbacks).
+Embodiment, agent competence, and a local/small-model path are one product — none is optional decoration. A neighboring plain LLM chat UI cannot truthfully claim the inseparable combination of: audio-reactive 3D sphere presence with TTS coupling; a System 1 decision model with memory that routes before the language model runs; and an inference stack that runs entirely on the user's device.
 
 ## Operating Context
 
-- Single-page web app (Next.js): chat panel + Three.js sphere scene
-- Inference order: `HF_CHAT_ENDPOINT` → local `node-llama-cpp` GGUF → HF Router fallback
-- Model target: `MiniCPM5-1B-Claude-Opus-Fable5-Thinking-Q4_K_M.gguf`
-- TTS via Hugging Face (browser SpeechSynthesis fallback); sphere driven by Web Audio analyser
-- Knowledge seed and product identity notes live under `hf-space/knowledge/`
-- Requires HF token / env configuration for full stack (see `.env.example`)
+- Single-page web app (Next.js): chat panel + Three.js sphere scene; no server-side inference
+- Decide: ARC 1 + Hippocampus + Occipital (ARCANE), main thread, ~10 ms per message
+- Write: SmolVLM-256M-Instruct (Q4) via Transformers.js / ONNX Runtime Web, in a Web Worker
+- Speak: Kokoro-82M via kokoro-js, in a Web Worker; audio drives the sphere through the Web Audio analyser
+- Knowledge notes live in `src/lib/knowledge.ts`; routing examples in `src/lib/brain.ts`
+- Models download from Hugging Face on first visit and are cached by the browser
 
 ## Capabilities and Constraints
 
 Confirmed capabilities:
-- Agentic chat with tool calling (`search_knowledge`, `web_search`, `fetch_url`, `get_current_time`, `calculate`)
-- RAG over local knowledge (HF embeddings + cosine similarity)
-- TTS with audio-reactive sphere
-- Optional HF Space backend (`hf-space/`) for remote llama.cpp inference
+- Routing with ARC 1 + Hippocampus memory; time and calculate answered without the language model
+- Knowledge recall from a Hippocampus memory (word + Occipital letter matching)
+- Image questions (SmolVLM is a vision-language model)
+- Streaming replies spoken sentence by sentence, with an on-screen caption
+- Chain of Thought trace on every reply; conversations persisted in the browser
 
 Constraints:
 - Platform is web (browser); not a native app
 - Small-model / local-first path is identity — do not redefine the product as a generic hosted-chat wrapper
-- Secrets stay in `.env.local`; never commit tokens
+- No web search or URL fetch: Arcanus is fully local
+- SmolVLM-256M is tiny: replies are short and can be wrong; keep facts in the knowledge notes
 - Multi-user accounts, billing, and public SaaS claims: undecided / out of current scope
 
 ## Brand Commitments
@@ -51,8 +53,8 @@ Constraints:
 
 ## Evidence on Hand
 
-- Seed/product knowledge: `hf-space/knowledge/arcanus.md`
-- Runnable app: `src/app/` (sphere + chat), agent/RAG/TTS under `src/lib/` and `src/app/api/`
+- Seed/product knowledge: `src/lib/knowledge.ts`
+- Runnable app: `src/app/` (sphere + chat), brain/engines under `src/lib/`, model workers under `src/workers/`
 - README setup and inference order: `README.md`
 - No customer testimonials, case studies, press, or fabricated benchmarks on hand — future work must not invent them
 

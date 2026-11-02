@@ -6,16 +6,14 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint",
-    "prefetch:gguf": "node scripts/prefetch-gguf.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
-    "@huggingface/inference": "^4.0.0",
-    "@react-three/cannon": "^6.6.0",
+    "@huggingface/transformers": "3.8.1",
     "@types/three": "^0.180.0",
+    "kokoro-js": "1.2.1",
     "next": "^15.5.22",
-    "node-llama-cpp": "^3.19.1",
-    "openai": "^5.12.0",
+    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "three": "0.180.0"
