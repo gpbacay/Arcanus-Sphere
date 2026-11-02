@@ -10,8 +10,8 @@ import { SphereTools } from "./Tools";
 
 export type SphereState = "idle" | "thinking" | "speaking";
 
-function Orb({ state, loading }: { state: SphereState; loading?: boolean }) {
-  return <div className="orb-fallback" data-state={state} data-loading={loading || undefined} aria-hidden />;
+function Orb({ state, loading, off }: { state: SphereState; loading?: boolean; off?: boolean }) {
+  return <div className="orb-fallback" data-state={state} data-loading={loading || undefined} data-off={off || undefined} aria-hidden />;
 }
 
 /** The AR page: Arcanus's orb in your space, tracked by the 8th Wall engine. Its own chunk, fetched only on /ar. */
@@ -35,16 +35,16 @@ function hasWebGL() {
 }
 const never = () => () => undefined;
 
-export function Sphere({ analyser, state }: { analyser: AnalyserNode | null; state: SphereState }) {
+export function Sphere({ analyser, state, on = true }: { analyser: AnalyserNode | null; state: SphereState; on?: boolean }) {
   const canDraw = useSyncExternalStore(never, hasWebGL, () => true);
   const [tool, setTool] = useState<Tool>("view");
   const [resetKey, setResetKey] = useState(0);
-  const orb = <Orb state={state} />;
+  const orb = <Orb state={state} off={!on} />;
   if (!canDraw) return orb;
   return (
     <>
       <Boundary fallback={orb}>
-        <Scene analyser={analyser} activityBoost={state === "thinking" ? 0.55 : 0} tool={tool} resetKey={resetKey} />
+        <Scene analyser={analyser} activityBoost={state === "thinking" ? 0.55 : 0} tool={tool} on={on} resetKey={resetKey} />
       </Boundary>
       <SphereTools
         tool={tool}

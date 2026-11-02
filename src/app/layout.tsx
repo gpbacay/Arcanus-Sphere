@@ -23,7 +23,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Arcanus — Agentic Sphere AI",
+  title: "Arcanus AI",
   description:
     "A fully local AI in your browser: ARC 1 decides, SmolVLM writes, Paradee speaks, and a 3D sphere reacts to its voice.",
   applicationName: "Arcanus",

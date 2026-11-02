@@ -4,35 +4,55 @@
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a status pill.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
-import { ChatFallback, ChatPanel, hydrateChats, useBusy } from "@/modules/chat";
-import { listenEngine } from "@/modules/listen";
+import { ChatFallback, ChatPanel, hydrateChats, stopReply, useBusy } from "@/modules/chat";
+import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
 import { Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
 import { Boundary } from "@/shared/boundary";
+import { power, restorePower } from "@/shared/power";
 import { useStore } from "@/shared/store";
+import { Engines } from "@/shared/ui/engines";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
 const ENGINES = [brainEngine, llmEngine, voiceEngine, listenEngine];
 
 export default function Home() {
+  const on = useStore(power, (s) => s.on);
+
   useEffect(() => {
     hydrateChats();
     voice.restore();
-    // Engines start once the service worker controls the page, so everything they download is kept for offline use.
-    // Each loads on its own: a slow or failed one never holds up the others.
-    void offlineReady().then(() => {
-      for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
-    });
+    restorePower();
   }, []);
+
+  useEffect(() => {
+    if (!on) {
+      // Switched off: finish nothing, say nothing, listen to nothing. The models stay loaded for the next boot.
+      stopReply();
+      voice.cancel();
+      listen.cancel();
+      return;
+    }
+    // Engines start once the service worker controls the page, so everything they download is kept for offline use.
+    // Each loads on its own: a slow or failed one never holds up the others. Off at load: nothing downloads yet.
+    let current = true;
+    void offlineReady().then(() => {
+      if (current) for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
+    });
+    return () => {
+      current = false;
+    };
+  }, [on]);
 
   return (
     <SidebarProvider defaultOpen className="h-dvh overflow-hidden" style={{ "--sidebar-width": "calc(min(420px, 100vw - 24px) + 24px)" } as React.CSSProperties}>
       <main className="app-shell">
         <Stage />
+        <Engines engines={ENGINES} />
         <Boundary fallback={<ChatFallback />}>
-          <ChatPanel engines={ENGINES} />
+          <ChatPanel />
         </Boundary>
       </main>
     </SidebarProvider>
@@ -45,21 +65,24 @@ function Stage() {
   const analyser = useStore(voice.state, (s) => s.analyser);
   const speaking = useStore(voice.state, (s) => s.speaking);
   const caption = useStore(voice.state, (s) => s.caption);
-  const state = speaking ? "speaking" : busy ? "thinking" : "idle";
+  const on = useStore(power, (s) => s.on);
+  const changing = useStore(power, (s) => s.changing);
+  const state = !on ? "off" : speaking ? "speaking" : busy ? "thinking" : "idle";
+  const label = changing ? (on ? "booting" : "shutting down") : state === "idle" ? "on this device" : state;
   return (
     <>
       <div className="app-stage">
         {/* Paradee's audio runs through this analyser, so the sphere moves with the voice. */}
-        <Sphere analyser={analyser} state={state} />
+        <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} />
       </div>
       <div className="stage-foot">
-        {caption ? (
+        {caption && on ? (
           <p className="caption" aria-hidden>
             {caption}
           </p>
         ) : null}
         <span className="stage-state" data-state={state}>
-          {state === "idle" ? "on this device" : state}
+          {label}
         </span>
       </div>
     </>

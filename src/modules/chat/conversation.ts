@@ -4,6 +4,7 @@
 import { think } from "@/modules/brain";
 import { llm, type Turn } from "@/modules/llm";
 import { takeSentences, voice } from "@/modules/voice";
+import { power } from "@/shared/power";
 import { Store, errorText, useStore } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { MAX, chatStore, currentChat, push, remove, write, type Msg, type Removal } from "./store";
@@ -13,7 +14,8 @@ export type Live = { chatId: string; trace: ThoughtStep[]; text: string };
 /** The reply being written right now, if any. */
 export const live = new Store<{ reply: Live | null }>({ reply: null });
 export const useBusy = () => useStore(live, (s) => s.reply !== null);
-const busy = () => live.state.reply !== null;
+// While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
+const busy = () => live.state.reply !== null || !power.state.on;
 
 const SYSTEM =
   "You are Arcanus, a local AI assistant that lives in the user's browser as a glowing 3D sphere. Gianne Bacay created you. You run on the user's device: SmolVLM writes replies, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation. Answer clearly and briefly. If asked who you are or who made you, say you are Arcanus, created by Gianne Bacay.";

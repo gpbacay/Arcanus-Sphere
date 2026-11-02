@@ -68,21 +68,35 @@ function trace(out, r, lat, lon, dirs = 8, steps = 14, step = 0.03, maxLat = 1.3
   }
 }
 
-function brokenRing(out, r, arcs, span, wiggle = 0, y = 0, tilt) {
+// `width` > 0 makes a thick band: `strands` parallel lines spread across it (1px lines can't be thicker).
+function brokenRing(out, r, arcs, span, wiggle = 0, y = 0, tilt, width = 0, strands = 7) {
   const turn = tilt ? new THREE.Matrix4().makeRotationFromEuler(tilt) : null;
   for (let i = 0; i < arcs; i++) {
     const start = rand(0, Math.PI * 2);
     const end = start + rand(span[0], span[1]);
     let rr = r;
     let yy = y;
-    const pts = [];
+    const path = [];
     for (let a = start; a <= end; a += 0.02) {
       if (wiggle && random() < 0.06) rr += (random() < 0.5 ? -1 : 1) * wiggle;
       if (wiggle && random() < 0.03) yy += (random() < 0.5 ? -1 : 1) * wiggle * 0.6;
-      const p = new THREE.Vector3(rr * Math.cos(a), yy, rr * Math.sin(a));
-      pts.push(turn ? p.applyMatrix4(turn) : p);
+      path.push([a, rr, yy]);
     }
-    if (pts.length > 1) polyline(out, pts);
+    if (path.length < 2) continue;
+    const traceSeed = random();
+    for (let s = 0; s < (width ? strands : 1); s++) {
+      const off = width ? (s / (strands - 1) - 0.5) * width : 0;
+      // Like the circuit traces: each strand sidesteps now and then on its own, and starts and ends where it likes.
+      let jog = 0;
+      const from = width ? Math.floor(rand(0, 0.2) * path.length) : 0;
+      const to = width ? path.length - Math.floor(rand(0, 0.2) * path.length) : path.length;
+      const pts = path.slice(from, to).map(([a, rad, h]) => {
+        if (width && random() < 0.05) jog += (random() < 0.5 ? -1 : 1) * (width / strands);
+        const p = new THREE.Vector3((rad + off + jog) * Math.cos(a), h, (rad + off + jog) * Math.sin(a));
+        return turn ? p.applyMatrix4(turn) : p;
+      });
+      if (pts.length > 1) polyline(out, pts, traceSeed);
+    }
   }
 }
 
@@ -136,7 +150,8 @@ function build() {
   for (let k = 0; k < 4; k++) {
     const lines = newLines();
     const inner = 1.04 + k * 0.1;
-    for (let i = 0; i < 18; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, [0.4, 2.6], 0.012, rand(-0.02, 0.02));
+    // Thick bands, mostly half rings, a few short arcs: never a full circle.
+    for (let i = 0; i < 3; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, i ? [2.4, 3.6] : [0.8, 1.8], 0.014, rand(-0.02, 0.02), undefined, rand(0.02, 0.035));
     const ring = part(inner + 0.05, rand(0.25, 0.6), 0.06, ringAxes);
     ring.rotation.set(rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
     ring.add(segments(lines, 0.14));
@@ -144,7 +159,7 @@ function build() {
 
   for (let k = 0; k < 4; k++) {
     const lines = newLines();
-    for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 4, [0.3, 1.4], 0.006);
+    for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 1, i ? [2.4, 3.4] : [0.8, 1.6], 0.01, 0, undefined, rand(0.015, 0.03), 5);
     const halo = part(1.13, rand(0.1, 0.35), 0.05, ringAxes);
     halo.rotation.set(Math.PI / 2 + rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
     halo.add(segments(lines, 0.16));

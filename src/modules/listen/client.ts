@@ -1,27 +1,65 @@
 "use client";
 
-// Speech to text: Whisper runs in its own Web Worker (listen.worker.ts). This is the main-thread side: the microphone,
-// recording, and the hand-off of the finished clip. Nothing leaves the device.
+// Speech to text. The microphone is captured as 16 kHz frames (an AudioWorklet); Silero VAD (vad.worker.ts) scores
+// each frame for speech, which lets Arcanus stop on its own when you pause and cut the silence off the clip; Whisper
+// (listen.worker.ts) then writes it down. Everything runs on the device.
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
 
-const RATE = 16000; // what Whisper expects
-const MIN_SECONDS = 0.4; // shorter than this is a mis-tap
-const MAX_SECONDS = 120; // a forgotten recording stops itself
-const QUIET = 0.004; // RMS below this is silence: Whisper would invent words for it
+const RATE = 16000; // what Whisper and Silero both expect
+const FRAME = 512; // 32 ms: the size Silero scores at a time
+const FPS = RATE / FRAME;
+const SPEECH = 0.5; // a frame at or above this is speech (Silero's recommended threshold)
+const PAUSE_FRAMES = Math.round(1.0 * FPS); // this long without speech, after speech, ends the recording
+const IDLE_FRAMES = Math.round(10 * FPS); // this long with no speech at all, and it gives up
+const PAD_FRAMES = Math.round(0.3 * FPS); // kept around the speech so the first and last words aren't clipped
+const MAX_FRAMES = Math.round(120 * FPS); // a forgotten recording stops itself
+const QUIET = 0.004; // without VAD: RMS below this is silence, and Whisper would invent words for it
 
 type Phase = "idle" | "recording" | "transcribing";
 type Pending = { resolve: (text: string) => void; reject: (e: Error) => void };
 
+// Runs in the audio thread: turns the mic's native rate into 16 kHz frames of FRAME samples, by averaging.
+const WORKLET = `
+class Frames extends AudioWorkletProcessor {
+  constructor() { super(); this.out = new Float32Array(${FRAME}); this.n = 0; this.acc = 0; this.cnt = 0; this.phase = 0; this.step = sampleRate / ${RATE}; }
+  process(inputs) {
+    const ch = inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.acc += ch[i]; this.cnt++; this.phase++;
+      if (this.phase >= this.step) {
+        this.phase -= this.step;
+        this.out[this.n++] = this.acc / this.cnt; this.acc = 0; this.cnt = 0;
+        if (this.n === ${FRAME}) { this.port.postMessage(this.out.slice()); this.n = 0; }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("arcanus-frames", Frames);
+`;
+
+type Session = {
+  stream: MediaStream;
+  ctx: AudioContext;
+  frames: Float32Array[];
+  vad: Worker | null;
+  first: number; // index of the first frame of speech, -1 until there is some
+  last: number; // index of the latest frame of speech
+  onText: (text: string) => void;
+};
+
 class Listen {
-  state = new Store<LoadState & { phase: Phase; problem: string }>({ ...IDLE, phase: "idle", problem: "" });
+  state = new Store<LoadState & { phase: Phase; problem: string; heard: boolean }>({ ...IDLE, phase: "idle", problem: "", heard: false });
   private worker: Promise<Worker> | null = null;
+  private vad: Promise<Worker> | null = null;
   private pending = new Map<number, Pending>();
   private seq = 0;
-  private recorder: MediaRecorder | null = null;
-  private timer = 0;
-  private cancelled = false;
+  private session: Session | null = null;
+  private aborted = false; // stopped before the microphone was even open
 
   start() {
+    void this.startVad().catch(() => undefined); // tiny: load it along with Whisper
     this.worker ??= startWorker(this.state, () => new Worker(new URL("./listen.worker.ts", import.meta.url), { type: "module" }), (data) => {
       const job = this.pending.get(data.id as number);
       if (!job) return;
@@ -33,66 +71,119 @@ class Listen {
     return this.worker;
   }
 
+  private startVad() {
+    this.vad ??= new Promise<Worker>((resolve, reject) => {
+      const worker = new Worker(new URL("./vad.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = ({ data }) => {
+        if (data.type === "ready") resolve(worker);
+        else if (data.type === "error") reject(new Error(String(data.message)));
+        else if (data.type === "prob") this.heard(data.i as number, data.p as number);
+      };
+      worker.onerror = (event) => reject(new Error(event.message));
+      worker.postMessage({ type: "load", model: new URL("/silero_vad.onnx", location.origin).href });
+    });
+    this.vad.catch(() => (this.vad = null));
+    return this.vad;
+  }
+
   /** Whether this browser can record at all. */
   static supported() {
-    return typeof MediaRecorder !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
+    return typeof AudioWorklet !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
   }
 
-  /** Start recording from the microphone. Call from a click: the browser asks for permission. `onText` gets the words. */
+  /** Start listening. Call from a click: the browser asks for the microphone. `onText` gets the words. */
   async record(onText: (text: string) => void) {
     if (this.state.state.phase !== "idle") return;
-    this.cancelled = false;
-    this.state.set({ problem: "" });
-    void this.start().catch(() => undefined); // load the model while the user talks
-    let stream: MediaStream;
+    this.aborted = false;
+    this.state.set({ problem: "", heard: false, phase: "recording" });
+    void this.start().catch(() => undefined); // load Whisper while the user talks
+    let stream: MediaStream | null = null;
+    let ctx: AudioContext | null = null;
     try {
+      ctx = new AudioContext(); // made here, inside the click, because Safari only lets a gesture start audio
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      await ctx.resume();
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
+      await ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+      const vad = await this.startVad().catch(() => null); // without VAD it still records: stop by tapping
+      vad?.postMessage({ type: "reset" });
+      const session: Session = { stream, ctx, frames: [], vad, first: -1, last: -1, onText };
+      const node = new AudioWorkletNode(ctx, "arcanus-frames");
+      node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
+        if (this.session !== session) return;
+        const i = session.frames.push(data) - 1;
+        vad?.postMessage({ type: "frame", i, samples: data.slice() });
+        if (i >= MAX_FRAMES) this.stop();
+      };
+      const mute = ctx.createGain(); // a worklet only runs while it is connected to the output; silence it
+      mute.gain.value = 0;
+      ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
+      this.session = session;
+      if (this.aborted) this.take(session);
     } catch {
-      this.state.set({ problem: "Arcanus can't use the microphone. Allow it in the browser's site settings." });
-      return;
+      stream?.getTracks().forEach((track) => track.stop());
+      void ctx?.close();
+      this.state.set({ phase: "idle", problem: "Arcanus can't use the microphone. Allow it in the browser's site settings." });
     }
-    const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(stream);
-    this.recorder = recorder;
-    recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
-    recorder.onstop = () => {
-      clearTimeout(this.timer);
-      stream.getTracks().forEach((track) => track.stop());
-      this.recorder = null;
-      if (this.cancelled) return this.state.set({ phase: "idle" });
-      void this.transcribe(new Blob(chunks, { type: recorder.mimeType })).then(onText, (error: unknown) => this.state.set({ problem: errorText(error) })).finally(() => this.state.set({ phase: "idle" }));
-    };
-    recorder.start();
-    this.timer = window.setTimeout(() => this.stop(), MAX_SECONDS * 1000);
-    this.state.set({ phase: "recording" });
   }
 
-  /** Stop recording and transcribe what was said. */
+  /** One frame was scored: note the speech, and stop once you have spoken and then paused. */
+  private heard(i: number, p: number) {
+    const s = this.session;
+    if (!s) return;
+    if (p >= SPEECH) {
+      if (s.first < 0) {
+        s.first = i;
+        this.state.set({ heard: true });
+      }
+      s.last = i;
+    } else if (s.first >= 0 ? i - s.last >= PAUSE_FRAMES : i >= IDLE_FRAMES) this.stop();
+  }
+
+  /** Stop listening and write down what was said. */
   stop() {
-    if (this.state.state.phase !== "recording") return;
+    const s = this.session;
+    if (!s) return this.cancel();
     this.state.set({ phase: "transcribing" });
-    this.recorder?.stop();
+    const clip = this.take(s);
+    void this.transcribe(clip, s.vad !== null)
+      .then(
+        (text) => {
+          if (!text && s.vad) this.state.set({ problem: "I didn't catch anything. Tap the mic and try again." });
+          s.onText(text);
+        },
+        (error: unknown) => this.state.set({ problem: errorText(error) }),
+      )
+      .finally(() => this.state.set({ phase: "idle", heard: false }));
   }
 
-  /** Stop recording and throw the clip away. */
+  /** Stop listening and throw the recording away. */
   cancel() {
-    this.cancelled = true;
-    this.recorder?.stop();
-    this.state.set({ phase: "idle" });
+    const s = this.session;
+    if (!s) this.aborted = true;
+    else this.take(s);
+    this.state.set({ phase: "idle", heard: false });
   }
 
-  private async transcribe(clip: Blob) {
-    const ctx = new AudioContext({ sampleRate: RATE }); // decoding resamples to the context's rate
-    let samples: Float32Array;
-    try {
-      samples = (await ctx.decodeAudioData(await clip.arrayBuffer())).getChannelData(0);
-    } finally {
-      void ctx.close();
+  /** Close the microphone and return the clip: just the speech, with a little around it, when VAD found some. */
+  private take(s: Session) {
+    this.session = null;
+    s.stream.getTracks().forEach((track) => track.stop());
+    void s.ctx.close();
+    let frames = s.frames;
+    if (s.vad) frames = s.first < 0 ? [] : frames.slice(Math.max(0, s.first - PAD_FRAMES), s.last + PAD_FRAMES + 1);
+    const clip = new Float32Array(frames.length * FRAME);
+    frames.forEach((frame, i) => clip.set(frame, i * FRAME));
+    return clip;
+  }
+
+  private async transcribe(samples: Float32Array, voiced: boolean) {
+    if (samples.length < 0.3 * RATE) return "";
+    if (!voiced) {
+      let energy = 0;
+      for (const sample of samples) energy += sample * sample;
+      if (Math.sqrt(energy / samples.length) < QUIET) return "";
     }
-    if (samples.length < MIN_SECONDS * RATE) return "";
-    let energy = 0;
-    for (const sample of samples) energy += sample * sample;
-    if (Math.sqrt(energy / samples.length) < QUIET) return "";
     let worker: Worker;
     try {
       worker = await this.start();

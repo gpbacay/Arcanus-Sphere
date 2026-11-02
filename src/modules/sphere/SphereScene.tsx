@@ -21,6 +21,8 @@ type Props = {
   /** 0..1: how busy Arcanus is while there is no audio yet (thinking). */
   activityBoost?: number;
   tool?: Tool;
+  /** Arcanus's power switch: flipping it plays the boot-up or shutdown animation. */
+  on?: boolean;
   /** Bump to put the orb and the camera back where they started. */
   resetKey?: number;
 };
@@ -65,7 +67,7 @@ function makeGrid() {
   const grid = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2),
     new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color("#ff9a2e") } },
+      uniforms: { uColor: { value: new THREE.Color("#4f9cff") } },
       vertexShader: GRID_VERTEX,
       fragmentShader: GRID_FRAGMENT,
       transparent: true,
@@ -77,16 +79,21 @@ function makeGrid() {
   return grid;
 }
 
-export default function SphereScene({ analyser, activityBoost = 0, tool = "view", resetKey = 0 }: Props) {
+export default function SphereScene({ analyser, activityBoost = 0, tool = "view", on = true, resetKey = 0 }: Props) {
   const [broken, setBroken] = useState(false);
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const boostRef = useRef(0);
+  const onRef = useRef(on);
   const api = useRef<{ tool: (tool: Tool) => void; reset: () => void } | null>(null);
 
   useEffect(() => {
     analyserRef.current = analyser;
   }, [analyser]);
+
+  useEffect(() => {
+    onRef.current = on;
+  }, [on]);
 
   useEffect(() => {
     boostRef.current = Math.max(0, Math.min(1, activityBoost));
@@ -184,7 +191,7 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
     let dead = false;
     let orb: Orb | null = null;
 
-    loadOrb({ analyser: () => analyserRef.current, boost: () => boostRef.current })
+    loadOrb({ analyser: () => analyserRef.current, boost: () => boostRef.current, on: () => onRef.current })
       .then((loaded) => {
         if (dead) return loaded.dispose();
         orb = loaded;

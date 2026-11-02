@@ -27,6 +27,8 @@ export type OrbInputs = {
   analyser?: () => AnalyserNode | null;
   /** 0..1: how busy Arcanus is while there is no audio yet (thinking). */
   boost?: () => number;
+  /** Whether Arcanus is switched on. Flipping it plays the boot-up or shutdown animation. Defaults to always on. */
+  on?: () => boolean;
 };
 
 const GOLD = new THREE.Color("#ff9a2e");
@@ -54,6 +56,7 @@ const LINE_FRAGMENT = /* glsl */ `
   uniform float uPhase;
   uniform float uFlow;
   uniform float uBase;
+  uniform float uPower;
   varying float vAlong;
   varying float vSeed;
   void main() {
@@ -62,7 +65,7 @@ const LINE_FRAGMENT = /* glsl */ `
     float head = fract(uPhase * (0.6 + vSeed * 0.8) + vSeed * 7.0);
     float pulse = smoothstep(0.15, 0.0, abs(vAlong - head)) * uFlow;
     // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
-    float glow = uBase * (twinkle + pulse * 4.0);
+    float glow = uBase * (twinkle + pulse * 4.0) * uPower;
     vec3 color = mix(uColor, uHot, clamp(pulse * 0.6, 0.0, 1.0));
     gl_FragColor = vec4(color * glow, 1.0);
   }
@@ -122,6 +125,8 @@ type Mover = {
   bias: number[];
   size: number;
   jitter: number;
+  /** Boot-up and shutdown: the orb comes on from the core outward, so the farther the part, the later it starts. */
+  delay: number;
   twitch: Twitch;
   // Clockwork: for stretches at random, an idle part holds still and moves in small quick steps instead of turning
   // smoothly. `want` is where its smooth turn has got to, `held` the last step, `shown` what is drawn.
@@ -148,6 +153,7 @@ const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, 
   bias: [rand(-0.7, 0.7), rand(-0.7, 0.7), rand(-0.7, 0.7)],
   size,
   jitter: jitterAt(radius),
+  delay: Math.min(1, radius / 1.45) * 0.5,
   twitch: twitch(),
   ticking: Math.random() < 0.3,
   until: rand(0, 5),
@@ -159,6 +165,13 @@ const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, 
   shown: [0, 0, 0],
 });
 
+const BOOT = 1.0; // seconds from dark to fully on
+const SHUT = 0.7; // seconds from fully on to dark
+const smooth = (x: number) => {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+};
+
 const disposeDraw = (object: THREE.Object3D) => {
   if (object instanceof THREE.LineSegments || object instanceof THREE.Mesh) {
     object.geometry.dispose();
@@ -167,7 +180,7 @@ const disposeDraw = (object: THREE.Object3D) => {
 };
 
 /** The file stores the shells, rings, and core. These shaders and the mover loop are what make it Arcanus. */
-export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 }: OrbInputs = {}): Promise<Orb> {
+export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0, on = () => true }: OrbInputs = {}): Promise<Orb> {
   const gltf = await new GLTFLoader().loadAsync("/orb.glb");
   // Shared uniforms: every material reads the same objects, so one write per frame drives them all.
   const shared = {
@@ -176,6 +189,7 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 
     uTime: { value: 0 },
     uPhase: { value: 0 },
     uFlow: { value: 0.35 },
+    uPower: { value: 0 },
   };
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const motion = reduced ? 0.25 : 1;
@@ -183,6 +197,9 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 
   const ease = (from: number, to: number, attack: number, release: number) => from + (to - from) * (to > from ? attack : release);
   let talk = 0;
   let boost = 0;
+  let flick = 1; // lightbulb: held for a few tens of ms, then re-rolled
+  let nextFlick = 0;
+  let power = 0; // 0 is dark, 1 is fully on; it moves toward the switch at BOOT / SHUT speed
   const coreTwitch = twitch();
 
   const movers: Mover[] = [];
@@ -221,6 +238,20 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 
   if (!mouth || movers.length === 0) throw new Error("orb.glb is missing the orb parts");
 
   const update = (dt: number) => {
+    // Power: ramp toward the switch. Fully dark costs nothing: nothing is drawn or moved.
+    const goal = on() ? 1 : 0;
+    power = goal > power ? Math.min(goal, power + dt / BOOT) : Math.max(goal, power - dt / SHUT);
+    gltf.scene.visible = power > 0;
+    if (power === 0) return;
+    // Lightbulb: while the power is changing the light stutters on and off, more often on the nearer it is to full.
+    // The same dice run both ways, so it sputters into life and sputters out.
+    if (power < 1 && shared.uTime.value >= nextFlick) {
+      nextFlick = shared.uTime.value + rand(0.025, 0.07);
+      flick = Math.random() < smooth((power - 0.1) / 0.8) ? 1 : 0.12;
+    } else if (power === 1) flick = 1;
+    shared.uPower.value = smooth(power / 0.6) * flick;
+    // While changing, everything whirls: fastest halfway through, calm at both ends.
+    const whirl = 1 + 24 * power * (1 - power);
     const t = (shared.uTime.value += dt);
 
     // Voice: the overall level over the speech range says whether Arcanus is talking.
@@ -240,7 +271,7 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 
 
     // Each part: its own drifting turn, much faster while talking, with a random shake on top and a twitching size.
     // Thinking only flutters a little and slowly: the twitch is smoothed harder for it.
-    const pace = (1 + boost * 2.5 + talk * 7) * motion * dt;
+    const pace = (1 + boost * 2.5 + talk * 7) * whirl * motion * dt;
     const shake = talk * 0.045 * motion * dt * 60;
     const flutter = Math.max(talk, boost * 0.35) * motion;
     const snap = 1 - Math.exp(-dt * (boost > talk ? 12 : 45));
@@ -279,14 +310,18 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0 
       const k = clockwork ? tickSnap : easeSnap;
       for (let i = 0; i < 3; i++) m.shown[i] += ((clockwork ? m.held[i] : m.want[i]) - m.shown[i]) * k;
       rotation.set(m.shown[0], m.shown[1], m.shown[2]);
-      m.obj.scale.setScalar(1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap));
+      // Each part grows out of the core as the power comes up, and falls back into it as it goes down.
+      const grown = Math.max(0.001, smooth((power - m.delay) / 0.5));
+      m.obj.scale.setScalar((1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap)) * grown);
     }
 
     // The core is the mouth: while talking its size twitches between small and large in quick jumps, and it glows a
     // little brighter when large.
     const jump = tick(coreTwitch, t, snap);
-    mouth.scale.setScalar(1 + (talk * 0.7 + boost * 0.12) * jump * motion);
-    coreGlow.value = 1 + 0.25 * talk * (0.5 + 0.5 * jump);
+    // The core is first to light and last to go out, and it flickers with the rest.
+    const lit = smooth(power / 0.3);
+    mouth.scale.setScalar((1 + (talk * 0.7 + boost * 0.12) * jump * motion) * (0.3 + 0.7 * lit));
+    coreGlow.value = (1 + 0.25 * talk * (0.5 + 0.5 * jump)) * lit * flick;
   };
 
   return { root: gltf.scene, update, dispose: () => gltf.scene.traverse(disposeDraw) };

@@ -3,6 +3,7 @@
 import { useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { canListen, listen } from "@/modules/listen";
 import { voice } from "@/modules/voice";
+import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
 import { send, stop, useBusy } from "./conversation";
 import { Icon } from "./parts";
@@ -30,8 +31,10 @@ export function Composer() {
   const voiceOn = !useStore(voice.state, (s) => s.off);
   const phase = useStore(listen.state, (s) => s.phase);
   const problem = useStore(listen.state, (s) => s.problem);
+  const heard = useStore(listen.state, (s) => s.heard);
   const micOk = useSyncExternalStore(never, canListen, yes);
   const busy = useBusy();
+  const on = useStore(power, (s) => s.on);
   const [draft, setDraft] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -109,8 +112,9 @@ export function Composer() {
           value={draft}
           maxLength={MAX}
           rows={2}
-          placeholder={phase === "recording" ? "Listening… tap the mic to finish" : phase === "transcribing" ? "Writing down what you said…" : "Message Arcanus"}
+          placeholder={!on ? "Arcanus is off" : phase === "recording" ? (heard ? "Listening… I'll write it down when you pause" : "Listening…") : phase === "transcribing" ? "Writing down what you said…" : "Message Arcanus"}
           aria-label="Message Arcanus"
+          disabled={!on}
           onChange={(e) => {
             setDraft(e.target.value);
             e.target.style.height = "auto";
@@ -135,8 +139,8 @@ export function Composer() {
               data-recording={phase === "recording" || undefined}
               aria-pressed={phase === "recording"}
               aria-label={phase === "recording" ? "Finish speaking" : "Speak your message"}
-              title={phase === "recording" ? "Tap to finish" : "Speak your message"}
-              disabled={phase === "transcribing"}
+              title={phase === "recording" ? "Finish now" : "Speak your message"}
+              disabled={!on || phase === "transcribing"}
               onClick={talk}
             >
               <Icon name="mic" />
@@ -160,7 +164,7 @@ export function Composer() {
               <Icon name="stop" />
             </button>
           ) : (
-            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!draft.trim() && !image}>
+            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!on || (!draft.trim() && !image)}>
               <Icon name="send" />
             </button>
           )}

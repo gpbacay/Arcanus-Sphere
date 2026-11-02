@@ -4,25 +4,27 @@ import { useEffect, useId, useRef, useState } from "react";
 import { llm } from "@/modules/llm";
 import { useOnline } from "@/modules/offline";
 import { voice } from "@/modules/voice";
-import { useStore, type Engine } from "@/shared/store";
+import { power } from "@/shared/power";
+import { useStore } from "@/shared/store";
 import { Sidebar, useSidebar } from "@/shared/ui/sidebar";
 import { COMPOSER_ID, Composer } from "./Composer";
 import { discard, send, useBusy } from "./conversation";
-import { EnginePill, Icon } from "./parts";
+import { Icon } from "./parts";
 import { Thread } from "./Thread";
 import { chatStore, newChat, rename, select, selectCurrent, undo } from "./store";
 
 const SUGGESTIONS = ["Who are you?", "What time is it?", "What's (12 + 8) * 3?", "Write a haiku about the sea"];
 
-type Mood = "ready" | "thinking" | "speaking";
+type Mood = "off" | "ready" | "thinking" | "speaking";
 
 /** The chat: each part below reads its own data, so a streamed token or a loading model re-renders only its part. */
-export function ChatPanel({ engines }: { engines: Engine[] }) {
+export function ChatPanel() {
   const { isMobile } = useSidebar();
   const [collapsed, setCollapsed] = useState(false);
   const busy = useBusy();
+  const on = useStore(power, (s) => s.on);
   const speaking = useStore(voice.state, (s) => s.speaking);
-  const mood: Mood = busy ? "thinking" : speaking ? "speaking" : "ready";
+  const mood: Mood = !on ? "off" : busy ? "thinking" : speaking ? "speaking" : "ready";
 
   if (collapsed) {
     return (
@@ -38,11 +40,6 @@ export function ChatPanel({ engines }: { engines: Engine[] }) {
   const body = (
     <>
       <Header mood={mood} onHide={() => setCollapsed(true)} />
-      <div className="engines" aria-label="On-device models">
-        {engines.map((engine) => (
-          <EnginePill key={engine.name} engine={engine} />
-        ))}
-      </div>
       <Thread />
       <UndoBar />
       <Suggestions />
@@ -84,7 +81,9 @@ function useStatusText(mood: Mood) {
   const saved = useStore(chatStore, (s) => s.saved);
   const note = saved === "text" ? " · storage full: images not saved" : saved === "none" ? " · can't save on this device" : "";
   const text =
-    mood === "thinking"
+    mood === "off"
+      ? "Off · switch Arcanus on to talk"
+      : mood === "thinking"
       ? "Thinking on this device"
       : mood === "speaking"
         ? "Speaking"
@@ -244,7 +243,8 @@ function UndoBar() {
 function Suggestions() {
   const empty = useStore(chatStore, (s) => selectCurrent(s)?.messages.length === 0);
   const busy = useBusy();
-  if (!empty || busy) return null;
+  const on = useStore(power, (s) => s.on);
+  if (!empty || busy || !on) return null;
   return (
     <div className="suggestions">
       {SUGGESTIONS.map((s) => (
