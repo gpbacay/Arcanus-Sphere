@@ -16,7 +16,7 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 const busy = () => live.state.reply !== null;
 
 const SYSTEM =
-  "You are Arcanus, a friendly AI assistant that lives in the user's browser as a glowing sphere. Answer clearly and briefly.";
+  "You are Arcanus, a local AI assistant that lives in the user's browser as a glowing 3D sphere. Gianne Bacay created you. You run on the user's device: SmolVLM writes replies, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation. Answer clearly and briefly. If asked who you are or who made you, say you are Arcanus, created by Gianne Bacay.";
 const NO_MODEL =
   "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolVLM shows ready.";
 

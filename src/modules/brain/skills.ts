@@ -50,9 +50,13 @@ export const SKILLS: Skill[] = [
   CHAT,
   {
     route: "about",
-    description: "A question about Arcanus itself: who it is, what it can do, its models, voice, sphere, memory or privacy",
+    description: "A question about Arcanus itself: who it is, who created it, what it can do, its models, voice, sphere, memory or privacy",
     seeds: [
       "who are you",
+      "who made you",
+      "who created you",
+      "who is your creator",
+      "who is gianne bacay",
       "what can you do",
       "what model do you run on",
       "how does your voice work",
