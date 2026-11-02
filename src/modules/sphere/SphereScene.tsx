@@ -184,6 +184,7 @@ const tick = (w: Twitch, t: number, snap: number) => {
  * One part that moves on its own. It turns about its axes at `spin` rad/s, each axis drifting in pace and sometimes
  * reversing (`rate` swings through zero). While Arcanus talks it also shakes and its size twitches by up to `size`.
  * `axes` weights how much it turns about x, y and z: a ring mostly spins in its own plane.
+ * `jitter` (from its distance to the core) scales that shake and twitch: the core quivers, the far shells stay calm.
  */
 type Mover = {
   obj: THREE.Object3D;
@@ -193,6 +194,7 @@ type Mover = {
   phase: number[];
   bias: number[];
   size: number;
+  jitter: number;
   twitch: Twitch;
   // Clockwork: for stretches at random, an idle part holds still and moves in small quick steps instead of turning
   // smoothly. `want` is where its smooth turn has got to, `held` the last step, `shown` what is drawn.
@@ -206,7 +208,11 @@ type Mover = {
   shown: number[];
 };
 
-const mover = (obj: THREE.Object3D, spin: number, size: number, axes: [number, number, number] = [1, 1, 1]): Mover => ({
+// Full jitter at the core, fading with distance to 12% at the outermost rings (radius ~1.45).
+// ponytail: linear falloff; tune the 1.5 / 1.3 if the shells read too still or too busy.
+const jitterAt = (radius: number) => Math.min(1, Math.max(0.12, (1.5 - radius) / 1.3));
+
+const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, axes: [number, number, number] = [1, 1, 1]): Mover => ({
   obj,
   spin,
   axes,
@@ -214,6 +220,7 @@ const mover = (obj: THREE.Object3D, spin: number, size: number, axes: [number, n
   phase: [rand(0, 6.3), rand(0, 6.3), rand(0, 6.3)],
   bias: [rand(-0.7, 0.7), rand(-0.7, 0.7), rand(-0.7, 0.7)],
   size,
+  jitter: jitterAt(radius),
   twitch: twitch(),
   ticking: Math.random() < 0.3,
   until: rand(0, 5),
@@ -280,10 +287,10 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
       );
 
     const movers: Mover[] = [];
-    const part = (spin: number, size: number, axes?: [number, number, number], parent: THREE.Object3D = scene) => {
+    const part = (radius: number, spin: number, size: number, axes?: [number, number, number], parent: THREE.Object3D = scene) => {
       const g = new THREE.Group();
       parent.add(g);
-      movers.push(mover(g, spin, size, axes));
+      movers.push(mover(g, radius, spin, size, axes));
       return g;
     };
     const ringAxes: [number, number, number] = [0.35, 1, 0.35];
@@ -298,24 +305,24 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
         brokenRing(outerLines, Math.cos(lat) * 1.02, 5, [0.4, 1.8], 0, Math.sin(lat) * 1.02);
       }
     }
-    part(rand(0.08, 0.14), 0.07).add(segments(outerLines, 0.13));
+    part(1, rand(0.08, 0.14), 0.07).add(segments(outerLines, 0.13));
 
     // Middle shell.
     const middleLines = newLines();
     for (let i = 0; i < 380; i++) trace(middleLines, 0.78, rand(-1.25, 1.25), rand(0, Math.PI * 2), 8, 12, 0.032);
-    part(rand(0.14, 0.22), 0.11).add(segments(middleLines, 0.08));
+    part(0.78, rand(0.14, 0.22), 0.11).add(segments(middleLines, 0.08));
 
     // Inner shell: a dense hex-grid circuit.
     const innerLines = newLines();
     for (let i = 0; i < 240; i++) trace(innerLines, 0.44, rand(-1.3, 1.3), rand(0, Math.PI * 2), 6, 9, 0.05);
-    part(rand(0.2, 0.32), 0.15).add(segments(innerLines, 0.11));
+    part(0.44, rand(0.2, 0.32), 0.15).add(segments(innerLines, 0.11));
 
     // A band of rings around the orb, almost edge-on: four rings, each on its own tilt and its own speed.
     for (let k = 0; k < 4; k++) {
       const lines = newLines();
       const inner = 1.04 + k * 0.1;
       for (let i = 0; i < 18; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, [0.4, 2.6], 0.012, rand(-0.02, 0.02));
-      const ring = part(rand(0.25, 0.6), 0.06, ringAxes);
+      const ring = part(inner + 0.05, rand(0.25, 0.6), 0.06, ringAxes);
       ring.rotation.set(rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
       ring.add(segments(lines, 0.14));
     }
@@ -324,7 +331,7 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
     for (let k = 0; k < 4; k++) {
       const lines = newLines();
       for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 4, [0.3, 1.4], 0.006);
-      const halo = part(rand(0.1, 0.35), 0.05, ringAxes);
+      const halo = part(1.13, rand(0.1, 0.35), 0.05, ringAxes);
       halo.rotation.set(Math.PI / 2 + rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
       halo.add(segments(lines, 0.16));
     }
@@ -352,11 +359,11 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
     for (let i = 0; i < cage.count; i += 2) {
       polyline(cageLines, [new THREE.Vector3().fromBufferAttribute(cage, i), new THREE.Vector3().fromBufferAttribute(cage, i + 1)]);
     }
-    part(rand(0.3, 0.5), 0.1, undefined, core).add(segments(cageLines, 0.7));
+    part(0.11, rand(0.3, 0.5), 0.1, undefined, core).add(segments(cageLines, 0.7));
     for (const r of [0.15, 0.19, 0.23]) {
       const lines = newLines();
       brokenRing(lines, r, 3, [1.2, 3], 0.004);
-      const ring = part(rand(0.6, 1.4), 0.15, undefined, core);
+      const ring = part(r, rand(0.6, 1.4), 0.15, undefined, core);
       ring.rotation.set(rand(0, Math.PI), rand(0, Math.PI * 2), 0);
       ring.add(segments(lines, 0.9));
     }
@@ -414,9 +421,10 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
       let ticking = 0;
       for (const m of movers) if (m.ticking) ticking++;
       const tickSnap = 1 - Math.exp(-dt * 30);
-      const easeSnap = 1 - Math.exp(-dt * (busy > 0.15 ? 40 : 10));
       for (const m of movers) {
         const { rotation } = m.obj;
+        // Far parts also follow their turn more softly, which smooths what shake is left.
+        const easeSnap = 1 - Math.exp(-dt * (busy > 0.15 ? 10 + 30 * m.jitter : 10));
         if (!m.ready) {
           m.want = [rotation.x, rotation.y, rotation.z];
           m.held = [...m.want];
@@ -425,7 +433,7 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
         }
         // Each part keeps turning smoothly in `want`; it is drawn from there, or stepped in clockwork fashion.
         for (let i = 0; i < 3; i++) {
-          m.want[i] += pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.axes[i];
+          m.want[i] += pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.jitter * m.axes[i];
         }
         if (t >= m.until) {
           if (!m.ticking && ticking >= MAX_TICKING) {
@@ -445,7 +453,7 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
         const k = clockwork ? tickSnap : easeSnap;
         for (let i = 0; i < 3; i++) m.shown[i] += ((clockwork ? m.held[i] : m.want[i]) - m.shown[i]) * k;
         rotation.set(m.shown[0], m.shown[1], m.shown[2]);
-        m.obj.scale.setScalar(1 + flutter * m.size * tick(m.twitch, t, snap));
+        m.obj.scale.setScalar(1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap));
       }
 
       // The core is the mouth: while talking its size twitches between small and large in quick jumps, and it glows a
