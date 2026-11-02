@@ -37,9 +37,9 @@ class Llm {
     turns: Turn[],
     image: string | undefined,
     onToken: (text: string) => void,
-    opts?: { maxNewTokens?: number; fresh?: boolean },
+    opts?: { maxNewTokens?: number; fresh?: boolean; sample?: boolean },
   ): Promise<Written> {
-    const key = image || opts?.fresh ? null : JSON.stringify(turns);
+    const key = image || opts?.fresh || opts?.sample ? null : JSON.stringify(turns);
     const hit = key ? this.replies.get(key) : undefined;
     if (hit) {
       onToken(hit.text);
@@ -49,7 +49,7 @@ class Llm {
     const id = ++this.seq;
     const written = await new Promise<Written>((resolve, reject) => {
       this.pending.set(id, { onToken, resolve, reject });
-      worker.postMessage({ type: "generate", id, turns, image, maxNewTokens: opts?.maxNewTokens });
+      worker.postMessage({ type: "generate", id, turns, image, maxNewTokens: opts?.maxNewTokens, sample: opts?.sample });
     });
     // A stopped reply is cut short: keep only replies that ran to the end.
     if (key && this.stopped < id && written.text) this.replies.set(key, written);

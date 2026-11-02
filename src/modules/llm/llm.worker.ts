@@ -52,7 +52,7 @@ function load() {
 
 type Turn = { role: "system" | "user" | "assistant"; content: string };
 
-async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?: number) {
+async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?: number, sample?: boolean) {
   const { processor, model } = await load();
   const last = turns.length - 1;
   const chat = turns.map((turn, i) => ({
@@ -77,7 +77,9 @@ async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?
   const output = (await model.generate({
     ...inputs,
     max_new_tokens: maxNewTokens || 384,
-    do_sample: false,
+    do_sample: Boolean(sample),
+    // ponytail: sampling is only for the boot greeting. Chat stays greedy, so retries stay cacheable.
+    ...(sample ? { temperature: 0.6, top_k: 20 } : {}),
     repetition_penalty: 1.15,
     streamer,
     stopping_criteria: stopping,
@@ -100,7 +102,7 @@ self.onmessage = ({ data }: MessageEvent) => {
   if (data.type === "load") void load();
   else if (data.type === "stop") stopping.interrupt();
   else if (data.type === "generate")
-    generate(data.id, data.turns, data.image, data.maxNewTokens).catch((err: unknown) =>
+    generate(data.id, data.turns, data.image, data.maxNewTokens, data.sample).catch((err: unknown) =>
       post({ type: "error", id: data.id, message: err instanceof Error ? err.message : String(err) })
     );
 };

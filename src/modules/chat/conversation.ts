@@ -122,8 +122,10 @@ async function runGreet(mine: number) {
         shown += piece;
         const line = openingLine(shown);
         if (line) greeting.set({ text: line });
+        // Stop once a real sentence is out, so a small model can't keep talking past the greeting.
+        if (/[.!?]$/.test(line) && line.split(/\s+/).length >= 3) llm.stop();
       },
-      { maxNewTokens: 24, fresh: true },
+      { maxNewTokens: 24, fresh: true, sample: true },
     );
     if (mine !== greetGen || !power.state.on) return;
     const line = openingLine(written.text || shown);
