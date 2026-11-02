@@ -68,8 +68,9 @@ function trace(out, r, lat, lon, dirs = 8, steps = 14, step = 0.03, maxLat = 1.3
   }
 }
 
-// `width` > 0 makes a thick band: `strands` parallel lines spread across it (1px lines can't be thicker).
-function brokenRing(out, r, arcs, span, wiggle = 0, y = 0, tilt, width = 0, strands = 7) {
+// `width` > 0 makes a thick tube: `strands` parallel lines, one down the middle and the rest around it, so it reads as
+// a round 3D bar from every side (1px lines can't be thicker).
+function brokenRing(out, r, arcs, span, wiggle = 0, y = 0, tilt, width = 0, strands = 9) {
   const turn = tilt ? new THREE.Matrix4().makeRotationFromEuler(tilt) : null;
   for (let i = 0; i < arcs; i++) {
     const start = rand(0, Math.PI * 2);
@@ -85,14 +86,16 @@ function brokenRing(out, r, arcs, span, wiggle = 0, y = 0, tilt, width = 0, stra
     if (path.length < 2) continue;
     const traceSeed = random();
     for (let s = 0; s < (width ? strands : 1); s++) {
-      const off = width ? (s / (strands - 1) - 0.5) * width : 0;
+      const phi = s ? ((s - 1) / (strands - 1)) * Math.PI * 2 : 0;
+      const off = s && width ? Math.cos(phi) * width * 0.5 : 0;
+      const lift = s && width ? Math.sin(phi) * width * 0.5 : 0;
       // Like the circuit traces: each strand sidesteps now and then on its own, and starts and ends where it likes.
       let jog = 0;
       const from = width ? Math.floor(rand(0, 0.2) * path.length) : 0;
       const to = width ? path.length - Math.floor(rand(0, 0.2) * path.length) : path.length;
       const pts = path.slice(from, to).map(([a, rad, h]) => {
         if (width && random() < 0.05) jog += (random() < 0.5 ? -1 : 1) * (width / strands);
-        const p = new THREE.Vector3((rad + off + jog) * Math.cos(a), h, (rad + off + jog) * Math.sin(a));
+        const p = new THREE.Vector3((rad + off + jog) * Math.cos(a), h + lift, (rad + off + jog) * Math.sin(a));
         return turn ? p.applyMatrix4(turn) : p;
       });
       if (pts.length > 1) polyline(out, pts, traceSeed);
@@ -137,32 +140,35 @@ function build() {
       brokenRing(outerLines, Math.cos(lat) * 1.02, 5, [0.4, 1.8], 0, Math.sin(lat) * 1.02);
     }
   }
-  part(1, rand(0.08, 0.14), 0.07).add(segments(outerLines, 0.13));
+  const outer = part(1, rand(0.08, 0.14), 0.07);
+  outer.add(segments(outerLines, 0.13));
 
   const middleLines = newLines();
   for (let i = 0; i < 380; i++) trace(middleLines, 0.78, rand(-1.25, 1.25), rand(0, Math.PI * 2), 8, 12, 0.032);
-  part(0.78, rand(0.14, 0.22), 0.11).add(segments(middleLines, 0.08));
+  const middle = part(0.78, rand(0.14, 0.22), 0.11);
+  middle.add(segments(middleLines, 0.08));
 
   const innerLines = newLines();
   for (let i = 0; i < 240; i++) trace(innerLines, 0.44, rand(-1.3, 1.3), rand(0, Math.PI * 2), 6, 9, 0.05);
-  part(0.44, rand(0.2, 0.32), 0.15).add(segments(innerLines, 0.11));
+  const inner = part(0.44, rand(0.2, 0.32), 0.15);
+  inner.add(segments(innerLines, 0.11));
 
   for (let k = 0; k < 4; k++) {
     const lines = newLines();
-    const inner = 1.04 + k * 0.1;
+    const inside = 1.04 + k * 0.1;
     // Thick bands, mostly half rings, a few short arcs: never a full circle.
-    for (let i = 0; i < 3; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, i ? [2.4, 3.6] : [0.8, 1.8], 0.014, rand(-0.02, 0.02), undefined, rand(0.02, 0.035));
-    const ring = part(inner + 0.05, rand(0.25, 0.6), 0.06, ringAxes);
+    for (let i = 0; i < 3; i++) brokenRing(lines, rand(inside, inside + 0.1), 1, i ? [2.4, 3.6] : [0.8, 1.8], 0.014, rand(-0.02, 0.02), undefined, rand(0.045, 0.075));
+    const ring = part(inside + 0.05, rand(0.25, 0.6), 0.06, ringAxes);
     ring.rotation.set(rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
-    ring.add(segments(lines, 0.14));
+    ring.add(segments(lines, 0.1));
   }
 
   for (let k = 0; k < 4; k++) {
     const lines = newLines();
-    for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 1, i ? [2.4, 3.4] : [0.8, 1.6], 0.01, 0, undefined, rand(0.015, 0.03), 5);
+    for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 1, i ? [2.4, 3.4] : [0.8, 1.6], 0.01, 0, undefined, rand(0.03, 0.05), 7);
     const halo = part(1.13, rand(0.1, 0.35), 0.05, ringAxes);
     halo.rotation.set(Math.PI / 2 + rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
-    halo.add(segments(lines, 0.16));
+    halo.add(segments(lines, 0.12));
   }
 
   const core = new THREE.Group();

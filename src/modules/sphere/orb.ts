@@ -59,14 +59,25 @@ const LINE_FRAGMENT = /* glsl */ `
   uniform float uPower;
   varying float vAlong;
   varying float vSeed;
+  float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
   void main() {
     float twinkle = 0.65 + 0.35 * sin(uTime * (1.0 + vSeed * 2.5) + vSeed * 50.0);
     // A pulse of light runs down each trace, each at its own pace.
     float head = fract(uPhase * (0.6 + vSeed * 0.8) + vSeed * 7.0);
     float pulse = smoothstep(0.15, 0.0, abs(vAlong - head)) * uFlow;
+    // On top of that glow, neurons: now and then, at random, a trace fires. A sharp spike of light runs down it and
+    // dies out, then it is quiet again until its next turn. Talking and thinking (uPhase) fire them faster.
+    float cycle = (uTime * 0.3 + uPhase * 1.5) * (0.6 + vSeed * 0.8) + vSeed * 31.0;
+    float turn = floor(cycle);
+    float fires = step(0.86, hash(turn + vSeed * 57.0)); // about one turn in seven
+    float t = fract(cycle) / 0.3; // the spike runs down the trace in the first part of the turn
+    float tip = t * 1.25 - 0.1;
+    float behind = tip - vAlong;
+    float spike = behind >= 0.0 ? exp(-behind * 14.0) : exp(behind * 45.0);
+    spike *= fires * step(t, 1.0) * (1.0 - smoothstep(0.6, 1.0, t));
     // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
-    float glow = uBase * (twinkle + pulse * 4.0) * uPower;
-    vec3 color = mix(uColor, uHot, clamp(pulse * 0.6, 0.0, 1.0));
+    float glow = uBase * (twinkle + pulse * 4.0 + spike * 5.0) * uPower;
+    vec3 color = mix(uColor, uHot, clamp(pulse * 0.6 + spike, 0.0, 1.0));
     gl_FragColor = vec4(color * glow, 1.0);
   }
 `;
