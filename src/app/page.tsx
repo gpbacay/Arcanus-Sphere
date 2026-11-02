@@ -4,7 +4,7 @@
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a status pill.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
-import { ChatFallback, ChatPanel, hydrateChats, stopReply, useBusy } from "@/modules/chat";
+import { cancelGreet, ChatFallback, ChatPanel, greet, greeting, hydrateChats, stopReply, useBusy } from "@/modules/chat";
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
@@ -30,6 +30,7 @@ export default function Home() {
   useEffect(() => {
     if (!on) {
       // Switched off: finish nothing, say nothing, listen to nothing. The models stay loaded for the next boot.
+      cancelGreet();
       stopReply();
       voice.cancel();
       listen.cancel();
@@ -39,10 +40,13 @@ export default function Home() {
     // Each loads on its own: a slow or failed one never holds up the others. Off at load: nothing downloads yet.
     let current = true;
     void offlineReady().then(() => {
-      if (current) for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
+      if (!current) return;
+      for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
+      greet();
     });
     return () => {
       current = false;
+      cancelGreet();
     };
   }, [on]);
 
@@ -65,6 +69,7 @@ function Stage() {
   const analyser = useStore(voice.state, (s) => s.analyser);
   const speaking = useStore(voice.state, (s) => s.speaking);
   const caption = useStore(voice.state, (s) => s.caption);
+  const greetLine = useStore(greeting, (s) => s.text);
   const on = useStore(power, (s) => s.on);
   const changing = useStore(power, (s) => s.changing);
   const state = !on ? "off" : speaking ? "speaking" : busy ? "thinking" : "idle";
@@ -76,9 +81,9 @@ function Stage() {
         <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} />
       </div>
       <div className="stage-foot">
-        {caption && on ? (
+        {(caption || greetLine) && on ? (
           <p className="caption" aria-hidden>
-            {caption}
+            {caption || greetLine}
           </p>
         ) : null}
         <span className="stage-state" data-state={state}>

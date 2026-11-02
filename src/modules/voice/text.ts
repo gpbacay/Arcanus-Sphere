@@ -11,6 +11,18 @@ export function forSpeech(text: string): string {
     .trim();
 }
 
+/** The greeting sentence in a model reply: quotes and a leading name stripped, one-word stubs skipped. */
+export function openingLine(text: string): string {
+  const cleaned = text
+    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .replace(/^arcanus\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  const line = parts.find((s) => s.split(/\s+/).length >= 3) ?? parts.at(-1) ?? "";
+  return line.slice(0, 180);
+}
+
 /**
  * Split streamed text into finished sentences and the unfinished rest, so speech can start before the reply ends.
  * A sentence still being written past `long` characters is cut at its last comma, semicolon or colon, so a long

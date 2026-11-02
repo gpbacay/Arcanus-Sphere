@@ -52,7 +52,7 @@ function load() {
 
 type Turn = { role: "system" | "user" | "assistant"; content: string };
 
-async function generate(id: number, turns: Turn[], image?: string) {
+async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?: number) {
   const { processor, model } = await load();
   const last = turns.length - 1;
   const chat = turns.map((turn, i) => ({
@@ -76,7 +76,7 @@ async function generate(id: number, turns: Turn[], image?: string) {
   stopping.reset();
   const output = (await model.generate({
     ...inputs,
-    max_new_tokens: 384,
+    max_new_tokens: maxNewTokens || 384,
     do_sample: false,
     repetition_penalty: 1.15,
     streamer,
@@ -100,7 +100,7 @@ self.onmessage = ({ data }: MessageEvent) => {
   if (data.type === "load") void load();
   else if (data.type === "stop") stopping.interrupt();
   else if (data.type === "generate")
-    generate(data.id, data.turns, data.image).catch((err: unknown) =>
+    generate(data.id, data.turns, data.image, data.maxNewTokens).catch((err: unknown) =>
       post({ type: "error", id: data.id, message: err instanceof Error ? err.message : String(err) })
     );
 };

@@ -4,7 +4,7 @@
 // since this page never loads the studio.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
-import { ArChat, hydrateChats, useBusy } from "@/modules/chat";
+import { ArChat, cancelGreet, greet, hydrateChats, useBusy } from "@/modules/chat";
 import { listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
@@ -23,7 +23,9 @@ export function ArScreen() {
     voice.restore();
     void offlineReady().then(() => {
       for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
+      greet();
     });
+    return () => cancelGreet();
   }, []);
 
   return (

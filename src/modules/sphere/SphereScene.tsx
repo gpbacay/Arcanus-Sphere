@@ -8,7 +8,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { loadOrb, type Orb } from "./orb";
+import { loadOrb, ORB_BLOOM, type Orb } from "./orb";
 
 /**
  * The studio: Arcanus's orb standing in a 3D space grid. Drag to orbit the camera, scroll or pinch to zoom, and pick a
@@ -163,7 +163,7 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.35, 0.08));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
     composer.addPass(new OutputPass());
 
     const fit = () => {

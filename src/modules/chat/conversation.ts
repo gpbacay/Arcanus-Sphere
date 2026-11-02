@@ -3,7 +3,7 @@
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { think } from "@/modules/brain";
 import { llm, type Turn } from "@/modules/llm";
-import { takeSentences, voice } from "@/modules/voice";
+import { openingLine, takeSentences, voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { Store, errorText, useStore } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
@@ -36,7 +36,112 @@ function buildTurns(prior: Msg[], user: Msg, facts?: string[]): Turn[] {
 const sayAll = (text: string) => takeSentences(`${text}\n`).sentences.forEach((s) => voice.say(s));
 const lastRole = (messages: Msg[], role: Msg["role"]) => messages.findLastIndex((m) => m.role === role);
 
+/** The line Arcanus composed for this boot. Empty until the model writes one. */
+export const greeting = new Store({ text: "" });
+
+let greetGen = 0;
+let greetJob = 0;
+let listening = false;
+
+function bootAsk() {
+  const when = new Date().toLocaleString(undefined, { weekday: "long", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  return `It is ${when}. Greet me in one short sentence and ask how you can help.`;
+}
+
+function onPointer() {
+  voice.unlock();
+  const line = greeting.state.text;
+  if (!line || !power.state.on || voice.state.state.off) return;
+  listening = false;
+  window.removeEventListener("pointerdown", onPointer);
+  voice.cancel();
+  sayAll(line);
+}
+
+function watchGesture() {
+  if (listening || voice.state.state.off) return;
+  listening = true;
+  window.addEventListener("pointerdown", onPointer);
+}
+
+function silence() {
+  if (!listening) return;
+  listening = false;
+  window.removeEventListener("pointerdown", onPointer);
+}
+
+function waitReady(mine: number) {
+  return new Promise<void>((resolve) => {
+    const check = () => {
+      const status = llm.state.state.status;
+      if (mine !== greetGen || !power.state.on || status === "ready" || status === "error") {
+        dropL();
+        dropP();
+        resolve();
+      }
+    };
+    const dropL = llm.state.subscribe(check);
+    const dropP = power.subscribe(check);
+    check();
+  });
+}
+
+/** Drop a boot greeting still being written, and the line from the last one. */
+export function cancelGreet() {
+  greetGen++;
+  greeting.set({ text: "" });
+  silence();
+  if (!greetJob) return;
+  greetJob = 0;
+  llm.stop();
+}
+
+/** Ask SmolVLM for this boot's greeting. Nothing is written ahead of time. */
+export function greet() {
+  if (!power.state.on) return;
+  const mine = ++greetGen;
+  watchGesture();
+  void runGreet(mine);
+}
+
+async function runGreet(mine: number) {
+  if (greetJob) llm.stop();
+  await waitReady(mine);
+  if (mine !== greetGen || !power.state.on || busy() || llm.state.state.status !== "ready") return;
+  greetJob = mine;
+  let shown = "";
+  try {
+    const written = await llm.generate(
+      [
+        { role: "system", content: "You are Arcanus. Speak one sentence, then stop." },
+        { role: "user", content: bootAsk() },
+      ],
+      undefined,
+      (piece) => {
+        if (mine !== greetGen) return;
+        shown += piece;
+        const line = openingLine(shown);
+        if (line) greeting.set({ text: line });
+      },
+      { maxNewTokens: 24, fresh: true },
+    );
+    if (mine !== greetGen || !power.state.on) return;
+    const line = openingLine(written.text || shown);
+    if (!line) return;
+    greeting.set({ text: line });
+    if (voice.state.state.off || !voice.state.state.analyser) return;
+    silence();
+    voice.cancel();
+    sayAll(line);
+  } catch {
+    // Stopped, or the model never loaded. Leave the greeting blank rather than substitute a fixed line.
+  } finally {
+    if (greetJob === mine) greetJob = 0;
+  }
+}
+
 async function answer(chatId: string, prior: Msg[], user: Msg) {
+  cancelGreet();
   const mine = ++gen;
   const stale = () => mine !== gen;
   const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });

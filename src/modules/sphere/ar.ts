@@ -1,5 +1,9 @@
 import * as THREE from "three";
-import { loadOrb, type OrbInputs } from "./orb";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { loadOrb, ORB_BLOOM, type OrbInputs } from "./orb";
 
 /**
  * Arcanus's orb in the real world, using the 8th Wall XR engine (XR8) for world tracking. The engine files are
@@ -71,7 +75,7 @@ export type ArEvents = { onReady: () => void; onError: (message: string) => void
 
 /** Starts the camera and the orb inside `container`. Resolves to a function that stops everything. */
 export async function startAr(container: HTMLElement, { onReady, onError }: ArEvents, inputs: OrbInputs = {}): Promise<() => void> {
-  const [xr8, orb] = await Promise.all([loadEngine(), loadOrb({ ...inputs, solid: true })]);
+  const [xr8, orb] = await Promise.all([loadEngine(), loadOrb(inputs)]);
 
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
@@ -82,10 +86,43 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   const rig = new THREE.Group();
   rig.add(dome, orb.root);
   rig.scale.setScalar(SCALE_START);
+  // The orb is drawn on black with the studio's bloom, then added onto the camera. Drawing it straight on the
+  // feed (or as flat gold) loses the halo and the hot core.
+  const bloomScene = new THREE.Scene();
+  bloomScene.add(rig);
+  const glowMat = new THREE.RawShaderMaterial({
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: /* glsl */ `
+      attribute vec3 position;
+      attribute vec2 uv;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      uniform sampler2D tDiffuse;
+      varying vec2 vUv;
+      void main() {
+        gl_FragColor = vec4(texture2D(tDiffuse, vUv).rgb, 1.0);
+      }
+    `,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+  });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), glowMat);
+  glow.frustumCulled = false;
 
   const clock = new THREE.Clock();
+  const caster = new THREE.Raycaster(); // reused by every touch: pointer moves fire many times a second
+  const ndc = new THREE.Vector2();
   let camera: THREE.PerspectiveCamera | null = null;
   let renderer: THREE.WebGLRenderer | null = null;
+  let composer: EffectComposer | null = null;
   let placed = false;
   let stopped = false;
 
@@ -102,9 +139,8 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
     } catch {
       // SLAM is still warming up: fall through to the ground plane.
     }
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(nx * 2 - 1, 1 - ny * 2), camera);
-    return ray.ray.intersectPlane(GROUND, new THREE.Vector3());
+    caster.setFromCamera(ndc.set(nx * 2 - 1, 1 - ny * 2), camera);
+    return caster.ray.intersectPlane(GROUND, new THREE.Vector3());
   };
 
   /** The orb rests on a point: its centre one radius above it. */
@@ -113,17 +149,20 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   const aimsAtOrb = (clientX: number, clientY: number) => {
     if (!camera) return false;
     const box = container.getBoundingClientRect();
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(((clientX - box.left) / box.width) * 2 - 1, 1 - ((clientY - box.top) / box.height) * 2), camera);
-    return ray.intersectObject(dome).length > 0;
+    caster.setFromCamera(ndc.set(((clientX - box.left) / box.width) * 2 - 1, 1 - ((clientY - box.top) / box.height) * 2), camera);
+    return caster.intersectObject(dome).length > 0;
   };
 
   // The engine sizes the canvas to the camera feed; keep it filling the screen instead (also when the phone turns).
+  // Pixel ratio matches the studio (capped at 2). Ratio 1 made every trace a full CSS pixel wide.
   const layout = () => {
     canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none";
-    // Pixel ratio 1: a one-pixel line is then a whole CSS pixel wide, two or three times thicker than at full density.
-    renderer?.setPixelRatio(1);
-    renderer?.setSize(container.clientWidth, container.clientHeight, false);
+    if (!renderer) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    composer?.setPixelRatio(ratio);
+    composer?.setSize(container.clientWidth, container.clientHeight);
   };
   layout();
   window.addEventListener("resize", layout);
@@ -202,6 +241,9 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
       // already stopped
     }
     orb.dispose();
+    composer?.dispose();
+    glow.geometry.dispose();
+    glowMat.dispose();
     dome.geometry.dispose();
     dome.material.dispose();
     renderer = null;
@@ -211,6 +253,24 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   xr8.XrController.configure({ disableWorldTracking: false });
   xr8.addCameraPipelineModules([
     xr8.GlTextureRenderer.pipelineModule(),
+    {
+      name: "arcanus-bloom",
+      // Before the engine draws the scene: bloom the orb on black, then the engine adds that plate onto the camera.
+      onRender: () => {
+        glow.visible = orb.root.visible; // switched off: nothing to bloom, nothing to add onto the camera
+        if (!composer || !renderer || !glow.visible) return;
+        const clearColor = renderer.autoClearColor;
+        const clearDepth = renderer.autoClearDepth;
+        // The camera pass turns color clearing off. The bloom plate still has to start from black each frame.
+        renderer.autoClearColor = true;
+        renderer.autoClearDepth = true;
+        composer.render();
+        renderer.resetState();
+        renderer.autoClearColor = clearColor;
+        renderer.autoClearDepth = clearDepth;
+        glowMat.uniforms.tDiffuse.value = composer.readBuffer.texture;
+      },
+    },
     xr8.Threejs.pipelineModule(),
     xr8.XrController.pipelineModule(),
     {
@@ -219,13 +279,20 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         const xr = xr8.Threejs.xrScene();
         camera = xr.camera;
         renderer = xr.renderer;
-        xr.scene.add(rig);
         renderer.setClearColor(0x000000, 0);
         layout();
+        composer = new EffectComposer(renderer);
+        composer.renderToScreen = false;
+        composer.addPass(new RenderPass(bloomScene, camera, null, new THREE.Color(0x000000), 1));
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(container.clientWidth, container.clientHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
+        composer.addPass(new OutputPass());
+        composer.setSize(container.clientWidth, container.clientHeight);
+        xr.scene.add(glow);
         camera.position.set(0, CAMERA_HEIGHT, 0);
         xr8.XrController.updateCameraProjectionMatrix({ origin: camera.position, facing: camera.quaternion });
         onReady();
       },
+      onCanvasSizeChange: () => layout(),
       onUpdate: () => {
         const dt = Math.min(clock.getDelta(), 0.05);
         if (camera && !placed) {

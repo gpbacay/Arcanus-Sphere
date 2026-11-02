@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/shared/store";
 import { ChainOfThoughtTrace } from "@/shared/ui/chain-of-thought";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { discard, live, resend, retry, speak, useBusy } from "./conversation";
+import { discard, greeting, live, resend, retry, speak, useBusy } from "./conversation";
 import { MAX, chatStore, selectCurrent, setEditing, setReplyTo, type Msg } from "./store";
 
 const clock = (at: number) =>
@@ -35,6 +35,7 @@ export function Thread() {
   const editingId = useStore(chatStore, (s) => s.editingId);
   const writingHere = useStore(live, (s) => Boolean(s.reply && s.reply.chatId === current?.id));
   const busy = useBusy();
+  const line = useStore(greeting, (s) => s.text);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,12 +47,10 @@ export function Thread() {
 
   return (
     <div className="thread" role="log" aria-label="Conversation">
-      {current.messages.length === 0 && !writingHere ? (
+      {current.messages.length === 0 && !writingHere && line ? (
         <div className="empty">
-          <p className="empty-title">I&apos;m Arcanus.</p>
-          <p>
-            Everything I do runs in this browser: ARC 1 decides what you need, SmolVLM writes, Paradee speaks. Nothing you
-            type leaves this device. Attach an image and I&apos;ll describe it.
+          <p className="empty-title" aria-live="polite">
+            {line}
           </p>
         </div>
       ) : null}

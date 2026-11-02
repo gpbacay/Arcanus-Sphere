@@ -31,9 +31,10 @@ export type OrbInputs = {
   boost?: () => number;
   /** Whether Arcanus is switched on. Flipping it plays the boot-up or shutdown animation. Defaults to always on. */
   on?: () => boolean;
-  /** AR: draw with ordinary blending (opaque gold) instead of additive light, so it reads against a bright camera feed. */
-  solid?: boolean;
 };
+
+/** Bloom the studio composites over the orb. AR uses the same numbers so the two views stay one look. */
+export const ORB_BLOOM = { strength: 0.55, radius: 0.35, threshold: 0.08 } as const;
 
 const GOLD = new THREE.Color("#ff9a2e");
 const HOT = new THREE.Color("#fff1c9");
@@ -41,14 +42,31 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 // ------------------------------------------------------------------ shaders
 
+// Everything that depends only on a trace's seed (twinkle, where its pulse is, whether and where it fires) is worked out
+// once per vertex here, not once per pixel. Both ends of a segment share a seed, so the values interpolate unchanged.
 const LINE_VERTEX = /* glsl */ `
+  uniform float uTime;
+  uniform float uPhase;
   attribute float along;
   attribute float seed;
   varying float vAlong;
-  varying float vSeed;
+  varying float vTwinkle;
+  varying float vHead;
+  varying float vTip;
+  varying float vFire;
+  float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
   void main() {
     vAlong = along;
-    vSeed = seed;
+    vTwinkle = 0.65 + 0.35 * sin(uTime * (1.0 + seed * 2.5) + seed * 50.0);
+    // A pulse of light runs down each trace, each at its own pace.
+    vHead = fract(uPhase * (0.6 + seed * 0.8) + seed * 7.0);
+    // On top of that glow, neurons: now and then, at random, a trace fires. A sharp spike of light runs down it and
+    // dies out, then it is quiet again until its next turn. Talking and thinking (uPhase) fire them faster.
+    float cycle = (uTime * 0.3 + uPhase * 1.5) * (0.6 + seed * 0.8) + seed * 31.0;
+    float fires = step(0.86, hash(floor(cycle) + seed * 57.0)); // about one turn in seven
+    float t = fract(cycle) / 0.3; // the spike runs down the trace in the first part of the turn
+    vTip = t * 1.25 - 0.1;
+    vFire = fires * step(t, 1.0) * (1.0 - smoothstep(0.6, 1.0, t));
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -56,35 +74,25 @@ const LINE_VERTEX = /* glsl */ `
 const LINE_FRAGMENT = /* glsl */ `
   uniform vec3 uColor;
   uniform vec3 uHot;
-  uniform float uTime;
-  uniform float uPhase;
   uniform float uFlow;
   uniform float uBase;
   uniform float uPower;
-  uniform float uSolid;
   varying float vAlong;
-  varying float vSeed;
-  float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+  varying float vTwinkle;
+  varying float vHead;
+  varying float vTip;
+  varying float vFire;
   void main() {
-    float twinkle = 0.65 + 0.35 * sin(uTime * (1.0 + vSeed * 2.5) + vSeed * 50.0);
-    // A pulse of light runs down each trace, each at its own pace.
-    float head = fract(uPhase * (0.6 + vSeed * 0.8) + vSeed * 7.0);
-    float pulse = smoothstep(0.15, 0.0, abs(vAlong - head)) * uFlow;
-    // On top of that glow, neurons: now and then, at random, a trace fires. A sharp spike of light runs down it and
-    // dies out, then it is quiet again until its next turn. Talking and thinking (uPhase) fire them faster.
-    float cycle = (uTime * 0.3 + uPhase * 1.5) * (0.6 + vSeed * 0.8) + vSeed * 31.0;
-    float turn = floor(cycle);
-    float fires = step(0.86, hash(turn + vSeed * 57.0)); // about one turn in seven
-    float t = fract(cycle) / 0.3; // the spike runs down the trace in the first part of the turn
-    float tip = t * 1.25 - 0.1;
-    float behind = tip - vAlong;
-    float spike = behind >= 0.0 ? exp(-behind * 14.0) : exp(behind * 45.0);
-    spike *= fires * step(t, 1.0) * (1.0 - smoothstep(0.6, 1.0, t));
+    float pulse = smoothstep(0.15, 0.0, abs(vAlong - vHead)) * uFlow;
+    float spike = 0.0;
+    if (vFire > 0.0) {
+      float behind = vTip - vAlong;
+      spike = (behind >= 0.0 ? exp(-behind * 14.0) : exp(behind * 45.0)) * vFire;
+    }
     // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
-    float glow = uBase * (twinkle + pulse * 4.0 + spike * 5.0) * uPower;
+    float glow = uBase * (vTwinkle + pulse * 4.0 + spike * 5.0) * uPower;
     vec3 color = mix(uColor, uHot, clamp(pulse * 0.6 + spike, 0.0, 1.0));
-    // Solid (AR): the glow becomes opacity, so the line stays gold over a bright background instead of vanishing.
-    gl_FragColor = uSolid > 0.5 ? vec4(color, clamp(glow * 7.0, 0.0, 1.0)) : vec4(color * glow, 1.0);
+    gl_FragColor = vec4(color * glow, 1.0);
   }
 `;
 
@@ -197,7 +205,7 @@ const disposeDraw = (object: THREE.Object3D) => {
 };
 
 /** The file stores the shells, rings, and core. These shaders and the mover loop are what make it Arcanus. */
-export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0, on = () => true, solid = false }: OrbInputs = {}): Promise<Orb> {
+export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0, on = () => true }: OrbInputs = {}): Promise<Orb> {
   const gltf = await new GLTFLoader().loadAsync("/orb.glb");
   // Shared uniforms: every material reads the same objects, so one write per frame drives them all.
   const shared = {
@@ -231,12 +239,12 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       if (seed) obj.geometry.setAttribute("seed", seed);
       (obj.material as THREE.Material).dispose();
       obj.material = new THREE.ShaderMaterial({
-        uniforms: { ...shared, uBase: { value: data.base ?? 0.13 }, uSolid: { value: solid ? 1 : 0 } },
+        uniforms: { ...shared, uBase: { value: data.base ?? 0.13 } },
         vertexShader: LINE_VERTEX,
         fragmentShader: LINE_FRAGMENT,
         transparent: true,
         depthWrite: false,
-        blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending,
+        blending: THREE.AdditiveBlending,
       });
     }
     if (obj.name === "core-eye" && obj instanceof THREE.Mesh) {
@@ -247,7 +255,7 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
         fragmentShader: CORE_FRAGMENT,
         transparent: true,
         depthWrite: false,
-        blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending,
+        blending: THREE.AdditiveBlending,
       });
     }
   });
