@@ -19,6 +19,8 @@ export type Orb = {
   /** Add this to a scene. The studio and AR views wrap it in their own group to move, turn and resize the orb. */
   root: THREE.Object3D;
   update: (dt: number) => void;
+  /** Go dark and play the boot-up animation again, as if Arcanus had just been switched on. */
+  reboot: () => void;
   dispose: () => void;
 };
 
@@ -29,6 +31,8 @@ export type OrbInputs = {
   boost?: () => number;
   /** Whether Arcanus is switched on. Flipping it plays the boot-up or shutdown animation. Defaults to always on. */
   on?: () => boolean;
+  /** AR: draw with ordinary blending (opaque gold) instead of additive light, so it reads against a bright camera feed. */
+  solid?: boolean;
 };
 
 const GOLD = new THREE.Color("#ff9a2e");
@@ -57,6 +61,7 @@ const LINE_FRAGMENT = /* glsl */ `
   uniform float uFlow;
   uniform float uBase;
   uniform float uPower;
+  uniform float uSolid;
   varying float vAlong;
   varying float vSeed;
   float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
@@ -78,7 +83,8 @@ const LINE_FRAGMENT = /* glsl */ `
     // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
     float glow = uBase * (twinkle + pulse * 4.0 + spike * 5.0) * uPower;
     vec3 color = mix(uColor, uHot, clamp(pulse * 0.6 + spike, 0.0, 1.0));
-    gl_FragColor = vec4(color * glow, 1.0);
+    // Solid (AR): the glow becomes opacity, so the line stays gold over a bright background instead of vanishing.
+    gl_FragColor = uSolid > 0.5 ? vec4(color, clamp(glow * 7.0, 0.0, 1.0)) : vec4(color * glow, 1.0);
   }
 `;
 
@@ -191,7 +197,7 @@ const disposeDraw = (object: THREE.Object3D) => {
 };
 
 /** The file stores the shells, rings, and core. These shaders and the mover loop are what make it Arcanus. */
-export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0, on = () => true }: OrbInputs = {}): Promise<Orb> {
+export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0, on = () => true, solid = false }: OrbInputs = {}): Promise<Orb> {
   const gltf = await new GLTFLoader().loadAsync("/orb.glb");
   // Shared uniforms: every material reads the same objects, so one write per frame drives them all.
   const shared = {
@@ -225,12 +231,12 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       if (seed) obj.geometry.setAttribute("seed", seed);
       (obj.material as THREE.Material).dispose();
       obj.material = new THREE.ShaderMaterial({
-        uniforms: { ...shared, uBase: { value: data.base ?? 0.13 } },
+        uniforms: { ...shared, uBase: { value: data.base ?? 0.13 }, uSolid: { value: solid ? 1 : 0 } },
         vertexShader: LINE_VERTEX,
         fragmentShader: LINE_FRAGMENT,
         transparent: true,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
+        blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending,
       });
     }
     if (obj.name === "core-eye" && obj instanceof THREE.Mesh) {
@@ -241,7 +247,7 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
         fragmentShader: CORE_FRAGMENT,
         transparent: true,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
+        blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending,
       });
     }
   });
@@ -335,5 +341,5 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     coreGlow.value = (1 + 0.25 * talk * (0.5 + 0.5 * jump)) * lit * flick;
   };
 
-  return { root: gltf.scene, update, dispose: () => gltf.scene.traverse(disposeDraw) };
+  return { root: gltf.scene, update, reboot: () => (power = 0), dispose: () => gltf.scene.traverse(disposeDraw) };
 }

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { loadOrb } from "./orb";
+import { loadOrb, type OrbInputs } from "./orb";
 
 /**
  * Arcanus's orb in the real world, using the 8th Wall XR engine (XR8) for world tracking. The engine files are
@@ -70,19 +70,15 @@ function loadEngine(): Promise<Xr8> {
 export type ArEvents = { onReady: () => void; onError: (message: string) => void };
 
 /** Starts the camera and the orb inside `container`. Resolves to a function that stops everything. */
-export async function startAr(container: HTMLElement, { onReady, onError }: ArEvents): Promise<() => void> {
-  const [xr8, orb] = await Promise.all([loadEngine(), loadOrb()]);
+export async function startAr(container: HTMLElement, { onReady, onError }: ArEvents, inputs: OrbInputs = {}): Promise<() => void> {
+  const [xr8, orb] = await Promise.all([loadEngine(), loadOrb({ ...inputs, solid: true })]);
 
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
 
-  // Looking at the orb through a camera feed: a faint dark dome behind its additive gold keeps it readable in daylight.
-  // It is also the target for touches, as thousands of thin lines are no good to aim at.
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(REST, 32, 16),
-    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false }),
-  );
-  dome.renderOrder = -1;
+  // An invisible dome: the target for touches, as thousands of thin lines are no good to aim at. Nothing is drawn behind
+  // the orb, so the camera feed shows right through it.
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(REST, 32, 16), new THREE.MeshBasicMaterial({ visible: false }));
   const rig = new THREE.Group();
   rig.add(dome, orb.root);
   rig.scale.setScalar(SCALE_START);
@@ -125,7 +121,8 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   // The engine sizes the canvas to the camera feed; keep it filling the screen instead (also when the phone turns).
   const layout = () => {
     canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none";
-    renderer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Pixel ratio 1: a one-pixel line is then a whole CSS pixel wide, two or three times thicker than at full density.
+    renderer?.setPixelRatio(1);
     renderer?.setSize(container.clientWidth, container.clientHeight, false);
   };
   layout();
@@ -173,12 +170,14 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   };
   const up = (event: PointerEvent) => {
     const tap = touches.size === 1 && !grabbed && !moved && performance.now() - start.at < 350;
+    const dropped = touches.size === 1 && grabbed && moved; // let go after dragging the orb somewhere new
     touches.delete(event.pointerId);
     if (touches.size < 2) pinch = null;
     if (tap) {
       const point = pick(event.clientX, event.clientY);
       if (point) putOn(point);
     }
+    if (tap || dropped) orb.reboot(); // wherever Arcanus lands, it boots up there
     grabbed = false;
   };
   canvas.addEventListener("pointerdown", down);

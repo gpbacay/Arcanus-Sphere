@@ -1021,7 +1021,7 @@ body {
 .ar-hint {
   position: absolute;
   left: 50%;
-  bottom: max(28px, env(safe-area-inset-bottom));
+  top: calc(max(var(--gap), env(safe-area-inset-top)) + 48px);
   z-index: 3;
   max-width: calc(100% - 32px);
   margin: 0;
@@ -1069,4 +1069,126 @@ body {
 .ar-qr {
   border-radius: 12px;
   background: #fff;
+}
+
+/* —— Chatting in AR: a mic button and a caption that never cover the middle of the screen —— */
+.arc {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px max(14px, env(safe-area-inset-bottom));
+  pointer-events: none; /* the camera view underneath keeps its touches; only the controls take them */
+}
+.arc > * {
+  pointer-events: auto;
+}
+.arc-caption,
+.arc-status {
+  max-width: min(520px, 100%);
+  max-height: 22dvh; /* never more than a fifth of the screen, so the orb stays in view */
+  margin: 0;
+  padding: 8px 14px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(7, 8, 10, 0.55);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 1.4;
+  text-align: left;
+  animation: arc-in 0.25s ease-out;
+}
+.arc-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+.arc-ask {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.arc-status {
+  padding: 5px 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+.arc-status[data-warn] {
+  color: var(--think);
+}
+@keyframes arc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.arc-dock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(420px, 100%);
+}
+.arc-btn,
+.arc-mic {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: rgba(7, 8, 10, 0.62);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  cursor: pointer;
+}
+.arc-btn {
+  width: 46px;
+  height: 46px;
+}
+.arc-btn:disabled {
+  opacity: 0.4;
+}
+.arc-spacer {
+  visibility: hidden;
+}
+.arc-mic {
+  width: 66px;
+  height: 66px;
+  border-color: rgba(255, 154, 46, 0.7);
+  background: rgba(255, 154, 46, 0.22);
+  color: #ffb257;
+  box-shadow: 0 0 22px rgba(255, 154, 46, 0.3);
+}
+.arc-mic[data-recording] {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: 0 0 0 0 var(--danger);
+  animation: arc-ring 1.4s ease-out infinite;
+}
+@keyframes arc-ring {
+  to {
+    box-shadow: 0 0 0 16px transparent;
+  }
+}
+.arc-input {
+  flex: 1;
+  min-width: 0;
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 23px;
+  background: rgba(7, 8, 10, 0.7);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* 16px or iOS zooms the page when the field is focused */
 }

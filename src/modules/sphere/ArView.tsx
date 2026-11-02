@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { startAr } from "./ar";
 
 /** The AR page: a camera view with Arcanus's orb placed in your space. The camera only starts after a tap. */
-export default function ArView() {
+export default function ArView({ analyser = null, activity = 0, children }: { analyser?: AnalyserNode | null; activity?: number; children?: ReactNode }) {
+  // The orb reads these every frame, so they live in refs: a new voice or busy state never restarts the camera.
+  const analyserRef = useRef(analyser);
+  const activityRef = useRef(activity);
+  useEffect(() => {
+    analyserRef.current = analyser;
+    activityRef.current = activity;
+  }, [analyser, activity]);
   const mount = useRef<HTMLDivElement>(null);
   const stopRef = useRef<(() => void) | null>(null);
   const alive = useRef(false);
@@ -41,7 +48,7 @@ export default function ArView() {
     }
     setPhase("starting");
     try {
-      const stop = await startAr(mount.current!, { onReady: () => setPhase("running"), onError: fail });
+      const stop = await startAr(mount.current!, { onReady: () => setPhase("running"), onError: fail }, { analyser: () => analyserRef.current, boost: () => activityRef.current });
       if (alive.current) stopRef.current = stop;
       else stop();
     } catch (cause) {
@@ -57,7 +64,10 @@ export default function ArView() {
         ← Arcanus
       </Link>
       {phase === "running" ? (
-        hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · pinch to resize · twist to turn</p>
+        <>
+          {hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · pinch to resize · twist to turn</p>}
+          {children}
+        </>
       ) : (
         <div className="ar-card" role="dialog" aria-label="Start AR">
           <h1>Arcanus in your space</h1>
