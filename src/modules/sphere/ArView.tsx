@@ -65,7 +65,7 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
       </Link>
       {phase === "running" ? (
         <>
-          {hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · pinch to resize · twist to turn</p>}
+          {hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · pinch to resize · twist to turn · hold out your open palm to pick it up</p>}
           {children}
         </>
       ) : (

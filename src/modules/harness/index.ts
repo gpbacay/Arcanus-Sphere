@@ -26,7 +26,7 @@ const tools = new Map<string, Tool>();
 const plugins: string[] = [];
 const sessions = new Map<string, string>();
 
-export function usePlugin(plugin: Plugin) {
+export function registerPlugin(plugin: Plugin) {
   if (!plugins.includes(plugin.name)) plugins.push(plugin.name);
   for (const tool of plugin.tools ?? []) tools.set(tool.name, tool);
 }
@@ -126,4 +126,4 @@ export async function callTool(name: string, input: string): Promise<string> {
   return `Tool ${name} has no runner.`;
 }
 
-export const harness = { personality, use: usePlugin, call: callTool, connect: connectMcp, match: matchTool, tools: listTools, plugins: listPlugins };
+export const harness = { personality, use: registerPlugin, call: callTool, connect: connectMcp, match: matchTool, tools: listTools, plugins: listPlugins };
