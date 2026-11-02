@@ -22,6 +22,10 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 180 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
 
+## Speech to text
+
+Tap the mic in the composer, talk, and tap it again: Whisper (tiny.en, ~41 MB, English) writes down what you said into the message box so you can check it before sending. It runs on-device in a worker like the other models, so it works offline after the first visit and no audio leaves the browser. The microphone needs HTTPS (or localhost).
+
 ## 3D studio and AR
 
 The orb stands in a 3D space grid. The toolbar picks what a drag does: orbit the camera, or move, rotate or resize the orb with a gizmo. Reset puts everything back.
@@ -52,6 +56,7 @@ src/
     brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
     llm/          SmolVLM: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
+    listen/       Whisper tiny.en speech to text: microphone recording + worker
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
     offline/      service worker registration, online status

@@ -361,6 +361,11 @@ body {
 .icon-btn[aria-pressed="true"] {
   color: var(--speak);
 }
+.icon-btn[data-recording] {
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: pulse 1.1s ease-in-out infinite;
+}
 .icon-btn[data-open="true"] {
   background: var(--accent-soft);
   color: var(--text);
@@ -369,7 +374,7 @@ body {
 /* —— Engines —— */
 .engines {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 6px;
   padding: 0 12px 10px;
 }

@@ -5,6 +5,7 @@
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
 import { ChatFallback, ChatPanel, hydrateChats, useBusy } from "@/modules/chat";
+import { listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
 import { Sphere } from "@/modules/sphere";
@@ -13,7 +14,7 @@ import { Boundary } from "@/shared/boundary";
 import { useStore } from "@/shared/store";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
-const ENGINES = [brainEngine, llmEngine, voiceEngine];
+const ENGINES = [brainEngine, llmEngine, voiceEngine, listenEngine];
 
 export default function Home() {
   useEffect(() => {
