@@ -1,919 +1,478 @@
 "use client";
 
-import React, { useRef, useEffect } from 'react';
-import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-interface SphereSceneProps {
+/**
+ * Arcanus's body: a holographic orb of gold circuit traces on three nested shells, loose broken rings and a 3D core.
+ * All geometry is built once; each frame the CPU only turns and resizes the parts.
+ * Every shell and every ring is its own part: it turns on its own axes at its own speed, drifting in pace and direction
+ * so no two move alike.
+ * - Idle: the parts drift slowly and faint pulses run along the traces. Now and then, a few parts at random hold still
+ *   and tick forward in small quick steps, like clockwork, then go back to turning smoothly.
+ * - Thinking (`activityBoost`): the parts turn faster, with a small flutter in size.
+ * - Speaking (`analyser`): everything whirls several times faster and shakes, and the shells, rings and core each
+ *   twitch in size at their own random moments, as if the orb were talking. The brightness stays the same.
+ */
+type Props = {
   analyser: AnalyserNode | null;
-  /** Soft ambient pulse while Arcanus is thinking (no TTS audio yet). */
+  /** 0..1: how busy Arcanus is while there is no audio yet (thinking). */
   activityBoost?: number;
+};
+
+const GOLD = new THREE.Color("#ff9a2e");
+const HOT = new THREE.Color("#fff1c9");
+
+// ------------------------------------------------------------------ geometry
+
+type Lines = { pos: number[]; along: number[]; seed: number[] };
+const newLines = (): Lines => ({ pos: [], along: [], seed: [] });
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+/** Adds a polyline as segments. `along` runs 0..1 from its start to its end, so a pulse can travel down it. */
+function polyline(out: Lines, pts: THREE.Vector3[], seed = Math.random()) {
+  const n = pts.length - 1;
+  for (let i = 0; i < n; i++) {
+    out.pos.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
+    out.along.push(i / n, (i + 1) / n);
+    out.seed.push(seed, seed);
+  }
 }
 
-const SphereScene: React.FC<SphereSceneProps> = ({ analyser, activityBoost = 0 }) => {
+const onSphere = (lat: number, lon: number, r: number) =>
+  new THREE.Vector3(r * Math.cos(lat) * Math.cos(lon), r * Math.sin(lat), r * Math.cos(lat) * Math.sin(lon));
+
+/**
+ * A circuit trace on a sphere: straight runs that turn one compass step at a time (45°, or 60° on a hex grid with
+ * dirs = 6), usually ending in a round pad.
+ */
+function trace(out: Lines, r: number, lat: number, lon: number, dirs = 8, steps = 14, step = 0.03, maxLat = 1.3) {
+  const seed = Math.random();
+  let k = Math.floor(Math.random() * dirs);
+  const pts = [onSphere(lat, lon, r)];
+  for (let s = 0; s < steps; s++) {
+    if (Math.random() < 0.3) k = (k + (Math.random() < 0.5 ? 1 : dirs - 1)) % dirs;
+    const a = (k / dirs) * Math.PI * 2;
+    if (Math.abs(lat + Math.sin(a) * step) > maxLat) break;
+    lat += Math.sin(a) * step;
+    lon += (Math.cos(a) * step) / Math.cos(lat);
+    pts.push(onSphere(lat, lon, r));
+  }
+  if (pts.length < 3) return;
+  polyline(out, pts, seed);
+  if (Math.random() < 0.55) {
+    const end = pts[pts.length - 1];
+    const n = end.clone().normalize();
+    const t1 = new THREE.Vector3(0, 1, 0).cross(n).normalize();
+    const t2 = n.clone().cross(t1);
+    const pad = r * 0.012;
+    const ring = Array.from({ length: 7 }, (_, i) => {
+      const a = (i / 6) * Math.PI * 2;
+      return end.clone().addScaledVector(t1, Math.cos(a) * pad).addScaledVector(t2, Math.sin(a) * pad);
+    });
+    polyline(out, ring, seed);
+  }
+}
+
+/** A broken circle in the XZ plane (then turned by `tilt`): arcs with gaps, stepping in and out like a circuit run. */
+function brokenRing(out: Lines, r: number, arcs: number, span: [number, number], wiggle = 0, y = 0, tilt?: THREE.Euler) {
+  const turn = tilt ? new THREE.Matrix4().makeRotationFromEuler(tilt) : null;
+  for (let i = 0; i < arcs; i++) {
+    const start = rand(0, Math.PI * 2);
+    const end = start + rand(span[0], span[1]);
+    let rr = r;
+    let yy = y;
+    const pts: THREE.Vector3[] = [];
+    for (let a = start; a <= end; a += 0.02) {
+      if (wiggle && Math.random() < 0.06) rr += (Math.random() < 0.5 ? -1 : 1) * wiggle;
+      if (wiggle && Math.random() < 0.03) yy += (Math.random() < 0.5 ? -1 : 1) * wiggle * 0.6;
+      const p = new THREE.Vector3(rr * Math.cos(a), yy, rr * Math.sin(a));
+      pts.push(turn ? p.applyMatrix4(turn) : p);
+    }
+    if (pts.length > 1) polyline(out, pts);
+  }
+}
+
+function toGeometry(lines: Lines) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(lines.pos, 3));
+  geometry.setAttribute("along", new THREE.Float32BufferAttribute(lines.along, 1));
+  geometry.setAttribute("seed", new THREE.Float32BufferAttribute(lines.seed, 1));
+  return geometry;
+}
+
+// ------------------------------------------------------------------ shaders
+
+const LINE_VERTEX = /* glsl */ `
+  attribute float along;
+  attribute float seed;
+  varying float vAlong;
+  varying float vSeed;
+  void main() {
+    vAlong = along;
+    vSeed = seed;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const LINE_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform vec3 uHot;
+  uniform float uTime;
+  uniform float uPhase;
+  uniform float uFlow;
+  uniform float uBase;
+  varying float vAlong;
+  varying float vSeed;
+  void main() {
+    float twinkle = 0.65 + 0.35 * sin(uTime * (1.0 + vSeed * 2.5) + vSeed * 50.0);
+    // A pulse of light runs down each trace, each at its own pace.
+    float head = fract(uPhase * (0.6 + vSeed * 0.8) + vSeed * 7.0);
+    float pulse = smoothstep(0.15, 0.0, abs(vAlong - head)) * uFlow;
+    // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
+    float glow = uBase * (twinkle + pulse * 4.0);
+    vec3 color = mix(uColor, uHot, clamp(pulse * 0.6, 0.0, 1.0));
+    gl_FragColor = vec4(color * glow, 1.0);
+  }
+`;
+
+// A shaded sphere for the core: brightest face-on, deeper gold toward the rim, so it reads as a ball, not a disc.
+const CORE_VERTEX = /* glsl */ `
+  varying vec3 vNormal;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const CORE_FRAGMENT = /* glsl */ `
+  uniform vec3 uColor;
+  uniform vec3 uHot;
+  uniform float uGlow;
+  varying vec3 vNormal;
+  void main() {
+    float f = pow(clamp(vNormal.z, 0.0, 1.0), 1.4);
+    gl_FragColor = vec4(mix(uColor, uHot, f) * (0.5 + 0.9 * f) * uGlow, 1.0);
+  }
+`;
+
+// ------------------------------------------------------------------ component
+
+/** At most this many parts tick like clockwork at once while idle, so it stays "some", never "all". */
+const MAX_TICKING = 5;
+
+/**
+ * A twitch: a random target in [-1, 1] picked anew every 30 to 90 ms and chased almost at once, so the value jumps
+ * from one level to another instead of gliding like a sine wave would.
+ */
+type Twitch = { target: number; value: number; next: number };
+const twitch = (): Twitch => ({ target: 0, value: 0, next: 0 });
+const tick = (w: Twitch, t: number, snap: number) => {
+  if (t >= w.next) {
+    w.target = rand(-1, 1);
+    w.next = t + rand(0.03, 0.09);
+  }
+  return (w.value += (w.target - w.value) * snap);
+};
+
+/**
+ * One part that moves on its own. It turns about its axes at `spin` rad/s, each axis drifting in pace and sometimes
+ * reversing (`rate` swings through zero). While Arcanus talks it also shakes and its size twitches by up to `size`.
+ * `axes` weights how much it turns about x, y and z: a ring mostly spins in its own plane.
+ */
+type Mover = {
+  obj: THREE.Object3D;
+  spin: number;
+  axes: [number, number, number];
+  drift: number[];
+  phase: number[];
+  bias: number[];
+  size: number;
+  twitch: Twitch;
+  // Clockwork: for stretches at random, an idle part holds still and moves in small quick steps instead of turning
+  // smoothly. `want` is where its smooth turn has got to, `held` the last step, `shown` what is drawn.
+  ticking: boolean;
+  until: number;
+  period: number;
+  nextTick: number;
+  ready: boolean;
+  want: number[];
+  held: number[];
+  shown: number[];
+};
+
+const mover = (obj: THREE.Object3D, spin: number, size: number, axes: [number, number, number] = [1, 1, 1]): Mover => ({
+  obj,
+  spin,
+  axes,
+  drift: [rand(0.05, 0.35), rand(0.05, 0.35), rand(0.05, 0.35)],
+  phase: [rand(0, 6.3), rand(0, 6.3), rand(0, 6.3)],
+  bias: [rand(-0.7, 0.7), rand(-0.7, 0.7), rand(-0.7, 0.7)],
+  size,
+  twitch: twitch(),
+  ticking: Math.random() < 0.3,
+  until: rand(0, 5),
+  period: rand(0.3, 1.1),
+  nextTick: 0,
+  ready: false,
+  want: [0, 0, 0],
+  held: [0, 0, 0],
+  shown: [0, 0, 0],
+});
+
+export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const activityBoostRef = useRef(0);
-  // Track previous scale to determine expansion/shrinking
-  const prevScaleRef = useRef(1.0);
+  const boostRef = useRef(0);
 
-  // Update the ref whenever the prop changes so the render loop has access to the latest analyser
   useEffect(() => {
     analyserRef.current = analyser;
   }, [analyser]);
 
   useEffect(() => {
-    activityBoostRef.current = Math.max(0, Math.min(1, activityBoost));
+    boostRef.current = Math.max(0, Math.min(1, activityBoost));
   }, [activityBoost]);
 
   useEffect(() => {
-    if (!mountRef.current) return;
+    const mount = mountRef.current;
+    if (!mount) return;
 
-    let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, innerParticleGroup: THREE.Group, middleParticleGroup: THREE.Group, bloomComposer: EffectComposer, finalComposer: EffectComposer, controls: OrbitControls;
-    let bloomPass: UnrealBloomPass;
-    let innerSphere: THREE.Mesh;
-    const BLOOM_LAYER = 1;
-    const bloomLayer = new THREE.Layers();
-    bloomLayer.set(BLOOM_LAYER);
-    const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const bloomMaterialCache: Record<string, THREE.Material | THREE.Material[]> = {};
-    let animationId: number;
-    let time = 0;
-    const innerParticleCount = 5000;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 1);
+    mount.appendChild(renderer.domElement);
 
-    // Lightning effect variables
-    const lightningBolts: THREE.Mesh[] = [];
-    const maxLightningConnections = 80;
-    const lightningThickness = 0.0008;
-    const boltLife: number[] = new Array(maxLightningConnections).fill(0);
-    const boltMaxLifes: number[] = new Array(maxLightningConnections).fill(1);
-    const boltTrackData: { startIdx: number; endIdx: number; startLayer: 'core' | 'inner' | 'middle'; endLayer: 'inner' | 'middle' }[] = new Array(maxLightningConnections).fill(null);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 3.9);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.enablePan = false;
+    controls.minDistance = 2.2;
+    controls.maxDistance = 9;
 
-    // Chain reaction state
-    type ActiveTip = { idx: number; layer: 'core' | 'inner' | 'middle'; remainingBranches: number; chainDepth: number };
-    const activeTips: ActiveTip[] = [];
-
-    // To store geometries for access in render loop
-    let middleGeometry: THREE.BufferGeometry;
-    let innerGeometry: THREE.BufferGeometry;
-    let wireframeSphere: THREE.LineSegments;
-
-    // Store original positions for organic movement calculations
-    let middleOriginalPositions: Float32Array;
-    let innerOriginalPositions: Float32Array;
-    let middleOriginalColors: Float32Array;
-    let innerOriginalColors: Float32Array;
-
-    // Random phases for each particle to desynchronize their movement
-    let middlePhases: Float32Array;
-    let innerPhases: Float32Array;
-
-    // Reusable array for frequency data to avoid garbage collection
-    const dataArray = new Uint8Array(256);
-
-    // Crisp circular sprite so Points render as round dots (minimal soft halo)
-    const createCircleTexture = () => {
-      const size = 64;
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
-
-      const center = size / 2;
-      const radius = size * 0.42;
-      const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius);
-      gradient.addColorStop(0, 'rgba(255,255,255,1)');
-      gradient.addColorStop(0.65, 'rgba(255,255,255,1)');
-      gradient.addColorStop(0.85, 'rgba(255,255,255,0.55)');
-      gradient.addColorStop(1, 'rgba(255,255,255,0)');
-
-      ctx.clearRect(0, 0, size, size);
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(center, center, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.needsUpdate = true;
-      return texture;
+    // Shared uniforms: every material reads the same objects, so one write per frame drives them all.
+    const shared = {
+      uColor: { value: GOLD },
+      uHot: { value: HOT },
+      uTime: { value: 0 },
+      uPhase: { value: 0 },
+      uFlow: { value: 0.35 },
     };
-
-    const darkenNonBloomed = (obj: THREE.Object3D) => {
-      if (
-        (obj instanceof THREE.Mesh ||
-          obj instanceof THREE.Points ||
-          obj instanceof THREE.LineSegments) &&
-        bloomLayer.test(obj.layers) === false
-      ) {
-        bloomMaterialCache[obj.uuid] = obj.material;
-        obj.material = darkMaterial;
-      }
-    };
-
-    const restoreBloomMaterial = (obj: THREE.Object3D) => {
-      const cached = bloomMaterialCache[obj.uuid];
-      if (!cached) return;
-      if (
-        obj instanceof THREE.Mesh ||
-        obj instanceof THREE.Points ||
-        obj instanceof THREE.LineSegments
-      ) {
-        obj.material = cached;
-      }
-      delete bloomMaterialCache[obj.uuid];
-    };
-
-    let particleTexture: THREE.CanvasTexture | null = null;
-
-    const setupScene = () => {
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      mountRef.current?.appendChild(renderer.domElement);
-
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
-      controls.enableZoom = true;
-      controls.enablePan = false;
-      camera.position.z = 5;
-
-      // Create inner glowing sphere (solid core) -> Smaller radius 0.15
-      const innerSphereGeometry = new THREE.SphereGeometry(0.08, 64, 64);
-      const innerSphereMaterial = new THREE.MeshBasicMaterial({
-        color: 0x6e8efb,
-        transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending
-      });
-      innerSphere = new THREE.Mesh(innerSphereGeometry, innerSphereMaterial);
-      innerSphere.layers.enable(BLOOM_LAYER);
-      scene.add(innerSphere);
-
-      // Palette
-      const palette = [
-        new THREE.Color("#B9DFE0"),
-        new THREE.Color("#F294C0"),
-        new THREE.Color("#C785F2"),
-        new THREE.Color("#835BD9"),
-        new THREE.Color("#9DE4FA")
-      ];
-
-      // Hex Core Wireframe Cage
-      const wireframeGeo = new THREE.IcosahedronGeometry(0.14, 1);
-      const wireframeEdges = new THREE.WireframeGeometry(wireframeGeo);
-      const wireframeMaterial = new THREE.LineBasicMaterial({
-        color: 0x9DE4FA,
-        transparent: true,
-        opacity: 0.5,
-        blending: THREE.AdditiveBlending
-      });
-      wireframeSphere = new THREE.LineSegments(wireframeEdges, wireframeMaterial);
-      wireframeSphere.layers.enable(BLOOM_LAYER);
-      scene.add(wireframeSphere);
-
-
-      // Create middle particle sphere layer (Volumetric)
-      const middleParticleCount = 3500;
-      const middlePositionsArray = new Float32Array(middleParticleCount * 3);
-      const middleColors = new Float32Array(middleParticleCount * 3);
-
-      middleOriginalPositions = new Float32Array(middleParticleCount * 3);
-      middlePhases = new Float32Array(middleParticleCount);
-
-      for (let i = 0; i < middleParticleCount; i++) {
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        // Volumetric distribution: Radius varies between 0.35 and 0.55
-        const r = 0.35 + Math.random() * 0.2;
-
-        const x = r * Math.sin(phi) * Math.cos(theta);
-        const y = r * Math.sin(phi) * Math.sin(theta);
-        const z = r * Math.cos(phi);
-
-        middlePositionsArray[i * 3] = x;
-        middlePositionsArray[i * 3 + 1] = y;
-        middlePositionsArray[i * 3 + 2] = z;
-
-        // Store original
-        middleOriginalPositions[i * 3] = x;
-        middleOriginalPositions[i * 3 + 1] = y;
-        middleOriginalPositions[i * 3 + 2] = z;
-
-        middlePhases[i] = Math.random() * Math.PI * 2;
-
-        const color = palette[Math.floor(Math.random() * palette.length)];
-        middleColors[i * 3] = color.r;
-        middleColors[i * 3 + 1] = color.g;
-        middleColors[i * 3] = color.r;
-        middleColors[i * 3 + 1] = color.g;
-        middleColors[i * 3 + 2] = color.b;
-      }
-
-      // Save original colors for restoration
-      middleOriginalColors = new Float32Array(middleColors);
-
-      middleGeometry = new THREE.BufferGeometry();
-      middleGeometry.setAttribute('position', new THREE.BufferAttribute(middlePositionsArray, 3));
-      middleGeometry.setAttribute('color', new THREE.BufferAttribute(middleColors, 3));
-
-      particleTexture = createCircleTexture();
-
-      const middleMaterial = new THREE.PointsMaterial({
-        size: 0.018,
-        map: particleTexture ?? undefined,
-        vertexColors: true,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.75,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      });
-
-      const middleParticles = new THREE.Points(middleGeometry, middleMaterial);
-      middleParticleGroup = new THREE.Group();
-      middleParticleGroup.add(middleParticles);
-      scene.add(middleParticleGroup);
-
-      // Inner particle cloud (Volumetric and overlapping)
-      const innerPositionsArray = new Float32Array(innerParticleCount * 3);
-      const innerColors = new Float32Array(innerParticleCount * 3);
-
-      innerOriginalPositions = new Float32Array(innerParticleCount * 3);
-      innerPhases = new Float32Array(innerParticleCount);
-
-      for (let i = 0; i < innerParticleCount; i++) {
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        // Volumetric distribution: Radius varies between 0.5 and 0.8
-        // Note: In original code "inner" was actually larger radius (0.6) than "middle" (0.43).
-        // We keep this hierarchy but make it volumetric.
-        const r = 0.5 + Math.random() * 0.3;
-
-        const x = r * Math.sin(phi) * Math.cos(theta);
-        const y = r * Math.sin(phi) * Math.sin(theta);
-        const z = r * Math.cos(phi);
-
-        innerPositionsArray[i * 3] = x;
-        innerPositionsArray[i * 3 + 1] = y;
-        innerPositionsArray[i * 3 + 2] = z;
-
-        // Store original
-        innerOriginalPositions[i * 3] = x;
-        innerOriginalPositions[i * 3 + 1] = y;
-        innerOriginalPositions[i * 3 + 2] = z;
-
-        innerPhases[i] = Math.random() * Math.PI * 2;
-
-        const color = palette[Math.floor(Math.random() * palette.length)];
-        innerColors[i * 3] = color.r;
-        innerColors[i * 3 + 1] = color.g;
-        innerColors[i * 3] = color.r;
-        innerColors[i * 3 + 1] = color.g;
-        innerColors[i * 3 + 2] = color.b;
-      }
-
-      // Save original colors for restoration
-      innerOriginalColors = new Float32Array(innerColors);
-
-      innerGeometry = new THREE.BufferGeometry();
-      innerGeometry.setAttribute('position', new THREE.BufferAttribute(innerPositionsArray, 3));
-      innerGeometry.setAttribute('color', new THREE.BufferAttribute(innerColors, 3));
-
-      const innerMaterial = new THREE.PointsMaterial({
-        size: 0.022,
-        map: particleTexture ?? undefined,
-        vertexColors: true,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      });
-
-      const innerParticles = new THREE.Points(innerGeometry, innerMaterial);
-      innerParticleGroup = new THREE.Group();
-      innerParticleGroup.add(innerParticles);
-      scene.add(innerParticleGroup);
-
-      const ambientLight = new THREE.AmbientLight(0x101010, 0.1);
-      scene.add(ambientLight);
-
-      // Selective bloom: only objects on BLOOM_LAYER (core + wireframe)
-      const renderScene = new RenderPass(scene, camera);
-      bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(window.innerWidth, window.innerHeight),
-        1.4,
-        0.55,
-        0.2
-      );
-
-      bloomComposer = new EffectComposer(renderer);
-      bloomComposer.renderToScreen = false;
-      bloomComposer.addPass(renderScene);
-      bloomComposer.addPass(bloomPass);
-
-      const mixPass = new ShaderPass(
+    const segments = (lines: Lines, base: number) =>
+      new THREE.LineSegments(
+        toGeometry(lines),
         new THREE.ShaderMaterial({
-          uniforms: {
-            baseTexture: { value: null },
-            bloomTexture: { value: bloomComposer.renderTarget2.texture }
-          },
-          vertexShader: `
-            varying vec2 vUv;
-            void main() {
-              vUv = uv;
-              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-          `,
-          fragmentShader: `
-            uniform sampler2D baseTexture;
-            uniform sampler2D bloomTexture;
-            varying vec2 vUv;
-            void main() {
-              vec4 base = texture2D(baseTexture, vUv);
-              vec4 bloom = texture2D(bloomTexture, vUv);
-              gl_FragColor = vec4(base.rgb + bloom.rgb, base.a);
-            }
-          `
-        }),
-        'baseTexture'
-      );
-      mixPass.needsSwap = true;
-
-      finalComposer = new EffectComposer(renderer);
-      finalComposer.addPass(renderScene);
-      finalComposer.addPass(mixPass);
-
-      // Setup Lightning Bolts
-      const boltHeight = 1;
-      const boltGeometry = new THREE.CylinderGeometry(lightningThickness, lightningThickness, boltHeight, 6);
-
-      for (let i = 0; i < maxLightningConnections; i++) {
-        const boltMaterial = new THREE.MeshBasicMaterial({
-          color: 0xaecbe8,
+          uniforms: { ...shared, uBase: { value: base } },
+          vertexShader: LINE_VERTEX,
+          fragmentShader: LINE_FRAGMENT,
           transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending
-        });
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+      );
 
-        const bolt = new THREE.Mesh(boltGeometry, boltMaterial);
-        bolt.visible = false;
-        scene.add(bolt);
-        lightningBolts.push(bolt);
-      }
-
+    const movers: Mover[] = [];
+    const part = (spin: number, size: number, axes?: [number, number, number], parent: THREE.Object3D = scene) => {
+      const g = new THREE.Group();
+      parent.add(g);
+      movers.push(mover(g, spin, size, axes));
+      return g;
     };
+    const ringAxes: [number, number, number] = [0.35, 1, 0.35];
 
-    const resizeShape = (forceRender = true) => {
+    // Outer shell: dense circuit bands around both caps, sparse traces between them.
+    const outerLines = newLines();
+    for (let i = 0; i < 320; i++) trace(outerLines, 1, rand(0.72, 1.22) * (i % 2 ? 1 : -1), rand(0, Math.PI * 2), 8, 16, 0.028);
+    for (let i = 0; i < 140; i++) trace(outerLines, 1, rand(-0.7, 0.7), rand(0, Math.PI * 2), 8, 12, 0.03);
+    for (const side of [1, -1]) {
+      for (let i = 0; i < 4; i++) {
+        const lat = (0.66 + i * 0.05) * side;
+        brokenRing(outerLines, Math.cos(lat) * 1.02, 5, [0.4, 1.8], 0, Math.sin(lat) * 1.02);
+      }
+    }
+    part(rand(0.08, 0.14), 0.07).add(segments(outerLines, 0.13));
+
+    // Middle shell.
+    const middleLines = newLines();
+    for (let i = 0; i < 380; i++) trace(middleLines, 0.78, rand(-1.25, 1.25), rand(0, Math.PI * 2), 8, 12, 0.032);
+    part(rand(0.14, 0.22), 0.11).add(segments(middleLines, 0.08));
+
+    // Inner shell: a dense hex-grid circuit.
+    const innerLines = newLines();
+    for (let i = 0; i < 240; i++) trace(innerLines, 0.44, rand(-1.3, 1.3), rand(0, Math.PI * 2), 6, 9, 0.05);
+    part(rand(0.2, 0.32), 0.15).add(segments(innerLines, 0.11));
+
+    // A band of rings around the orb, almost edge-on: four rings, each on its own tilt and its own speed.
+    for (let k = 0; k < 4; k++) {
+      const lines = newLines();
+      const inner = 1.04 + k * 0.1;
+      for (let i = 0; i < 18; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, [0.4, 2.6], 0.012, rand(-0.02, 0.02));
+      const ring = part(rand(0.25, 0.6), 0.06, ringAxes);
+      ring.rotation.set(rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
+      ring.add(segments(lines, 0.14));
+    }
+
+    // Broken halo circles, roughly facing the camera, each turning on its own.
+    for (let k = 0; k < 4; k++) {
+      const lines = newLines();
+      for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 4, [0.3, 1.4], 0.006);
+      const halo = part(rand(0.1, 0.35), 0.05, ringAxes);
+      halo.rotation.set(Math.PI / 2 + rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
+      halo.add(segments(lines, 0.16));
+    }
+
+    // The core, all in 3D so it reads from any angle: a glowing sphere inside a small cage and three gimbal rings,
+    // each turning on its own. While Arcanus talks the whole core swells and shrinks.
+    const core = new THREE.Group();
+    scene.add(core);
+    const coreGlow = { value: 1 };
+    core.add(
+      new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 32, 32),
+        new THREE.ShaderMaterial({
+          uniforms: { ...shared, uGlow: coreGlow },
+          vertexShader: CORE_VERTEX,
+          fragmentShader: CORE_FRAGMENT,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+      )
+    );
+    const cageLines = newLines();
+    const cage = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.11, 1)).attributes.position;
+    for (let i = 0; i < cage.count; i += 2) {
+      polyline(cageLines, [new THREE.Vector3().fromBufferAttribute(cage, i), new THREE.Vector3().fromBufferAttribute(cage, i + 1)]);
+    }
+    part(rand(0.3, 0.5), 0.1, undefined, core).add(segments(cageLines, 0.7));
+    for (const r of [0.15, 0.19, 0.23]) {
+      const lines = newLines();
+      brokenRing(lines, r, 3, [1.2, 3], 0.004);
+      const ring = part(rand(0.6, 1.4), 0.15, undefined, core);
+      ring.rotation.set(rand(0, Math.PI), rand(0, Math.PI * 2), 0);
+      ring.add(segments(lines, 0.9));
+    }
+
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.35, 0.08));
+    composer.addPass(new OutputPass());
+
+    const onResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-      if (bloomComposer) {
-        bloomComposer.setSize(window.innerWidth, window.innerHeight);
-      }
-      if (finalComposer) {
-        finalComposer.setSize(window.innerWidth, window.innerHeight);
-      }
-      if (forceRender) render();
+      composer.setSize(window.innerWidth, window.innerHeight);
     };
+    window.addEventListener("resize", onResize);
 
-    const onResize = () => resizeShape();
-
-    const getAverage = (data: Uint8Array, start: number, end: number) => {
-      let sum = 0;
-      for (let i = start; i < end; i++) {
-        sum += data[i];
-      }
-      return sum / (end - start);
-    };
-
-    // Dynamic Rotation Vectors (Random direction and speed)
-    const innerRotVel = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.02,
-      (Math.random() - 0.5) * 0.02,
-      (Math.random() - 0.5) * 0.02
-    );
-
-    // Smoothed audio — calm particles; snappy core for talk/beat
-    let smoothBass = 0;
-    let smoothMid = 0;
-    let smoothTreble = 0;
-    let smoothVocalEnv = 0; // fast open/close for "talking"
-    let vocalFloor = 0; // slow baseline so sustained pads don't lock size open
-    let smoothBeat = 0; // quick bass thump
-
-    const easeToward = (current: number, target: number, attack: number, release: number) =>
-      current + (target - current) * (target > current ? attack : release);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motion = reduced ? 0.25 : 1;
+    const spectrum = new Uint8Array(256);
+    const ease = (from: number, to: number, attack: number, release: number) => from + (to - from) * (to > from ? attack : release);
+    let talk = 0;
+    let boost = 0;
+    const coreTwitch = twitch();
+    const clock = new THREE.Clock();
+    let frame = 0;
 
     const render = () => {
-      time += 0.007 + smoothBass * 0.003 + smoothTreble * 0.004;
-      animationId = requestAnimationFrame(render);
-
+      frame = requestAnimationFrame(render);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = (shared.uTime.value += dt);
       controls.update();
 
-      let bass = 0;
-      let mid = 0;
-      let treble = 0;
-
-      if (analyserRef.current) {
-        analyserRef.current.getByteFrequencyData(dataArray);
-        bass = getAverage(dataArray, 0, 10) / 255;
-        mid = getAverage(dataArray, 10, 80) / 255;
-        treble = getAverage(dataArray, 80, 200) / 255;
-      } else if (activityBoostRef.current > 0.01) {
-        // Thinking / generating — gentle synthetic pulse so the sphere stays alive
-        const t = time * 2.4;
-        const boost = activityBoostRef.current;
-        bass = (0.18 + 0.12 * Math.sin(t * 0.7)) * boost;
-        mid = (0.28 + 0.2 * Math.sin(t * 1.6 + 0.4)) * boost;
-        treble = (0.22 + 0.18 * Math.sin(t * 2.8 + 1.1)) * boost;
+      // Voice: the overall level over the speech range says whether Arcanus is talking.
+      const live = analyserRef.current;
+      let level = 0;
+      if (live) {
+        live.getByteFrequencyData(spectrum);
+        for (let i = 1; i < 40; i++) level += spectrum[i];
+        level /= 39 * 255;
       }
+      talk = ease(talk, Math.min(1, Math.max(0, (level - 0.1) * 2.5)), 0.7, 0.3);
+      boost = ease(boost, boostRef.current, 0.05, 0.05);
 
-      // Softer attack so particle motion stays calm
-      smoothBass = easeToward(smoothBass, bass, 0.22, 0.1);
-      smoothMid = easeToward(smoothMid, mid, 0.18, 0.09);
-      smoothTreble = easeToward(smoothTreble, treble, 0.25, 0.11);
+      const busy = Math.max(talk, boost);
+      shared.uFlow.value = 0.35 + 0.15 * busy;
+      shared.uPhase.value += dt * (0.15 + boost * 0.3 + talk * 0.8);
 
-      const bassPunch = smoothBass * 0.85 + bass * 0.15;
-      const treblePunch = smoothTreble * 0.8 + treble * 0.2;
-
-      // --- Center orb: talk (mid/treble) + beat (bass) ---
-      // Vocals/sibilance only — ignore bass so music beds don't permanently inflate it
-      const vocalRaw = mid * 0.72 + treble * 0.48;
-      vocalFloor = easeToward(vocalFloor, vocalRaw, 0.035, 0.018);
-      // Energy above the slow floor = syllables / consonants (opens then closes)
-      const vocalDelta = Math.max(0, vocalRaw - vocalFloor * 0.88);
-      const gatedVocal = vocalDelta > 0.035 ? vocalDelta : vocalDelta * 0.12;
-      // Fast attack AND release so it looks like talking, not just swelling
-      smoothVocalEnv = easeToward(smoothVocalEnv, gatedVocal, 0.58, 0.42);
-
-      // Beat: brief kick pulse, decays quickly between hits
-      const beatTarget = bass > smoothBass + 0.04 ? bass : bass * 0.25;
-      smoothBeat = easeToward(smoothBeat, beatTarget, 0.55, 0.28);
-
-      const talkPulse = smoothVocalEnv * 0.62;
-      const beatPulse = smoothBeat * 0.14;
-      // Returns to ~1.0 between syllables/beats instead of staying large
-      const coreScale = 1 + talkPulse + beatPulse;
-
-      prevScaleRef.current = coreScale;
-
-      // Animate inner solid sphere
-      if (innerSphere) {
-        innerSphere.scale.setScalar(coreScale);
-        (innerSphere.material as THREE.MeshBasicMaterial).opacity =
-          0.55 + smoothVocalEnv * 0.35 + smoothBeat * 0.1;
-        const r = 110 + smoothBeat * 80 + smoothVocalEnv * 40;
-        const g = 142 + smoothMid * 70;
-        const b = 251 - smoothTreble * 90;
-        (innerSphere.material as THREE.MeshBasicMaterial).color.setRGB(r / 255, g / 255, b / 255);
-
-        innerSphere.rotation.x += innerRotVel.x + (bassPunch * 0.008 * Math.sign(innerRotVel.x));
-        innerSphere.rotation.y += innerRotVel.y + (bassPunch * 0.008 * Math.sign(innerRotVel.y));
-        innerSphere.rotation.z += innerRotVel.z + (bassPunch * 0.008 * Math.sign(innerRotVel.z));
-      }
-
-      // Animate Wireframe — follows the same talk/beat mouth motion
-      if (wireframeSphere) {
-        wireframeSphere.scale.setScalar(coreScale * 1.08);
-        wireframeSphere.rotation.x -= 0.004 + treblePunch * 0.003;
-        wireframeSphere.rotation.y += 0.004 + bassPunch * 0.003;
-        wireframeSphere.rotation.z += 0.0015;
-        (wireframeSphere.material as THREE.LineBasicMaterial).opacity =
-          0.28 + smoothVocalEnv * 0.45 + smoothBeat * 0.15;
-      }
-
-      // --- Calm audio-reactive particle motion ---
-      // Bass → gentle radial breath + swirl | Treble → soft shimmer (kept near center)
-
-      const updateParticles = (
-        geometry: THREE.BufferGeometry,
-        originalPos: Float32Array,
-        phases: Float32Array,
-        bassAmt: number,
-        trebleAmt: number,
-        midAmt: number,
-        speedMod: number,
-        freqStart: number,
-        freqEnd: number
-      ) => {
-        const positions = geometry.attributes.position.array as Float32Array;
-        const count = positions.length / 3;
-        const freqSpan = Math.max(1, freqEnd - freqStart);
-
-        const moveScale = 0.02 + bassAmt * 0.035 + midAmt * 0.015;
-        const speedBoost = 1 + bassAmt * 0.25 + trebleAmt * 0.35;
-        const timeS = time * speedMod * speedBoost;
-        // Keep radial expansion subtle so particles stay near the orb
-        const bassPulse = bassAmt * bassAmt * 0.04 + bassAmt * 0.03;
-        const breatheAmp = 0.012 + bassAmt * 0.025 + midAmt * 0.01;
-        const swirlAmp = 0.008 + bassAmt * 0.02 + midAmt * 0.008;
-        const trebleFlutter = trebleAmt * trebleAmt * 0.015 + trebleAmt * 0.008;
-        const trebleSpeed = 2.2 + trebleAmt * 2.5;
-
-        for (let i = 0; i < count; i++) {
-          const ix = i * 3;
-          const ox = originalPos[ix];
-          const oy = originalPos[ix + 1];
-          const oz = originalPos[ix + 2];
-          const phase = phases[i];
-
-          const bin = freqStart + Math.floor((i / count) * freqSpan);
-          const localEnergy = dataArray[bin] / 255;
-          const localBass = localEnergy * bassAmt;
-          const localTreble = localEnergy * trebleAmt;
-
-          const t1 = timeS + phase;
-          const t2 = timeS * 0.73 + phase * 1.37;
-          const t3 = timeS * 1.19 + phase * 0.61;
-
-          let dx =
-            Math.sin(t1 + oy * 2.4) * moveScale +
-            Math.sin(t2 + oz * 1.8) * moveScale * 0.45 +
-            Math.cos(t3 + ox * 1.2) * moveScale * 0.25;
-          let dy =
-            Math.cos(t1 * 0.92 + oz * 2.4) * moveScale +
-            Math.cos(t3 + ox * 1.9) * moveScale * 0.45 +
-            Math.sin(t2 + oy * 1.3) * moveScale * 0.25;
-          let dz =
-            Math.sin(t2 + ox * 2.4) * moveScale +
-            Math.sin(t1 * 1.08 + oy * 1.7) * moveScale * 0.45 +
-            Math.cos(t3 + oz * 1.4) * moveScale * 0.25;
-
-          const len = Math.sqrt(ox * ox + oy * oy + oz * oz) || 1;
-          const nx = ox / len;
-          const ny = oy / len;
-          const nz = oz / len;
-
-          // Gentle bass breath — stays close to home radius
-          const pulse =
-            bassPulse * (0.75 + 0.25 * Math.sin(phase * 2.0)) +
-            localBass * 0.02;
-          dx += nx * pulse;
-          dy += ny * pulse;
-          dz += nz * pulse;
-
-          const breathe =
-            Math.sin(timeS * (0.45 + bassAmt * 0.4) + phase) * breatheAmp +
-            Math.sin(timeS * 0.9 + phase * 2.0) * breatheAmp * 0.3;
-          dx += nx * breathe;
-          dy += ny * breathe;
-          dz += nz * breathe;
-
-          // Soft swirl (orbital, not explosive)
-          const swirl = Math.sin(t1 * (0.5 + bassAmt * 0.3)) * swirlAmp;
-          dx += (-oy) * swirl * 0.55;
-          dy += ox * swirl * 0.55;
-          dz += Math.cos(t2 * 0.45) * swirlAmp * 0.25;
-
-          // Soft treble shimmer
-          if (trebleFlutter > 0.0005) {
-            const tf = trebleFlutter + localTreble * 0.01;
-            dx += Math.sin(timeS * trebleSpeed + phase * 2.4) * tf;
-            dy += Math.cos(timeS * (trebleSpeed * 0.9) + phase * 1.8) * tf;
-            dz += Math.sin(timeS * (trebleSpeed * 1.05) + phase * 1.4) * tf;
-          }
-
-          positions[ix] = ox + dx;
-          positions[ix + 1] = oy + dy;
-          positions[ix + 2] = oz + dz;
+      // Each part: its own drifting turn, much faster while talking, with a random shake on top and a twitching size.
+      // Thinking only flutters a little and slowly: the twitch is smoothed harder for it.
+      const pace = (1 + boost * 2.5 + talk * 7) * motion * dt;
+      const shake = talk * 0.045 * motion * dt * 60;
+      const flutter = Math.max(talk, boost * 0.35) * motion;
+      const snap = 1 - Math.exp(-dt * (boost > talk ? 12 : 45));
+      let ticking = 0;
+      for (const m of movers) if (m.ticking) ticking++;
+      const tickSnap = 1 - Math.exp(-dt * 30);
+      const easeSnap = 1 - Math.exp(-dt * (busy > 0.15 ? 40 : 10));
+      for (const m of movers) {
+        const { rotation } = m.obj;
+        if (!m.ready) {
+          m.want = [rotation.x, rotation.y, rotation.z];
+          m.held = [...m.want];
+          m.shown = [...m.want];
+          m.ready = true;
         }
-        geometry.attributes.position.needsUpdate = true;
-      };
-
-      if (middleParticleGroup && middleGeometry) {
-        middleParticleGroup.rotation.y += 0.0008 + bassPunch * 0.004 + treblePunch * 0.0015;
-        middleParticleGroup.rotation.z += 0.0004 + bassPunch * 0.002;
-        middleParticleGroup.rotation.x += treblePunch * 0.001;
-        middleParticleGroup.scale.setScalar(1 + bassPunch * 0.06 + treblePunch * 0.02);
-        updateParticles(
-          middleGeometry,
-          middleOriginalPositions,
-          middlePhases,
-          bassPunch,
-          treblePunch,
-          smoothMid,
-          0.75,
-          0,
-          40
-        );
-      }
-
-      if (innerParticleGroup && innerGeometry) {
-        innerParticleGroup.rotation.y -= 0.001 + treblePunch * 0.0035 + bassPunch * 0.002;
-        innerParticleGroup.rotation.x += 0.0005 + treblePunch * 0.0015;
-        innerParticleGroup.rotation.z -= bassPunch * 0.0015;
-        innerParticleGroup.scale.setScalar(1 + bassPunch * 0.08 + treblePunch * 0.03);
-        updateParticles(
-          innerGeometry,
-          innerOriginalPositions,
-          innerPhases,
-          bassPunch * 0.75,
-          treblePunch,
-          smoothMid,
-          0.95,
-          40,
-          200
-        );
-      }
-
-
-      // Update Lightning Effect
-      if (middleParticleGroup && innerParticleGroup && middleGeometry && innerGeometry) {
-        const middlePositions = middleGeometry.attributes.position.array as Float32Array;
-        const innerPositions = innerGeometry.attributes.position.array as Float32Array;
-
-        middleParticleGroup.updateMatrixWorld();
-        innerParticleGroup.updateMatrixWorld();
-
-        // Focus on vocal range (Mid/Treble) for "speaking"
-        // Bass is usually environmental/beat, not the "voice"
-        // Reset colors to original before applying highlights
-        if (middleOriginalColors) {
-          (middleGeometry.attributes.color.array as Float32Array).set(middleOriginalColors);
-          middleGeometry.attributes.color.needsUpdate = true;
+        // Each part keeps turning smoothly in `want`; it is drawn from there, or stepped in clockwork fashion.
+        for (let i = 0; i < 3; i++) {
+          m.want[i] += pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.axes[i];
         }
-        if (innerOriginalColors) {
-          (innerGeometry.attributes.color.array as Float32Array).set(innerOriginalColors);
-          innerGeometry.attributes.color.needsUpdate = true;
-        }
-
-        // Focus on vocal range (Mid/Treble) for "speaking"
-        // Bass is usually environmental/beat, not the "voice"
-        const vocalIntensity = smoothMid + smoothTreble * 0.7;
-        const isSpeaking = vocalIntensity > 0.2; // Higher threshold to strictly catch "speaking"
-
-        // Active count based on vocal intensity
-        const activeConnections = isSpeaking ? Math.floor(Math.min(maxLightningConnections, vocalIntensity * 120)) : 0;
-        const freeBoltSlots: number[] = [];
-
-        const placeBolt = (
-          boltIndex: number,
-          startIdx: number,
-          endIdx: number,
-          startLayer: 'core' | 'inner' | 'middle',
-          endLayer: 'inner' | 'middle'
-        ) => {
-          const bolt = lightningBolts[boltIndex];
-          if (!bolt) return;
-
-          boltTrackData[boltIndex] = { startIdx, endIdx, startLayer, endLayer };
-          const newLife = Math.floor(Math.random() * 15) + 10;
-          boltLife[boltIndex] = newLife;
-          boltMaxLifes[boltIndex] = newLife;
-
-          const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
-          const endGroup = endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-          const v2 = new THREE.Vector3(
-            endArr[endIdx * 3],
-            endArr[endIdx * 3 + 1],
-            endArr[endIdx * 3 + 2]
-          );
-          v2.applyMatrix4(endGroup.matrixWorld);
-
-          const v1 = new THREE.Vector3();
-          if (startLayer === 'core') {
-            const coreRadius = 0.08 * (innerSphere ? innerSphere.scale.x : 1);
-            v1.copy(v2).normalize().multiplyScalar(coreRadius);
+        if (t >= m.until) {
+          if (!m.ticking && ticking >= MAX_TICKING) {
+            m.until = t + rand(1, 3); // enough parts are ticking already: wait
           } else {
-            const startArr = startLayer === 'inner' ? innerPositions : middlePositions;
-            const startGroup = startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-            v1.set(startArr[startIdx * 3], startArr[startIdx * 3 + 1], startArr[startIdx * 3 + 2]);
-            v1.applyMatrix4(startGroup.matrixWorld);
-          }
-
-          const distance = v1.distanceTo(v2);
-          const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
-          bolt.position.copy(midpoint);
-          bolt.lookAt(v2);
-          bolt.rotateX(Math.PI / 2);
-          bolt.scale.set(1, distance, 1);
-          bolt.visible = true;
-          (bolt.material as THREE.MeshBasicMaterial).opacity = 1.0;
-
-          // Highlight impact particle
-          const targetGeometry = endLayer === 'inner' ? innerGeometry : middleGeometry;
-          const colors = targetGeometry.attributes.color.array as Float32Array;
-          const cIdx = endIdx * 3;
-          colors[cIdx] = 1.0;
-          colors[cIdx + 1] = 1.0;
-          colors[cIdx + 2] = 1.0;
-          targetGeometry.attributes.color.needsUpdate = true;
-        };
-
-        const pickEndTarget = (avoidIdx: number, avoidLayer: 'core' | 'inner' | 'middle') => {
-          const endLayer: 'inner' | 'middle' = Math.random() > 0.6 ? 'inner' : 'middle';
-          const endArr = endLayer === 'inner' ? innerPositions : middlePositions;
-          const endCount = endArr.length / 3;
-          let endIdx = Math.floor(Math.random() * endCount);
-          // Avoid self-connection when jumping within the same layer
-          if (avoidLayer === endLayer && endCount > 1) {
-            let guard = 0;
-            while (endIdx === avoidIdx && guard++ < 8) {
-              endIdx = Math.floor(Math.random() * endCount);
-            }
-          }
-          return { endLayer, endIdx };
-        };
-
-        for (let i = 0; i < maxLightningConnections; i++) {
-          const bolt = lightningBolts[i];
-          if (!bolt) continue;
-
-          // Update active bolts
-          if (boltLife[i] > 0 && boltTrackData[i]) {
-            if (!isSpeaking) {
-              boltLife[i] -= 5; // Rapid decay if speech stops
-            } else {
-              boltLife[i]--;
-            }
-
-            if (boltLife[i] <= 0) {
-              bolt.visible = false;
-            } else {
-              // Fade
-              const lifeRatio = boltLife[i] / (boltMaxLifes[i] || 1);
-              const opacity = Math.pow(lifeRatio, 1.5) * 0.8;
-              (bolt.material as THREE.MeshBasicMaterial).opacity = opacity;
-
-              // Highlight connected particle
-              const data = boltTrackData[i];
-              if (data) {
-                const targetGeometry = data.endLayer === 'inner' ? innerGeometry : middleGeometry;
-                const colors = targetGeometry.attributes.color.array as Float32Array;
-                const idx = data.endIdx * 3;
-                // Set to bright white/cyan mix for electricity
-                colors[idx] = 1.0;     // R
-                colors[idx + 1] = 1.0; // G
-                colors[idx + 2] = 1.0; // B
-                targetGeometry.attributes.color.needsUpdate = true;
-              }
-
-              // Position Update
-
-              const v1 = new THREE.Vector3();
-              const v2 = new THREE.Vector3();
-
-              // End Position (Target Particle)
-              const endArr = data.endLayer === 'inner' ? innerPositions : middlePositions;
-              const endGroup = data.endLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-              v2.set(endArr[data.endIdx * 3], endArr[data.endIdx * 3 + 1], endArr[data.endIdx * 3 + 2]);
-              v2.applyMatrix4(endGroup.matrixWorld);
-
-              // Start Position
-              if (data.startLayer === 'core') {
-                // Core Surface
-                let coreRadius = 0.08;
-                if (innerSphere) {
-                  coreRadius = 0.08 * innerSphere.scale.x;
-                }
-                v1.copy(v2).normalize().multiplyScalar(coreRadius);
-              } else {
-                // Particle -> Particle
-                const startArr = data.startLayer === 'inner' ? innerPositions : middlePositions;
-                const startGroup = data.startLayer === 'inner' ? innerParticleGroup : middleParticleGroup;
-                v1.set(startArr[data.startIdx * 3], startArr[data.startIdx * 3 + 1], startArr[data.startIdx * 3 + 2]);
-                v1.applyMatrix4(startGroup.matrixWorld);
-              }
-
-              const distance = v1.distanceTo(v2);
-              const midpoint = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
-              bolt.position.copy(midpoint);
-              bolt.lookAt(v2);
-              bolt.rotateX(Math.PI / 2);
-              bolt.scale.set(1, distance, 1);
-              bolt.visible = true;
-            }
-          } else if (i < activeConnections && isSpeaking) {
-            freeBoltSlots.push(i);
-          } else if (!isSpeaking && boltLife[i] <= 0) {
-            bolt.visible = false;
+            m.ticking = !m.ticking;
+            ticking += m.ticking ? 1 : -1;
+            m.until = t + (m.ticking ? rand(2, 5) : rand(4, 11));
           }
         }
-
-        // Spawn from tips — fan out one-to-many when a bolt jumps onto a particle
-        if (isSpeaking && freeBoltSlots.length > 0) {
-          if (activeTips.length === 0 && Math.random() < 0.12) {
-            // Core seeds multiple outgoing arcs
-            activeTips.push({
-              idx: -1,
-              layer: 'core',
-              remainingBranches: Math.floor(Math.random() * 3) + 2,
-              chainDepth: 0
-            });
-          }
-
-          const maxDepth = 6;
-          let spawnBudget = Math.min(freeBoltSlots.length, Math.max(2, Math.floor(activeConnections * 0.45)));
-
-          while (spawnBudget > 0 && activeTips.length > 0 && freeBoltSlots.length > 0) {
-            const tipIdx = Math.floor(Math.random() * activeTips.length);
-            const tip = activeTips[tipIdx];
-
-            // One-to-many: from this particle, fire several forks in the same burst
-            const fanOutChance = tip.layer === 'core'
-              ? 0.55 + vocalIntensity * 0.25
-              : 0.7 + smoothBass * 0.25 + vocalIntensity * 0.15;
-            const maxFan = tip.layer === 'core' ? 3 : 5;
-            const minFan = tip.layer === 'core' ? 1 : 2;
-            const wantFan =
-              Math.random() < fanOutChance
-                ? Math.min(maxFan, tip.remainingBranches, Math.floor(Math.random() * (maxFan - minFan + 1)) + minFan)
-                : 1;
-            const forks = Math.min(wantFan, tip.remainingBranches, freeBoltSlots.length, spawnBudget);
-
-            const usedEnds = new Set<string>();
-
-            for (let f = 0; f < forks; f++) {
-              const boltIndex = freeBoltSlots.pop();
-              if (boltIndex === undefined) break;
-
-              let endLayer: 'inner' | 'middle' = 'inner';
-              let endIdx = 0;
-              let attempts = 0;
-              do {
-                const picked = pickEndTarget(tip.idx, tip.layer);
-                endLayer = picked.endLayer;
-                endIdx = picked.endIdx;
-                attempts++;
-              } while (usedEnds.has(`${endLayer}:${endIdx}`) && attempts < 12);
-
-              usedEnds.add(`${endLayer}:${endIdx}`);
-              placeBolt(boltIndex, tip.idx, endIdx, tip.layer, endLayer);
-              tip.remainingBranches--;
-              spawnBudget--;
-
-              // Landed particle becomes a new tip that can fan out further
-              if (tip.chainDepth < maxDepth) {
-                const branchChance = 0.55 + smoothBass * 0.35 + vocalIntensity * 0.2;
-                // Prefer multi-branch tips so jumps create one-to-many spreads
-                const branches =
-                  Math.random() < branchChance
-                    ? Math.floor(Math.random() * 3) + 2 // 2–4
-                    : 1;
-                activeTips.push({
-                  idx: endIdx,
-                  layer: endLayer,
-                  remainingBranches: branches,
-                  chainDepth: tip.chainDepth + 1
-                });
-              }
-            }
-
-            if (tip.remainingBranches <= 0) {
-              activeTips.splice(tipIdx, 1);
-            }
-          }
-
-          // Cap tip queue so chains don't grow forever
-          if (activeTips.length > 24) {
-            activeTips.splice(0, activeTips.length - 24);
-          }
-        } else if (!isSpeaking) {
-          activeTips.length = 0;
+        const clockwork = m.ticking && busy < 0.15 && motion === 1;
+        if (clockwork && t >= m.nextTick) {
+          m.nextTick = t + m.period * rand(0.85, 1.15);
+          // A tick: catch up with the smooth turn in one quick step, with a small mechanical shiver.
+          for (let i = 0; i < 3; i++) m.held[i] = m.want[i] + (Math.random() - 0.5) * 0.015 * m.axes[i];
         }
+        const k = clockwork ? tickSnap : easeSnap;
+        for (let i = 0; i < 3; i++) m.shown[i] += ((clockwork ? m.held[i] : m.want[i]) - m.shown[i]) * k;
+        rotation.set(m.shown[0], m.shown[1], m.shown[2]);
+        m.obj.scale.setScalar(1 + flutter * m.size * tick(m.twitch, t, snap));
       }
 
-      // Pulse bloom on core only (particles are excluded via selective bloom)
-      if (bloomPass) {
-        bloomPass.strength = 1.35 + smoothBass * 1.2;
-        bloomPass.radius = 0.5 + smoothMid * 0.15;
-      }
+      // The core is the mouth: while talking its size twitches between small and large in quick jumps, and it glows a
+      // little brighter when large.
+      const jump = tick(coreTwitch, t, snap);
+      core.scale.setScalar(1 + (talk * 0.7 + boost * 0.12) * jump * motion);
+      coreGlow.value = 1 + 0.25 * talk * (0.5 + 0.5 * jump);
 
-      // Bloom pass sees only bloom-layer objects; particles stay dark here
-      scene.traverse(darkenNonBloomed);
-      bloomComposer.render();
-      scene.traverse(restoreBloomMaterial);
-      finalComposer.render();
+      composer.render();
     };
-
-    const init = () => {
-      setupScene();
-      resizeShape(false);
-      render();
-      window.addEventListener("resize", onResize);
-    };
-
-    init();
+    render();
 
     return () => {
-      cancelAnimationFrame(animationId);
-      controls.dispose();
-      darkMaterial.dispose();
-      particleTexture?.dispose();
-      renderer.domElement.remove();
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", onResize);
+      controls.dispose();
+      scene.traverse((object) => {
+        if (object instanceof THREE.LineSegments || object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          (object.material as THREE.Material).dispose();
+        }
+      });
+      composer.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
     };
-  }, []); // Run once on mount
+  }, []);
 
-  return <div ref={mountRef} style={{ width: '100vw', height: '100vh', overflow: 'hidden' }} />;
-};
-
-export default SphereScene;
+  return <div ref={mountRef} style={{ width: "100vw", height: "100vh", overflow: "hidden" }} />;
+}

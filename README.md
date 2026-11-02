@@ -33,13 +33,29 @@ Arcanus is an offline-first PWA, so you can install it from the browser's addres
 
 The service worker only registers in production builds (`npm run build && npm start`). `npm run dev` unregisters it, so stale caches never hide code changes.
 
-## Where things live
+## Architecture
 
-- `src/lib/brain.ts` — ARC 1 routing, Hippocampus seeds, knowledge recall, the time and math tools
-- `src/lib/knowledge.ts` — what Arcanus knows about itself
-- `src/lib/engines.ts` — load state for the three engines, the SmolVLM client, voice playback through the analyser
-- `src/workers/` — SmolVLM and Paradee, each in its own Web Worker (`misaki.ts` is Paradee's phoneme mapping)
-- `src/lib/arcane/` — ARCANE 5.0, vendored until it is on npm (see its README)
-- `src/app/components/` — the chat panel, the Chain of Thought component, the sphere
+Arcanus is a modular monolith: one Next.js app, split into feature modules that each own their state, workers and UI, and talk to each other only through a public API.
 
-Teach the router a new phrasing by adding a line to `SEEDS` in `src/lib/brain.ts`. Check the tools with `node src/lib/tools.check.ts`.
+```
+src/
+  app/            composition root: page.tsx wires the modules together and boots the engines
+  modules/
+    brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
+    llm/          SmolVLM: worker + client, with a cache of finished replies
+    voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
+    chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
+    sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
+    offline/      service worker registration, online status
+  shared/         kernel every module may use: Store, Engine, Boundary, Lru, UI components
+```
+
+- **Boundaries.** A module is imported only as `@/modules/<name>` (its `index.ts`). `npm run lint` fails on deep imports, on relative imports between modules, and on `shared/` depending on a module.
+- **Adding a skill.** Add one entry to `SKILLS` in `src/modules/brain/skills.ts`: a route, a description for ARC 1, seed phrasings, and a `run` that answers. Routing, memory and the chat pick it up.
+- **Adding an engine.** Export an `Engine` from its module and append it to `ENGINES` in `src/app/page.tsx`: it boots on its own and gets a status pill.
+- **Graceful degradation.** Engines load independently. Without ARC 1, messages go straight to SmolVLM; without SmolVLM, Arcanus still answers time, math and questions about itself (from recalled notes); without Paradee or Web Audio, replies are text only; without WebGL, or if the scene crashes, a CSS orb stands in for the sphere; if the chat crashes, an error boundary keeps the sphere alive. When storage is full, chats are saved without their images.
+- **Loading.** The page is prerendered with skeletons: the conversation skeleton until saved chats are read, the orb until the three.js chunk arrives. Each part of the chat reads only its own slice of state, so a streamed token re-renders the reply being written and nothing else.
+- **Caching.** The service worker caches the app, ARC 1 and the ONNX runtime; Transformers.js and the voice worker cache the model weights. In memory, a text prompt seen before is answered from the reply cache (decoding is greedy, so the model would write the same words), and a sentence spoken before replays without running Paradee. Chats are saved to `localStorage` in the background, batched, and flushed when the tab closes.
+- **Optimistic updates.** Your message and a "thinking" reply appear the moment you send, even while models still load. Deletes apply at once and can be undone for six seconds instead of asking first.
+
+Check the pure logic with `npm run check`.

@@ -99,6 +99,39 @@ body {
   inset: 0;
 }
 
+/* The sphere's stand-in: while three.js loads, and for good without WebGL. Breathes faster as Arcanus works. */
+.orb-fallback {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(44vmin, 360px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff1c9 0 3%, rgba(255, 154, 46, 0.55) 10%, rgba(255, 154, 46, 0.12) 42%, transparent 70%);
+  animation: orb-breathe 4s ease-in-out infinite;
+}
+.orb-fallback[data-loading] {
+  opacity: 0.45;
+}
+.orb-fallback[data-state="thinking"] {
+  animation-duration: 1.4s;
+}
+.orb-fallback[data-state="speaking"] {
+  animation-duration: 0.7s;
+}
+@keyframes orb-breathe {
+  50% {
+    transform: scale(1.06);
+    filter: brightness(1.3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-fallback,
+  .skeleton {
+    animation: none;
+  }
+}
+
 .stage-foot {
   position: absolute;
   left: 0;
@@ -559,23 +592,38 @@ body {
 .btn-primary:hover {
   background: #a2bcda;
 }
-.btn-danger {
-  background: var(--danger);
-  color: #1a0b0d;
+/* Deletes apply at once; this bar offers the way back for a few seconds. */
+.undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
 }
-.btn-danger:hover {
-  background: #eb9ca3;
+.undo p {
+  margin: 0;
 }
 
-.confirm {
-  margin: 0 12px 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--danger);
-  border-radius: 12px;
-  background: var(--danger-soft);
+/* Loading placeholders, shaped like what they stand in for. */
+.skeleton {
+  border-radius: 14px;
+  background: var(--surface-2);
 }
-.confirm p {
-  margin: 0 0 8px;
+
+/* The chat crashed: the sphere keeps running behind this. */
+.panel-fallback {
+  left: auto;
+  right: var(--gap);
+  bottom: auto;
+  gap: 10px;
+  padding: 16px;
+}
+.panel-fallback p {
+  margin: 0;
 }
 
 .suggestions {

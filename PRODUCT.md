@@ -26,7 +26,7 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 - Decide: ARC 1 + Hippocampus + Occipital (ARCANE), main thread, ~10 ms per message
 - Write: SmolVLM-256M-Instruct (Q4) via Transformers.js / ONNX Runtime Web, in a Web Worker
 - Speak: Kokoro-82M via kokoro-js, in a Web Worker; audio drives the sphere through the Web Audio analyser
-- Knowledge notes live in `src/lib/knowledge.ts`; routing examples in `src/lib/brain.ts`
+- Knowledge notes live in `src/modules/brain/knowledge.ts`; skills and their routing examples in `src/modules/brain/skills.ts`
 - Models download from Hugging Face on first visit and are cached by the browser
 
 ## Capabilities and Constraints
@@ -53,8 +53,8 @@ Constraints:
 
 ## Evidence on Hand
 
-- Seed/product knowledge: `src/lib/knowledge.ts`
-- Runnable app: `src/app/` (sphere + chat), brain/engines under `src/lib/`, model workers under `src/workers/`
+- Seed/product knowledge: `src/modules/brain/knowledge.ts`
+- Runnable app: `src/app/` (composition root), feature modules under `src/modules/` (brain, llm, voice, chat, sphere, offline), shared kernel under `src/shared/`
 - README setup and inference order: `README.md`
 - No customer testimonials, case studies, press, or fabricated benchmarks on hand — future work must not invent them
 

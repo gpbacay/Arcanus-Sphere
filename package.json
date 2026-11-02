@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/shared/lru.check.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",

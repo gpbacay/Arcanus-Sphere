@@ -3,6 +3,7 @@
 // Text -> eSpeak NG phonemes (the `phonemizer` package) -> misaki spelling -> Kokoro token ids -> ONNX Runtime Web.
 import * as ort from "onnxruntime-web/wasm";
 import { phonemize } from "phonemizer";
+import { Lru } from "@/shared/lru";
 import { toMisaki } from "./misaki";
 
 const REPO = "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2/resolve/v1.2";
@@ -25,6 +26,9 @@ type Engine = { session: ort.InferenceSession; vocab: Record<string, number> };
 let loading: Promise<Engine> | null = null;
 let queue = Promise.resolve();
 let latest = 0; // sentences queued under an older generation were cancelled
+// Sentences already spoken ("Speak" on a reply, a retried reply), so they play again without running the model.
+// ponytail: capped by count (~13 MB at 32 five-second sentences), cap by bytes if replies get long.
+const spoken = new Lru<string, Float32Array>(32);
 
 /** A model file, from this worker's own Cache Storage when it has it, so the voice works offline after one visit. */
 async function cached(url: string) {
@@ -111,10 +115,15 @@ self.onmessage = ({ data }: MessageEvent) => {
     queue = queue.then(async () => {
       if (data.gen !== latest) return;
       try {
-        const engine = await load();
-        if (data.gen !== latest) return;
-        const samples = await synthesize(engine, data.text);
-        post({ type: "audio", gen: data.gen, text: data.text, samples, rate: Math.round(24000 * DEEPEN) }, [samples.buffer]);
+        let samples = spoken.get(data.text);
+        if (!samples) {
+          const engine = await load();
+          if (data.gen !== latest) return;
+          samples = await synthesize(engine, data.text);
+          spoken.set(data.text, samples);
+        }
+        const copy = samples.slice(); // the cached samples stay here; the copy is handed to the page
+        post({ type: "audio", gen: data.gen, text: data.text, samples: copy, rate: Math.round(24000 * DEEPEN) }, [copy.buffer]);
       } catch {
         /* one sentence failed to synthesize: skip it and keep the rest of the reply */
       }

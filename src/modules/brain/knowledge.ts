@@ -40,7 +40,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "sphere",
     title: "The sphere",
     content:
-      "The Arcanus Sphere is a Three.js particle system with bloom and lightning arcs. It glows while Arcanus thinks and pulses with the bass, mids and treble of its voice while it speaks.",
+      "The Arcanus Sphere is a holographic orb of gold circuit traces on three nested shells, with loose broken rings and a glowing core eye, drawn with Three.js shaders and bloom. Every shell and ring moves on its own axes at its own speed. While Arcanus thinks they turn faster, and while it speaks the rings whirl and each shell and ring swells and shrinks at its own random rhythm, as if the orb were talking.",
   },
   {
     id: "thoughts",
