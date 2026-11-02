@@ -2,8 +2,8 @@
 // - Pages: served from cache at once, refreshed in the background (stale-while-revalidate).
 // - Same-origin assets (hashed Next.js chunks, fonts, ARC 1 weights) and the ONNX Runtime files from jsDelivr:
 //   cache first. Both are versioned by URL, so a cached copy never goes stale.
-// - Hugging Face model files pass straight through: Transformers.js ("transformers-cache") and kokoro-js
-//   ("kokoro-voices") already keep them in Cache Storage and read that before the network. Caching them here
+// - Hugging Face model files pass straight through: Transformers.js ("transformers-cache") and the Paradee voice
+//   worker ("paradee-v1.2") already keep them in Cache Storage and read that before the network. Caching them here
 //   too would store ~270 MB twice.
 const CACHE = "arcanus-v1";
 const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/icon-192.png", "/icon-512.png"];

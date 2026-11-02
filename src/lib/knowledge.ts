@@ -32,9 +32,9 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
   },
   {
     id: "voice",
-    title: "Voice: Kokoro TTS",
+    title: "Voice: Paradee TTS",
     content:
-      "Arcanus speaks with Kokoro-82M, an open text-to-speech model by hexgrad, running in your browser. It starts speaking each sentence as soon as it is written, and the audio drives the sphere through the Web Audio analyser.",
+      "Arcanus speaks with Paradee-8M, an open text-to-speech model by Sahil Mahendrakar distilled from Kokoro-82M, in a British male voice. It is only 8.5 MB and runs in your browser many times faster than real time. It starts speaking each sentence as soon as it is written, and the audio drives the sphere through the Web Audio analyser.",
   },
   {
     id: "sphere",
@@ -52,6 +52,6 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "stack",
     title: "Tech stack",
     content:
-      "Arcanus Sphere is a Next.js and React app with Three.js, Transformers.js, ONNX Runtime Web, kokoro-js and ARCANE (ARC 1, Hippocampus, Occipital). The language and voice models run in Web Workers so the sphere stays smooth.",
+      "Arcanus Sphere is a Next.js and React app with Three.js, Transformers.js, ONNX Runtime Web, Paradee and ARCANE (ARC 1, Hippocampus, Occipital). The language and voice models run in Web Workers so the sphere stays smooth.",
   },
 ];

@@ -14,4 +14,6 @@ assert.equal(tellTime("time in Asia/Tokyo").zone, "Asia/Tokyo");
 assert.notEqual(tellTime("time in Mars/Olympus").zone, "Mars/Olympus");
 assert.equal(forSpeech("**Hi** see [docs](http://x)."), "Hi see docs.");
 assert.deepEqual(takeSentences("One. Two! Thr"), { sentences: ["One.", "Two!"], rest: "Thr" });
+assert.deepEqual(takeSentences("A long clause, then more", 10), { sentences: ["A long clause,"], rest: "then more" });
+assert.deepEqual(takeSentences("Short, still", 80), { sentences: [], rest: "Short, still" });
 console.log("tools ok");

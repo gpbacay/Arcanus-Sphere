@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 :root {
   --bg-root: #07080a;
   --panel: rgba(14, 16, 20, 0.86);
@@ -22,6 +24,14 @@
   --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
   --panel-w: min(420px, calc(100vw - 24px));
   --gap: 12px;
+  --sidebar: rgba(14, 16, 20, 0.92);
+  --sidebar-foreground: #e6e9ee;
+  --sidebar-primary: #88a8cc;
+  --sidebar-primary-foreground: #0b1018;
+  --sidebar-accent: rgba(136, 168, 204, 0.16);
+  --sidebar-accent-foreground: #e6e9ee;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #88a8cc;
 }
 
 /* Tokens the ARCANE Chain of Thought component reads through Tailwind. */
@@ -30,6 +40,14 @@
   --color-muted-foreground: var(--text-muted);
   --color-border: var(--line-strong);
   --color-muted: var(--surface-2);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
 }
 
 html,
@@ -39,9 +57,13 @@ body {
   background: var(--bg-root);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 13.5px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* On body, not html: Tailwind spacing is in rem, and the Chain of Thought lines are drawn in px against a 16px rem. */
+body {
+  font-size: 13.5px;
 }
 
 :focus-visible {
@@ -79,7 +101,7 @@ body {
 
 .stage-foot {
   position: absolute;
-  left: calc(var(--panel-w) + var(--gap));
+  left: 0;
   right: 0;
   bottom: 20px;
   display: flex;
@@ -135,10 +157,24 @@ body {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
 
+.panel-docked {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .rail {
   position: absolute;
   top: var(--gap);
-  left: var(--gap);
+  right: var(--gap);
   z-index: 10;
   display: flex;
   align-items: center;
@@ -291,6 +327,10 @@ body {
 }
 .icon-btn[aria-pressed="true"] {
   color: var(--speak);
+}
+.icon-btn[data-open="true"] {
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 /* —— Engines —— */
@@ -463,6 +503,9 @@ body {
 }
 .msg-actions button:hover:not(:disabled) {
   color: var(--text);
+}
+.msg-actions button[aria-pressed="true"] {
+  color: var(--accent);
 }
 .msg-actions button:disabled {
   opacity: 0.4;
@@ -683,7 +726,40 @@ body {
 
   .stage-foot {
     left: 0;
+    right: 0;
     top: 16px;
     bottom: auto;
+  }
+}
+
+/* Right rail: same glass as the chat, fixed over the sphere. The gap spacer stays out of flow. */
+[data-side="right"] > [data-slot="sidebar-gap"] {
+  display: none;
+}
+[data-side="right"][data-variant="floating"] > [data-slot="sidebar-container"] {
+  z-index: 20;
+  padding: var(--gap);
+}
+[data-variant="floating"] [data-slot="sidebar-inner"] {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--text);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+[data-mobile="true"][data-sidebar="sidebar"] {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+[data-side="right"] [data-sidebar="trigger"] svg {
+  transform: scaleX(-1);
+}
+
+@media (min-width: 768px) {
+  [data-slot="sidebar-wrapper"]:has([data-side="right"][data-state="expanded"]:not([data-collapsible="offcanvas"])) .stage-foot {
+    right: var(--sidebar-width);
   }
 }

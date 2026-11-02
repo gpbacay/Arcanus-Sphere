@@ -25,7 +25,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Arcanus — Agentic Sphere AI",
   description:
-    "A fully local AI in your browser: ARC 1 decides, SmolVLM writes, Kokoro speaks, and a 3D sphere reacts to its voice.",
+    "A fully local AI in your browser: ARC 1 decides, SmolVLM writes, Paradee speaks, and a 3D sphere reacts to its voice.",
   applicationName: "Arcanus",
   appleWebApp: { capable: true, title: "Arcanus", statusBarStyle: "black-translucent" },
   icons: { icon: "/icon-192.png", apple: "/icon-192.png" },

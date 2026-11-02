@@ -1,6 +1,6 @@
 "use client";
 
-// The three on-device engines and their load state: ARC 1 (main thread, ~10 ms per decision), SmolVLM and Kokoro
+// The three on-device engines and their load state: ARC 1 (main thread, ~10 ms per decision), SmolVLM and Paradee
 // (each in its own Web Worker). Components read state with useEngine(); nothing here runs on the server.
 import { useSyncExternalStore } from "react";
 import { loadBrain } from "./brain";
@@ -112,7 +112,7 @@ class Llm {
   }
 }
 
-// ----------------------------------------------------------------- Kokoro
+// ---------------------------------------------------------------- Paradee
 class Voice {
   state = new Store<LoadState & { speaking: boolean; caption: string; analyser: AnalyserNode | null }>({
     ...IDLE,

@@ -21,7 +21,7 @@ export type ThoughtStep = {
   steps?: ThoughtStep[];
 };
 
-const ThoughtContext = createContext<{ open: boolean; toggle: () => void; id: string } | null>(null);
+const ThoughtContext = createContext<{ open: boolean; toggle: () => void; id: string; bare: boolean } | null>(null);
 
 /** Where a step sits in its list, so it can draw its own connections. */
 const PlaceContext = createContext({ depth: 0, first: true, last: true });
@@ -77,24 +77,28 @@ export function ChainOfThought({
   open,
   defaultOpen = false,
   onOpenChange,
+  bare = false,
   className = "",
   children,
 }: {
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Steps only, always open. The parent supplies the heading. */
+  bare?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   const [own, setOwn] = useState(defaultOpen);
-  const isOpen = open ?? own;
+  const isOpen = bare || (open ?? own);
   const toggle = () => {
+    if (bare) return;
     setOwn(!isOpen);
     onOpenChange?.(!isOpen);
   };
   const id = useId();
   return (
-    <ThoughtContext.Provider value={{ open: isOpen, toggle, id }}>
+    <ThoughtContext.Provider value={{ open: isOpen, toggle, id, bare }}>
       <div className={`w-full ${className}`}>{children}</div>
     </ThoughtContext.Provider>
   );
@@ -109,7 +113,7 @@ export function ChainOfThoughtHeader({ thinking = false, children }: { thinking?
       onClick={toggle}
       aria-expanded={open}
       aria-controls={id}
-      className={`group flex w-full items-center gap-2 text-[11px] tracking-wide transition-colors hover:text-foreground ${open ? "text-foreground" : "text-muted-foreground"}`}
+      className={`group flex w-full items-center gap-[9px] text-[11px] tracking-wide transition-colors hover:text-foreground ${open ? "text-foreground" : "text-muted-foreground"}`}
     >
       <Node status={thinking ? "active" : "complete"} depth={0} />
       <span className={`min-w-0 flex-1 truncate text-left ${thinking ? "animate-pulse" : ""}`}>
@@ -152,6 +156,7 @@ export function ChainOfThoughtStep({
   children?: ReactNode;
 }) {
   const { depth, first, last } = useContext(PlaceContext);
+  const { bare } = useThought();
   const root = depth === 0;
   const parts = Children.toArray(children);
   const substeps = parts.filter((part) => isValidElement(part) && part.type === ChainOfThoughtSubsteps);
@@ -160,8 +165,8 @@ export function ChainOfThoughtStep({
   const continues = root && !last;
   return (
     <li className={`relative pl-5 transition-[opacity,translate] duration-300 starting:-translate-y-1 starting:opacity-0 ${last ? "" : root ? "pb-3" : "pb-2"}`}>
-      {root && first && <Line depth={0} className="-top-3 left-[5px] h-[15px]" />}
-      {continues && <Line depth={depth} className="bottom-0 left-[5px] top-[14px]" />}
+      {root && first && !bare && <Line depth={0} className="-top-[15px] left-[5px] h-[18px]" />}
+      {continues && <Line depth={depth} className="-bottom-[3px] left-[5px] top-[14px]" />}
       {!root && (
         <>
           {!last && <Line depth={depth - 1} className="-left-[15px] bottom-0 top-0" />}
@@ -224,6 +229,7 @@ export function ChainOfThoughtTrace({
   defaultOpen = false,
   open,
   onOpenChange,
+  bare = false,
 }: {
   label?: ReactNode;
   steps: ThoughtStep[];
@@ -231,10 +237,12 @@ export function ChainOfThoughtTrace({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Skip the collapse header. Use when the trace already lives under its own heading. */
+  bare?: boolean;
 }) {
   return (
-    <ChainOfThought defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
-      <ChainOfThoughtHeader thinking={thinking}>{label}</ChainOfThoughtHeader>
+    <ChainOfThought bare={bare} defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
+      {bare ? null : <ChainOfThoughtHeader thinking={thinking}>{label}</ChainOfThoughtHeader>}
       <ChainOfThoughtContent>
         {steps.map((step, index) => (
           <StepFromData key={index} step={step} />

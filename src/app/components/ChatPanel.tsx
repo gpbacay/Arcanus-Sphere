@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { Sidebar, useSidebar } from "@/components/ui/sidebar";
 import { ChainOfThoughtTrace, type ThoughtStep } from "./chain-of-thought";
 import { think } from "@/lib/brain";
 import { brainState, llm, startBrain, useEngine, voice, type LoadState, type Turn } from "@/lib/engines";
@@ -175,6 +176,7 @@ function EnginePill({ name, detail, state, off, onRetry }: { name: string; detai
 
 export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boolean) => void }) {
   const menuId = useId();
+  const { isMobile } = useSidebar();
   const brain = useEngine(brainState);
   const model = useEngine(llm.state);
   const speech = useEngine(voice.state);
@@ -297,7 +299,8 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
       trace = plan.trace;
       if (stale()) return;
       if (plan.reply) {
-        if (voiceRef.current) voice.say(plan.reply);
+        // Sentence by sentence, like the model's replies: one long block would hold back the first word.
+        if (voiceRef.current) takeSentences(`${plan.reply}\n`).sentences.forEach((s) => voice.say(s));
         finish(plan.reply, trace);
         return;
       }
@@ -324,7 +327,7 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
           label: "SmolVLM-256M wrote this",
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         },
-        ...(voiceRef.current ? [{ label: "Kokoro-82M spoke it", description: "Sentence by sentence, as it was written" }] : []),
+        ...(voiceRef.current ? [{ label: "Paradee-8M spoke it", description: "Sentence by sentence, as it was written" }] : []),
       ]);
     } catch (err) {
       const reason = (err instanceof Error ? err.message : String(err)).slice(0, 200);
@@ -355,7 +358,7 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
   function send(text = draft, quote: Msg | null = replyTo) {
     const trimmed = text.trim().slice(0, MAX);
     if ((!trimmed && !image) || busy || flightChat.current || !current) return;
-    voice.unlock(); // inside the click/keypress, so the browser lets Kokoro play
+    voice.unlock(); // inside the click/keypress, so the browser lets the voice play
     const userMessage: Msg = {
       id: crypto.randomUUID(),
       role: "user",
@@ -483,17 +486,19 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
 
   if (collapsed) {
     return (
-      <aside className="rail" aria-label="Arcanus chat (collapsed)">
-        <button type="button" className="icon-btn" aria-label="Open chat" title="Open chat" onClick={() => setCollapsed(false)}>
-          <Icon name="right" />
-        </button>
-        <span className="brand-mark" data-state={status} />
-      </aside>
+      <>
+        <aside className="rail" aria-label="Arcanus chat (collapsed)">
+          <button type="button" className="icon-btn" aria-label="Open chat" title="Open chat" onClick={() => setCollapsed(false)}>
+            <Icon name="left" />
+          </button>
+          <span className="brand-mark" data-state={status} />
+        </aside>
+      </>
     );
   }
 
-  return (
-    <aside className="panel" aria-label="Arcanus chat">
+  const chat = (
+    <>
       <header className="panel-head">
         <span className="brand-mark" data-state={status} aria-hidden />
         <div className="panel-title" ref={menuRef}>
@@ -593,14 +598,14 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
           <Icon name="trash" />
         </button>
         <button type="button" className="icon-btn" aria-label="Hide chat" title="Hide chat" onClick={() => setCollapsed(true)}>
-          <Icon name="left" />
+          <Icon name="right" />
         </button>
       </header>
 
       <div className="engines" aria-label="On-device models">
         <EnginePill name="ARC 1" detail="decides · 5.5 MB" state={brain} onRetry={startBrain} />
         <EnginePill name="SmolVLM" detail="256M Q4 · ~170 MB" state={model} onRetry={() => void llm.start().catch(() => undefined)} />
-        <EnginePill name="Kokoro" detail="82M voice · ~90 MB" state={speech} off={!voiceOn} onRetry={() => void voice.start().catch(() => undefined)} />
+        <EnginePill name="Paradee" detail="8M voice · ~9 MB" state={speech} off={!voiceOn} onRetry={() => void voice.start().catch(() => undefined)} />
       </div>
 
       <div className="thread" role="log" aria-label="Conversation">
@@ -608,7 +613,7 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
           <div className="empty">
             <p className="empty-title">I&apos;m Arcanus.</p>
             <p>
-              Everything I do runs in this browser: ARC 1 decides what you need, SmolVLM writes, Kokoro speaks. Nothing you
+              Everything I do runs in this browser: ARC 1 decides what you need, SmolVLM writes, Paradee speaks. Nothing you
               type leaves this device. Attach an image and I&apos;ll describe it.
             </p>
           </div>
@@ -817,6 +822,22 @@ export default function ChatPanel({ onBusyChange }: { onBusyChange: (busy: boole
           </div>
         </div>
       </form>
-    </aside>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <aside className="panel" aria-label="Arcanus chat">
+        {chat}
+      </aside>
+    );
+  }
+
+  return (
+    <Sidebar side="right" variant="floating" collapsible="offcanvas">
+      <div className="panel panel-docked" role="complementary" aria-label="Arcanus chat">
+        {chat}
+      </div>
+    </Sidebar>
   );
 }
