@@ -91,7 +91,7 @@ export async function think(text: string, hasImage: boolean): Promise<Plan> {
   ];
   let outcome = null;
   try {
-    outcome = skill.run?.(text) ?? null;
+    outcome = (await skill.run?.(text)) ?? null;
   } catch (err) {
     trace.push({ label: `The ${skill.route} skill failed`, description: errorText(err) });
   }

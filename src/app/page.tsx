@@ -25,6 +25,10 @@ export default function Home() {
     hydrateChats();
     voice.restore();
     restorePower();
+    // A click anywhere, including the power switch, lets the boot greeting be spoken once it's written.
+    const unlock = () => voice.unlock();
+    window.addEventListener("pointerdown", unlock);
+    return () => window.removeEventListener("pointerdown", unlock);
   }, []);
 
   useEffect(() => {

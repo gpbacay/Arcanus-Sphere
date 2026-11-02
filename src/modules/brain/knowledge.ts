@@ -1,5 +1,18 @@
+import { personality } from "@/modules/harness";
+
 /** What Arcanus knows about itself. Recalled by a Hippocampus memory (word + Occipital letter search). */
 export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
+  {
+    id: "personality",
+    title: "Personality",
+    content: personality.line,
+  },
+  {
+    id: "harness",
+    title: "Agent harness",
+    content:
+      "Arcanus is an agent with its own harness. Skills decide what a message needs. Tools run when a message names them. A plugin adds tools through the harness. An MCP server connects over HTTP and its tools register the same way. Time and math stay local skills.",
+  },
   {
     id: "identity",
     title: "Who Arcanus is",

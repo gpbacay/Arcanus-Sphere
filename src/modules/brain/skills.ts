@@ -4,6 +4,7 @@ import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Hippocampus } from "./arcane/web.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
+import { callTool, connectMcp, matchTool, personalityReply } from "@/modules/harness";
 import { calculate, findExpression, tellTime } from "./tools";
 
 /** A skill's answer: a reply written without the language model, or facts for the language model to use. */
@@ -18,7 +19,7 @@ export interface Skill {
   /** Take a message before ARC 1 votes, for what words can't show (a bare "12*7"). Returns the reason, or nothing. */
   claim?(text: string): string | undefined;
   /** Handle the message, or return null to hand it to the language model as plain chat. */
-  run?(text: string): Outcome | null;
+  run?(text: string): Outcome | null | Promise<Outcome | null>;
 }
 
 // Knowledge notes, recalled by letters and words. Built on first use: it needs no model.
@@ -48,6 +49,14 @@ export const CHAT: Skill = {
 
 export const SKILLS: Skill[] = [
   CHAT,
+  {
+    route: "personality",
+    description: "Asks what Arcanus is like: its personality, character, tone, or how it behaves",
+    seeds: ["what's your personality", "describe your personality", "what are you like", "how do you behave", "what's your character"],
+    run() {
+      return { step: { label: "Personality", description: "From the harness, not the language model" }, reply: personalityReply() };
+    },
+  },
   {
     route: "about",
     description: "A question about Arcanus itself: who it is, who created it, what it can do, its models, voice, sphere, memory or privacy",
@@ -96,6 +105,35 @@ export const SKILLS: Skill[] = [
       return {
         step: { label: "Calculated", description: "Answered without the language model", results: [`${expression} = ${result}`] },
         reply: result.startsWith("Error") ? result : `${expression} = ${result}`,
+      };
+    },
+  },
+  {
+    route: "tool",
+    description: "A request that names a harness tool from a plugin or an MCP server",
+    seeds: ["run the echo tool", "call the weather tool", "use the plugin tool"],
+    claim(text) {
+      if (/^connect mcp\s+https?:\/\//i.test(text)) return "mcp url";
+      return matchTool(text) ? "a harness tool is named" : undefined;
+    },
+    async run(text) {
+      const url = text.match(/^connect mcp\s+(https?:\/\/\S+)/i)?.[1];
+      if (url) {
+        try {
+          const names = await connectMcp(url);
+          return {
+            step: { label: "MCP", description: url, results: names },
+            reply: names.length ? `Connected. Tools: ${names.join(", ")}.` : "Connected. That server listed no tools.",
+          };
+        } catch {
+          return { step: { label: "MCP", description: url }, reply: "That server didn't connect." };
+        }
+      }
+      const tool = matchTool(text);
+      if (!tool) return null;
+      return {
+        step: { label: `Tool · ${tool.name}`, description: tool.mcp ? `MCP ${tool.mcp}` : "Harness" },
+        reply: await callTool(tool.name, text),
       };
     },
   },

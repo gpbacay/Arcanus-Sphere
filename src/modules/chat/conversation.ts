@@ -2,8 +2,9 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { think } from "@/modules/brain";
+import { personality } from "@/modules/harness";
 import { llm, type Turn } from "@/modules/llm";
-import { openingLine, takeSentences, voice } from "@/modules/voice";
+import { isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { Store, errorText, useStore } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
@@ -17,8 +18,7 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 // While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
 const busy = () => live.state.reply !== null || !power.state.on;
 
-const SYSTEM =
-  "You are Arcanus, a local AI assistant that lives in the user's browser as a glowing 3D sphere. Gianne Bacay created you. You run on the user's device: SmolVLM writes replies, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation. Answer clearly and briefly. If asked who you are or who made you, say you are Arcanus, created by Gianne Bacay.";
+const SYSTEM = `You are Arcanus, a local AI assistant that lives in the user's browser as a glowing 3D sphere. ${personality.line} Gianne Bacay created you. You run on the user's device: SmolVLM writes replies, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation. Answer clearly and briefly. If asked who you are or who made you, say you are Arcanus, created by Gianne Bacay.`;
 const NO_MODEL =
   "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolVLM shows ready.";
 
@@ -45,7 +45,7 @@ let listening = false;
 
 function bootAsk() {
   const when = new Date().toLocaleString(undefined, { weekday: "long", hour: "numeric", minute: "2-digit", second: "2-digit" });
-  return `It is ${when}. Greet me in one short sentence and ask how you can help.`;
+  return `It is ${when}. Introduce yourself.`;
 }
 
 function onPointer() {
@@ -108,35 +108,51 @@ async function runGreet(mine: number) {
   if (greetJob) llm.stop();
   await waitReady(mine);
   if (mine !== greetGen || !power.state.on || busy() || llm.state.state.status !== "ready") return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (mine !== greetGen || !power.state.on || busy()) return;
+    const line = await oneIntro(mine);
+    if (mine !== greetGen || !power.state.on || !isIntroduction(line)) continue;
+    greeting.set({ text: line });
+    if (voice.state.state.off || !voice.state.state.analyser) return;
+    silence();
+    voice.cancel();
+    sayAll(line);
+    return;
+  }
+}
+
+/** One sampled sentence. A sign-off is returned and discarded by the caller. */
+async function oneIntro(mine: number): Promise<string> {
   greetJob = mine;
   let shown = "";
+  const take = (text: string) => {
+    const line = openingLine(text);
+    // A short stub may be followed by the introduction. A finished sign-off is not.
+    if (!/[.!?]$/.test(line) || line.split(/\s+/).length < 3) return;
+    if (isIntroduction(line)) greeting.set({ text: line });
+    llm.stop();
+  };
   try {
     const written = await llm.generate(
       [
-        { role: "system", content: "You are Arcanus. Speak one sentence, then stop." },
+        {
+          role: "system",
+          content:
+            `You are Arcanus, just switched on. ${personality.line} One sentence that says the name Arcanus first, greets the person, and offers help. Do not thank them. Do not say goodbye.`,
+        },
         { role: "user", content: bootAsk() },
       ],
       undefined,
       (piece) => {
         if (mine !== greetGen) return;
         shown += piece;
-        const line = openingLine(shown);
-        if (line) greeting.set({ text: line });
-        // Stop once a real sentence is out, so a small model can't keep talking past the greeting.
-        if (/[.!?]$/.test(line) && line.split(/\s+/).length >= 3) llm.stop();
+        take(shown);
       },
       { maxNewTokens: 24, fresh: true, sample: true },
     );
-    if (mine !== greetGen || !power.state.on) return;
-    const line = openingLine(written.text || shown);
-    if (!line) return;
-    greeting.set({ text: line });
-    if (voice.state.state.off || !voice.state.state.analyser) return;
-    silence();
-    voice.cancel();
-    sayAll(line);
+    return openingLine(written.text || shown);
   } catch {
-    // Stopped, or the model never loaded. Leave the greeting blank rather than substitute a fixed line.
+    return openingLine(shown);
   } finally {
     if (greetJob === mine) greetJob = 0;
   }
