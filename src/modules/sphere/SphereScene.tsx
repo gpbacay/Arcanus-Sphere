@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /**
  * Arcanus's body: a holographic orb of gold circuit traces on three nested shells, loose broken rings and a 3D core.
- * All geometry is built once; each frame the CPU only turns and resizes the parts.
+ * The shape is public/orb.glb. Each frame the CPU only turns and resizes the parts.
  * Every shell and every ring is its own part: it turns on its own axes at its own speed, drifting in pace and direction
  * so no two move alike.
  * - Idle: the parts drift slowly and faint pulses run along the traces. Now and then, a few parts at random hold still
@@ -27,84 +28,7 @@ type Props = {
 
 const GOLD = new THREE.Color("#ff9a2e");
 const HOT = new THREE.Color("#fff1c9");
-
-// ------------------------------------------------------------------ geometry
-
-type Lines = { pos: number[]; along: number[]; seed: number[] };
-const newLines = (): Lines => ({ pos: [], along: [], seed: [] });
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
-
-/** Adds a polyline as segments. `along` runs 0..1 from its start to its end, so a pulse can travel down it. */
-function polyline(out: Lines, pts: THREE.Vector3[], seed = Math.random()) {
-  const n = pts.length - 1;
-  for (let i = 0; i < n; i++) {
-    out.pos.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
-    out.along.push(i / n, (i + 1) / n);
-    out.seed.push(seed, seed);
-  }
-}
-
-const onSphere = (lat: number, lon: number, r: number) =>
-  new THREE.Vector3(r * Math.cos(lat) * Math.cos(lon), r * Math.sin(lat), r * Math.cos(lat) * Math.sin(lon));
-
-/**
- * A circuit trace on a sphere: straight runs that turn one compass step at a time (45°, or 60° on a hex grid with
- * dirs = 6), usually ending in a round pad.
- */
-function trace(out: Lines, r: number, lat: number, lon: number, dirs = 8, steps = 14, step = 0.03, maxLat = 1.3) {
-  const seed = Math.random();
-  let k = Math.floor(Math.random() * dirs);
-  const pts = [onSphere(lat, lon, r)];
-  for (let s = 0; s < steps; s++) {
-    if (Math.random() < 0.3) k = (k + (Math.random() < 0.5 ? 1 : dirs - 1)) % dirs;
-    const a = (k / dirs) * Math.PI * 2;
-    if (Math.abs(lat + Math.sin(a) * step) > maxLat) break;
-    lat += Math.sin(a) * step;
-    lon += (Math.cos(a) * step) / Math.cos(lat);
-    pts.push(onSphere(lat, lon, r));
-  }
-  if (pts.length < 3) return;
-  polyline(out, pts, seed);
-  if (Math.random() < 0.55) {
-    const end = pts[pts.length - 1];
-    const n = end.clone().normalize();
-    const t1 = new THREE.Vector3(0, 1, 0).cross(n).normalize();
-    const t2 = n.clone().cross(t1);
-    const pad = r * 0.012;
-    const ring = Array.from({ length: 7 }, (_, i) => {
-      const a = (i / 6) * Math.PI * 2;
-      return end.clone().addScaledVector(t1, Math.cos(a) * pad).addScaledVector(t2, Math.sin(a) * pad);
-    });
-    polyline(out, ring, seed);
-  }
-}
-
-/** A broken circle in the XZ plane (then turned by `tilt`): arcs with gaps, stepping in and out like a circuit run. */
-function brokenRing(out: Lines, r: number, arcs: number, span: [number, number], wiggle = 0, y = 0, tilt?: THREE.Euler) {
-  const turn = tilt ? new THREE.Matrix4().makeRotationFromEuler(tilt) : null;
-  for (let i = 0; i < arcs; i++) {
-    const start = rand(0, Math.PI * 2);
-    const end = start + rand(span[0], span[1]);
-    let rr = r;
-    let yy = y;
-    const pts: THREE.Vector3[] = [];
-    for (let a = start; a <= end; a += 0.02) {
-      if (wiggle && Math.random() < 0.06) rr += (Math.random() < 0.5 ? -1 : 1) * wiggle;
-      if (wiggle && Math.random() < 0.03) yy += (Math.random() < 0.5 ? -1 : 1) * wiggle * 0.6;
-      const p = new THREE.Vector3(rr * Math.cos(a), yy, rr * Math.sin(a));
-      pts.push(turn ? p.applyMatrix4(turn) : p);
-    }
-    if (pts.length > 1) polyline(out, pts);
-  }
-}
-
-function toGeometry(lines: Lines) {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(lines.pos, 3));
-  geometry.setAttribute("along", new THREE.Float32BufferAttribute(lines.along, 1));
-  geometry.setAttribute("seed", new THREE.Float32BufferAttribute(lines.seed, 1));
-  return geometry;
-}
 
 // ------------------------------------------------------------------ shaders
 
@@ -233,6 +157,7 @@ const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, 
 });
 
 export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
+  const [broken, setBroken] = useState(false);
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const boostRef = useRef(0);
@@ -273,101 +198,6 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
       uPhase: { value: 0 },
       uFlow: { value: 0.35 },
     };
-    const segments = (lines: Lines, base: number) =>
-      new THREE.LineSegments(
-        toGeometry(lines),
-        new THREE.ShaderMaterial({
-          uniforms: { ...shared, uBase: { value: base } },
-          vertexShader: LINE_VERTEX,
-          fragmentShader: LINE_FRAGMENT,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        })
-      );
-
-    const movers: Mover[] = [];
-    const part = (radius: number, spin: number, size: number, axes?: [number, number, number], parent: THREE.Object3D = scene) => {
-      const g = new THREE.Group();
-      parent.add(g);
-      movers.push(mover(g, radius, spin, size, axes));
-      return g;
-    };
-    const ringAxes: [number, number, number] = [0.35, 1, 0.35];
-
-    // Outer shell: dense circuit bands around both caps, sparse traces between them.
-    const outerLines = newLines();
-    for (let i = 0; i < 320; i++) trace(outerLines, 1, rand(0.72, 1.22) * (i % 2 ? 1 : -1), rand(0, Math.PI * 2), 8, 16, 0.028);
-    for (let i = 0; i < 140; i++) trace(outerLines, 1, rand(-0.7, 0.7), rand(0, Math.PI * 2), 8, 12, 0.03);
-    for (const side of [1, -1]) {
-      for (let i = 0; i < 4; i++) {
-        const lat = (0.66 + i * 0.05) * side;
-        brokenRing(outerLines, Math.cos(lat) * 1.02, 5, [0.4, 1.8], 0, Math.sin(lat) * 1.02);
-      }
-    }
-    part(1, rand(0.08, 0.14), 0.07).add(segments(outerLines, 0.13));
-
-    // Middle shell.
-    const middleLines = newLines();
-    for (let i = 0; i < 380; i++) trace(middleLines, 0.78, rand(-1.25, 1.25), rand(0, Math.PI * 2), 8, 12, 0.032);
-    part(0.78, rand(0.14, 0.22), 0.11).add(segments(middleLines, 0.08));
-
-    // Inner shell: a dense hex-grid circuit.
-    const innerLines = newLines();
-    for (let i = 0; i < 240; i++) trace(innerLines, 0.44, rand(-1.3, 1.3), rand(0, Math.PI * 2), 6, 9, 0.05);
-    part(0.44, rand(0.2, 0.32), 0.15).add(segments(innerLines, 0.11));
-
-    // A band of rings around the orb, almost edge-on: four rings, each on its own tilt and its own speed.
-    for (let k = 0; k < 4; k++) {
-      const lines = newLines();
-      const inner = 1.04 + k * 0.1;
-      for (let i = 0; i < 18; i++) brokenRing(lines, rand(inner, inner + 0.1), 1, [0.4, 2.6], 0.012, rand(-0.02, 0.02));
-      const ring = part(inner + 0.05, rand(0.25, 0.6), 0.06, ringAxes);
-      ring.rotation.set(rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
-      ring.add(segments(lines, 0.14));
-    }
-
-    // Broken halo circles, roughly facing the camera, each turning on its own.
-    for (let k = 0; k < 4; k++) {
-      const lines = newLines();
-      for (let i = 0; i < 2; i++) brokenRing(lines, rand(1.06, 1.2), 4, [0.3, 1.4], 0.006);
-      const halo = part(1.13, rand(0.1, 0.35), 0.05, ringAxes);
-      halo.rotation.set(Math.PI / 2 + rand(-0.3, 0.3), rand(0, Math.PI * 2), rand(-0.3, 0.3));
-      halo.add(segments(lines, 0.16));
-    }
-
-    // The core, all in 3D so it reads from any angle: a glowing sphere inside a small cage and three gimbal rings,
-    // each turning on its own. While Arcanus talks the whole core swells and shrinks.
-    const core = new THREE.Group();
-    scene.add(core);
-    const coreGlow = { value: 1 };
-    core.add(
-      new THREE.Mesh(
-        new THREE.SphereGeometry(0.07, 32, 32),
-        new THREE.ShaderMaterial({
-          uniforms: { ...shared, uGlow: coreGlow },
-          vertexShader: CORE_VERTEX,
-          fragmentShader: CORE_FRAGMENT,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        })
-      )
-    );
-    const cageLines = newLines();
-    const cage = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.11, 1)).attributes.position;
-    for (let i = 0; i < cage.count; i += 2) {
-      polyline(cageLines, [new THREE.Vector3().fromBufferAttribute(cage, i), new THREE.Vector3().fromBufferAttribute(cage, i + 1)]);
-    }
-    part(0.11, rand(0.3, 0.5), 0.1, undefined, core).add(segments(cageLines, 0.7));
-    for (const r of [0.15, 0.19, 0.23]) {
-      const lines = newLines();
-      brokenRing(lines, r, 3, [1.2, 3], 0.004);
-      const ring = part(r, rand(0.6, 1.4), 0.15, undefined, core);
-      ring.rotation.set(rand(0, Math.PI), rand(0, Math.PI * 2), 0);
-      ring.add(segments(lines, 0.9));
-    }
-
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.35, 0.08));
@@ -390,8 +220,59 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
     const coreTwitch = twitch();
     const clock = new THREE.Clock();
     let frame = 0;
+    let dead = false;
+    const disposeDraw = (object: THREE.Object3D) => {
+      if (object instanceof THREE.LineSegments || object instanceof THREE.Mesh) {
+        object.geometry.dispose();
+        (object.material as THREE.Material).dispose();
+      }
+    };
 
-    const render = () => {
+    // The file stores the shells, rings, and core. These shaders and the mover loop are what make it Arcanus.
+    new GLTFLoader().loadAsync("/orb.glb").then((gltf) => {
+      if (dead) {
+        gltf.scene.traverse(disposeDraw);
+        return;
+      }
+      scene.add(gltf.scene);
+      const movers: Mover[] = [];
+      let core: THREE.Object3D | null = null;
+      const coreGlow = { value: 1 };
+      gltf.scene.traverse((obj) => {
+        const data = obj.userData as { part?: boolean; radius?: number; spin?: number; size?: number; axes?: [number, number, number]; base?: number };
+        if (obj.name === "core") core = obj;
+        if (data.part && data.radius != null && data.spin != null && data.size != null) movers.push(mover(obj, data.radius, data.spin, data.size, data.axes));
+        if (obj instanceof THREE.LineSegments) {
+          const along = obj.geometry.getAttribute("_along");
+          const seed = obj.geometry.getAttribute("_seed");
+          if (along) obj.geometry.setAttribute("along", along);
+          if (seed) obj.geometry.setAttribute("seed", seed);
+          (obj.material as THREE.Material).dispose();
+          obj.material = new THREE.ShaderMaterial({
+            uniforms: { ...shared, uBase: { value: data.base ?? 0.13 } },
+            vertexShader: LINE_VERTEX,
+            fragmentShader: LINE_FRAGMENT,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          });
+        }
+        if (obj.name === "core-eye" && obj instanceof THREE.Mesh) {
+          (obj.material as THREE.Material).dispose();
+          obj.material = new THREE.ShaderMaterial({
+            uniforms: { ...shared, uGlow: coreGlow },
+            vertexShader: CORE_VERTEX,
+            fragmentShader: CORE_FRAGMENT,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          });
+        }
+      });
+      if (!core || movers.length === 0) throw new Error("orb.glb is missing the orb parts");
+      const mouth = core;
+
+      const render = () => {
       frame = requestAnimationFrame(render);
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = (shared.uTime.value += dt);
@@ -459,28 +340,31 @@ export default function SphereScene({ analyser, activityBoost = 0 }: Props) {
       // The core is the mouth: while talking its size twitches between small and large in quick jumps, and it glows a
       // little brighter when large.
       const jump = tick(coreTwitch, t, snap);
-      core.scale.setScalar(1 + (talk * 0.7 + boost * 0.12) * jump * motion);
+      mouth.scale.setScalar(1 + (talk * 0.7 + boost * 0.12) * jump * motion);
       coreGlow.value = 1 + 0.25 * talk * (0.5 + 0.5 * jump);
 
       composer.render();
     };
-    render();
+      clock.getDelta();
+      render();
+    }).catch((error: unknown) => {
+      console.error(error);
+      if (!dead) setBroken(true);
+    });
 
     return () => {
+      dead = true;
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", onResize);
       controls.dispose();
-      scene.traverse((object) => {
-        if (object instanceof THREE.LineSegments || object instanceof THREE.Mesh) {
-          object.geometry.dispose();
-          (object.material as THREE.Material).dispose();
-        }
-      });
+      scene.traverse(disposeDraw);
       composer.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
   }, []);
+
+  if (broken) throw new Error("orb.glb failed to load");
 
   return <div ref={mountRef} style={{ width: "100vw", height: "100vh", overflow: "hidden" }} />;
 }
