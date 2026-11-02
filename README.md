@@ -26,7 +26,7 @@ Open [http://localhost:3000](http://localhost:3000). The first visit downloads a
 
 Tap the mic in the composer and talk. Arcanus stops listening when you pause (about a second of silence) and writes what you said into the message box, so you can check it before sending. Tap the mic again to finish early.
 
-It runs on-device, so it works offline after the first visit and no audio leaves the browser. Silero VAD (`public/silero_vad.onnx`, 2.3 MB, MIT) scores every 32 ms of microphone audio for speech: that is how it knows when you've stopped, and it cuts the silence off the clip so Whisper (tiny.en, ~41 MB, English) doesn't invent words for it. If VAD can't load, recording still works and stops when you tap. The microphone needs HTTPS (or localhost).
+The words come from the browser's own speech recognition (the same technology as Gianne's portfolio chat), so unlike the rest of Arcanus **it is not on-device**: Chrome and Safari send the audio to their speech service, and it needs a connection. Silero VAD (`public/silero_vad.onnx`, 2.3 MB, MIT) still runs on-device: it scores every 32 ms of microphone audio for speech, which is how Arcanus knows you've stopped. If VAD can't load, recording still works and stops when you tap. In a browser with no speech recognition (Firefox), or when it hears nothing, Whisper (tiny.en, ~41 MB, English) writes down the clip on the device instead; it is only downloaded then. The microphone needs HTTPS (or localhost).
 
 ## 3D studio and AR
 
@@ -58,7 +58,7 @@ src/
     brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
     llm/          SmolVLM: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
-    listen/       speech to text: microphone frames, Silero VAD (vad.worker.ts), Whisper tiny.en (listen.worker.ts)
+    listen/       speech to text: browser speech recognition, microphone frames, Silero VAD (vad.worker.ts), Whisper tiny.en fallback (listen.worker.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
     offline/      service worker registration, online status

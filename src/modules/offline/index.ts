@@ -8,14 +8,15 @@ import { useSyncExternalStore } from "react";
  * stale caches never hide code changes. Never rejects: without a service worker Arcanus still runs, just not offline.
  */
 export async function offlineReady() {
+  // Ask the browser not to evict ~270 MB of models under storage pressure, so they download once per device.
+  // First, and in development too: the model caches (Cache API) don't depend on the service worker.
+  void navigator.storage?.persist?.();
   if (!("serviceWorker" in navigator)) return;
   try {
     if (process.env.NODE_ENV !== "production") {
       for (const reg of await navigator.serviceWorker.getRegistrations()) await reg.unregister();
       return;
     }
-    // Ask the browser not to evict ~270 MB of models under storage pressure.
-    void navigator.storage?.persist?.();
     await navigator.serviceWorker.register("/sw.js");
     if (!navigator.serviceWorker.controller) {
       await Promise.race([
