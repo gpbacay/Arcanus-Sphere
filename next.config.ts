@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
         ],
       },
+      // The AR page needs the camera and motion sensors; the engine files never change for a given install.
+      { source: "/ar", headers: [{ key: "Permissions-Policy", value: "camera=(self), microphone=(self), xr-spatial-tracking=(self)" }] },
+      { source: "/external/xr/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
     ];
   },
 };

@@ -8,9 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/shared/lru.check.ts",
-    "orb": "node scripts/export-orb.mjs"
+    "orb": "node scripts/export-orb.mjs",
+    "postinstall": "node scripts/copy-8thwall-engine.mjs",
+    "copy:8thwall": "node scripts/copy-8thwall-engine.mjs",
+    "dev:https": "next dev --turbopack --experimental-https -H 0.0.0.0"
   },
   "dependencies": {
+    "@8thwall/engine-binary": "^1.0.0",
     "@huggingface/transformers": "3.8.1",
     "@types/three": "^0.180.0",
     "class-variance-authority": "^0.7.1",
@@ -19,6 +23,7 @@
     "next": "^15.5.22",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "phonemizer": "1.2.1",
+    "qrcode": "^1.5.4",
     "radix-ui": "^1.8.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -28,6 +33,7 @@
     "@eslint/eslintrc": "^3.3.6",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9.39.5",

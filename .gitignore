@@ -44,3 +44,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 8th Wall engine, copied from node_modules by scripts/copy-8thwall-engine.mjs
+/public/external/xr/

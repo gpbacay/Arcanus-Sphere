@@ -22,6 +22,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 180 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
 
+## 3D studio and AR
+
+The orb stands in a 3D space grid. The toolbar picks what a drag does: orbit the camera, or move, rotate or resize the orb with a gizmo. Reset puts everything back.
+
+The eye icon opens the AR view (`/ar`). On a desktop it shows a QR code for the phone; on a phone it goes straight there. AR uses the 8th Wall XR engine (`@8thwall/engine-binary`, copied to `public/external/xr` by `npm install`) for world tracking: tap a surface to place the orb, drag it to move, pinch to resize, twist to turn.
+
+The phone's camera needs HTTPS. To try it on a phone, run `npm run dev:https` and open the computer's network address, or use a tunnel, then edit the link in the QR dialog (or set `NEXT_PUBLIC_APP_URL`).
+
 ## Offline
 
 Arcanus is an offline-first PWA, so you can install it from the browser's address bar. After one online visit it works with no network at all.
