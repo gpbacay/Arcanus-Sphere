@@ -946,22 +946,27 @@ html.light .btn-primary:hover {
   }
 }
 
-/* —— 3D studio tools —— */
+/* —— 3D studio tools: inside the left rail, never over the model list —— */
 .stage-tools {
   position: absolute;
-  top: 50%;
-  left: calc(var(--gap) + var(--nav-w, 0px) + 8px);
-  z-index: 5;
+  top: calc(var(--gap) + 78px);
+  bottom: calc(var(--gap) + 118px);
+  left: var(--gap);
+  z-index: 26;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-  backdrop-filter: blur(18px);
-  transform: translateY(-50%);
+  width: var(--nav-w);
+  padding: 4px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }
 .stage-tools .icon-btn {
   width: 40px;
@@ -1002,7 +1007,16 @@ html.light .btn-primary:hover {
   }
   .stage-tools {
     top: calc(var(--gap) + 136px);
+    bottom: auto;
     left: 50%;
+    width: auto;
+    height: auto;
+    padding: 6px;
+    overflow: visible;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    backdrop-filter: blur(18px);
     flex-direction: row;
     transform: translateX(-50%);
   }
