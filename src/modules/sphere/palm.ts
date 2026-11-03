@@ -62,6 +62,9 @@ export function createPalm({ camera, size, onReady }: { camera: () => THREE.Pers
   };
   worker.postMessage({ type: "load", model: new URL("/hand_landmarker.task", location.origin).href });
 
+  /** Whether the tracker would look at a camera frame offered now: it is ready, idle, and it is time to look again. */
+  const wants = (ms: number) => ready && !busy && ms >= next && camera() !== null;
+
   const holding = () => {
     const since = performance.now() / 1000 - seenAt;
     if (since > GRACE) suppressed = false; // the hand has been away: it may pick Arcanus up again
@@ -73,7 +76,7 @@ export function createPalm({ camera, size, onReady }: { camera: () => THREE.Pers
     /** Offer this frame's camera pixels. Taken up only when the worker is free and it is time to look again. */
     offer(pixels: Frame | undefined, ms: number) {
       const cam = camera();
-      if (!ready || busy || ms < next || !cam || !pixels?.pixels || pixels.pixels.byteLength !== pixels.cols * pixels.rows * 4) return;
+      if (!cam || !wants(ms) || !pixels?.pixels || pixels.pixels.byteLength !== pixels.cols * pixels.rows * 4) return;
       next = ms + (holding() ? TRACK_EVERY : SEARCH_EVERY);
       busy = true;
       frame = { cols: pixels.cols, rows: pixels.rows };
@@ -82,6 +85,7 @@ export function createPalm({ camera, size, onReady }: { camera: () => THREE.Pers
       const buffer = pixels.pixels.buffer; // the engine makes a fresh buffer every frame: hand it over, no copy
       worker.postMessage({ type: "frame", id: 0, buffer, cols: pixels.cols, rows: pixels.rows }, [buffer]);
     },
+    wants,
     /** Whether Arcanus is resting on a palm right now. */
     holding,
     /** Arcanus was placed or moved by touch: let it stay there. */

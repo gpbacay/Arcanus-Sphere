@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { loadOrb, ORB_BLOOM, type OrbInputs } from "./orb";
 import { createPalm, type Frame, type Palm } from "./palm";
 
@@ -31,7 +30,7 @@ type Xr8 = {
     xrScene: () => { scene: THREE.Scene; camera: THREE.PerspectiveCamera; renderer: THREE.WebGLRenderer };
   };
   XrConfig: { device: () => { ANY: unknown } };
-  CameraPixelArray: { pipelineModule: (options: object) => object };
+  CameraPixelArray: { pipelineModule: (options: object) => { onProcessGpu: (args: unknown) => unknown } };
   addCameraPipelineModule: (module: object) => void;
   addCameraPipelineModules: (modules: object[]) => void;
   clearCameraPipelineModules: () => void;
@@ -54,6 +53,8 @@ const SCALE_START = 0.2; // a ~30 cm radius orb
 const SCALE_RANGE = [0.04, 1.2] as const;
 const PALM_SCALE = 0.035; // a ~5 cm radius orb: small enough to sit in a hand
 const PALM_FRAME = 320; // the longest side, in pixels, of the camera copy the hand tracker looks at
+const ORB_GAIN = 1.3; // the plate is lifted a little over the studio: a camera feed is a far busier backdrop than black
+const ORB_OPACITY = 1.6; // how much the orb covers the camera behind it, from its brightness: solid at the core, a veil at the halo
 const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const rest = new THREE.Vector3(); // where the orb sits on the palm this frame
 
@@ -98,7 +99,7 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   const bloomScene = new THREE.Scene();
   bloomScene.add(rig);
   const glowMat = new THREE.RawShaderMaterial({
-    uniforms: { tDiffuse: { value: null } },
+    uniforms: { tDiffuse: { value: null }, uGain: { value: ORB_GAIN }, uOpacity: { value: ORB_OPACITY } },
     vertexShader: /* glsl */ `
       attribute vec3 position;
       attribute vec2 uv;
@@ -111,12 +112,22 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
     fragmentShader: /* glsl */ `
       precision highp float;
       uniform sampler2D tDiffuse;
+      uniform float uGain;
+      uniform float uOpacity;
       varying vec2 vUv;
       void main() {
-        gl_FragColor = vec4(texture2D(tDiffuse, vUv).rgb, 1.0);
+        // Linear to sRGB here, what an OutputPass would do: one full-screen pass fewer.
+        vec3 c = texture2D(tDiffuse, vUv).rgb * uGain;
+        c = mix(pow(c, vec3(0.41666)) * 1.055 - 0.055, c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308))));
+        // The orb covers the camera behind it in proportion to how bright it is there, so it reads as a thing, not a tint.
+        float a = clamp(max(c.r, max(c.g, c.b)) * uOpacity, 0.0, 1.0);
+        gl_FragColor = vec4(c, a);
       }
     `,
-    blending: THREE.AdditiveBlending,
+    // Premultiplied over: the orb's light, plus what is left of the camera behind it.
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
     depthTest: false,
     depthWrite: false,
     transparent: true,
@@ -265,10 +276,10 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
 
   xr8.XrController.configure({ disableWorldTracking: false });
   xr8.addCameraPipelineModules([
-    xr8.GlTextureRenderer.pipelineModule(),
     {
       name: "arcanus-bloom",
-      // Before the engine draws the scene: bloom the orb on black, then the engine adds that plate onto the camera.
+      // Before the engine draws anything: bloom the orb on black, then the engine draws the camera and lays that plate
+      // over it. The plate comes first so the canvas is drawn in one go: a phone's GPU pays to leave and come back to it.
       onRender: () => {
         glow.visible = orb.root.visible; // switched off: nothing to bloom, nothing to add onto the camera
         if (!composer || !renderer || !glow.visible) return;
@@ -284,6 +295,7 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         glowMat.uniforms.tDiffuse.value = composer.readBuffer.texture;
       },
     },
+    xr8.GlTextureRenderer.pipelineModule(),
     xr8.Threejs.pipelineModule(),
     xr8.XrController.pipelineModule(),
     {
@@ -297,7 +309,6 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         composer.renderToScreen = false;
         composer.addPass(new RenderPass(bloomScene, camera, null, new THREE.Color(0x000000), 1));
         composer.addPass(new UnrealBloomPass(new THREE.Vector2(container.clientWidth, container.clientHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
-        composer.addPass(new OutputPass());
         layout(); // sizes the renderer and the bloom plate alike: a plate at 1x on a 3x screen draws every trace fat and soft
         xr.scene.add(glow);
         camera.position.set(0, CAMERA_HEIGHT, 0);
@@ -308,7 +319,12 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         palm = createPalm({
           camera: () => camera,
           size: () => ({ w: container.clientWidth, h: container.clientHeight }),
-          onReady: () => xr8.addCameraPipelineModule(xr8.CameraPixelArray.pipelineModule({ luminance: false, maxDimension: PALM_FRAME })),
+          onReady: () => {
+            // Handing out pixels means reading them back from the GPU, which waits for the last frame to finish drawing:
+            // the whole frame stalls. So only on the frames the hand tracker will actually look at, a few a second.
+            const pixels = xr8.CameraPixelArray.pipelineModule({ luminance: false, maxDimension: PALM_FRAME });
+            xr8.addCameraPipelineModule({ ...pixels, onProcessGpu: (args: unknown) => (orb.root.visible && palm?.wants(performance.now()) ? pixels.onProcessGpu(args) : undefined) });
+          },
         });
       },
       onCanvasSizeChange: () => layout(),
@@ -345,6 +361,8 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
       },
     },
   ]);
-  xr8.run({ canvas, allowedDevices: xr8.XrConfig.device().ANY });
+  // No multisampling: only two full-screen quads (the camera and the plate) are ever drawn on the canvas. The orb's lines are
+  // drawn into the plate, which MSAA on the canvas does nothing for, so it would only cost a full-screen resolve a frame.
+  xr8.run({ canvas, allowedDevices: xr8.XrConfig.device().ANY, glContextConfig: { antialias: false } });
   return stop;
 }
