@@ -1,5 +1,5 @@
 // Arcanus offline-first service worker.
-// - Pages: served from cache at once, refreshed in the background (stale-while-revalidate).
+// - Pages: from the network, so a new deploy shows on the next visit; the cached copy only when offline.
 // - Same-origin assets (hashed Next.js chunks, fonts, ARC 1 weights) and the ONNX Runtime files from jsDelivr:
 //   cache first. Both are versioned by URL, so a cached copy never goes stale.
 // - Hugging Face model files pass straight through: Transformers.js ("transformers-cache") and the Paradee voice
@@ -24,13 +24,11 @@ async function cacheFirst(request) {
 }
 
 async function page(event) {
-  const cached = (await caches.match(event.request, { ignoreSearch: true })) ?? (await caches.match("/"));
-  const fresh = fetch(event.request).then((r) => put(event.request, r));
-  if (cached) {
-    event.waitUntil(fresh.catch(() => undefined));
-    return cached;
+  try {
+    return await put(event.request, await fetch(event.request));
+  } catch {
+    return (await caches.match(event.request, { ignoreSearch: true })) ?? (await caches.match("/")) ?? Response.error();
   }
-  return fresh;
 }
 
 self.addEventListener("install", (event) => {

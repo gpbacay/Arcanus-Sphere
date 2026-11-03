@@ -6,6 +6,7 @@ import { useOnline } from "@/modules/offline";
 import { voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
+import { Logo } from "@/shared/ui/logo";
 import { Sidebar, useSidebar } from "@/shared/ui/sidebar";
 import { COMPOSER_ID, Composer } from "./Composer";
 import { discard, send, useBusy } from "./conversation";
@@ -32,7 +33,7 @@ export function ChatPanel() {
         <button type="button" className="icon-btn" aria-label="Open chat" title="Open chat" onClick={() => setCollapsed(false)}>
           <Icon name="left" />
         </button>
-        <span className="brand-mark" data-state={mood} />
+        <Logo state={mood} size={18} />
       </aside>
     );
   }
@@ -136,7 +137,7 @@ function Header({ mood, onHide }: { mood: Mood; onHide: () => void }) {
 
   return (
     <header className="panel-head">
-      <span className="brand-mark" data-state={mood} aria-hidden />
+      <Logo state={mood} size={22} />
       <div className="panel-title" ref={menuRef}>
         {renaming ? (
           <form

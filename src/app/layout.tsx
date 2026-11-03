@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import localFont from "next/font/local";
+import Script from "next/script";
 import "./globals.css";
 
 // Gilroy (Fontspring EULA, see fonts/gilroy/License.txt): WOFF2 made from the TTFs in personal-portfolio-2025.
@@ -45,6 +46,9 @@ export default function RootLayout({
     // The font variables go on <html>: globals.css reads them in :root (--font-ui), which is <html>.
     <html lang="en" className={`${gilroy.variable} ${plexMono.variable}`} suppressHydrationWarning={true}>
       <body suppressHydrationWarning={true}>
+        <Script id="arcanus-theme" strategy="beforeInteractive">
+          {`try{if(localStorage.getItem("arcanus_theme")==="light")document.documentElement.classList.add("light")}catch(e){}`}
+        </Script>
         {children}
       </body>
     </html>

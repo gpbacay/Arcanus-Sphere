@@ -293,13 +293,12 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         camera = xr.camera;
         renderer = xr.renderer;
         renderer.setClearColor(0x000000, 0);
-        layout();
         composer = new EffectComposer(renderer);
         composer.renderToScreen = false;
         composer.addPass(new RenderPass(bloomScene, camera, null, new THREE.Color(0x000000), 1));
         composer.addPass(new UnrealBloomPass(new THREE.Vector2(container.clientWidth, container.clientHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
         composer.addPass(new OutputPass());
-        composer.setSize(container.clientWidth, container.clientHeight);
+        layout(); // sizes the renderer and the bloom plate alike: a plate at 1x on a 3x screen draws every trace fat and soft
         xr.scene.add(glow);
         camera.position.set(0, CAMERA_HEIGHT, 0);
         xr8.XrController.updateCameraProjectionMatrix({ origin: camera.position, facing: camera.quaternion });
