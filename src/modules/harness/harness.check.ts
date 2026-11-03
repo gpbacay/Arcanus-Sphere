@@ -1,8 +1,11 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, callTool, matchTool, parseMcpBody, personalityReply, registerPlugin } from "./index.ts";
+import { argsFor, callTool, identityBrief, introduction, matchTool, parseMcpBody, personalityReply, registerPlugin } from "./index.ts";
 
 assert.match(personalityReply(), /Arcanus/);
+assert.match(identityBrief, /Gianne Bacay/);
+assert.match(identityBrief, /not a member of any team/);
+assert.equal(introduction, "I am Arcanus, created by Gianne Bacay. How can I help?");
 assert.deepEqual(argsFor({ properties: { city: {}, units: {} } }, "Manila"), { city: "Manila" });
 assert.deepEqual(argsFor(undefined, "2+2"), { input: "2+2" });
 

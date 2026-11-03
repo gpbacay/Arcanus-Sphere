@@ -29,11 +29,9 @@ type Props = {
 
 const GRID_Y = -1.6; // just under the outermost ring (radius ~1.45)
 const SCALE_RANGE = [0.3, 3] as const;
-// On a phone the chat covers the lower half and the toolbar the top: the orb stands back and sits in what is left.
 const NARROW = 720;
-const TOOLBAR = 68; // px, keep in step with .stage-tools in globals.css
-const PANEL = 0.52; // the chat's share of the screen height, keep in step with .panel in globals.css
-const home = () => (window.innerWidth <= NARROW ? new THREE.Vector3(0, 3.2, 6.4) : new THREE.Vector3(0, 2.4, 4.2));
+// Phone: the canvas is only the free band under the chrome, so the orb can sit in the middle of it.
+const homeFor = (width: number) => (width <= NARROW ? new THREE.Vector3(0, 0.15, 5.8) : new THREE.Vector3(0, 2.4, 4.2));
 
 const MODES = { move: "translate", rotate: "rotate", scale: "scale" } as const;
 
@@ -105,13 +103,13 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(1, 1, false);
     renderer.setClearColor(0x000000, 1);
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.copy(home());
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.copy(homeFor(mount.clientWidth || window.innerWidth));
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -155,7 +153,7 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
         rig.position.set(0, 0, 0);
         rig.rotation.set(0, 0, 0);
         rig.scale.setScalar(1);
-        camera.position.copy(home());
+        camera.position.copy(homeFor(mount.clientWidth || window.innerWidth));
         controls.target.set(0, 0, 0);
       },
     };
@@ -163,28 +161,22 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
     composer.addPass(new OutputPass());
 
     const fit = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      const w = mount.clientWidth;
+      const h = mount.clientHeight;
+      if (w < 2 || h < 2) return;
       camera.aspect = w / h;
-      if (w <= NARROW) {
-        const free = (TOOLBAR + h - Math.min(PANEL * h, 640)) / 2; // the middle of the space the orb has
-        camera.setViewOffset(w, h, 0, h / 2 - free, w, h);
-      } else {
-        camera.clearViewOffset();
-      }
+      camera.clearViewOffset();
       camera.updateProjectionMatrix();
+      renderer.setSize(w, h, false);
+      composer.setSize(w, h);
     };
     fit();
-    const onResize = () => {
-      fit();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      composer.setSize(window.innerWidth, window.innerHeight);
-    };
-    window.addEventListener("resize", onResize);
+    const onResize = new ResizeObserver(fit);
+    onResize.observe(mount);
 
     const clock = new THREE.Clock();
     let frame = 0;
@@ -216,7 +208,7 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
       dead = true;
       api.current = null;
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
+      onResize.disconnect();
       orb?.dispose();
       gizmo.dispose();
       controls.dispose();
@@ -235,5 +227,5 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
 
   if (broken) throw new Error("orb.glb failed to load");
 
-  return <div ref={mountRef} style={{ width: "100vw", height: "100vh", overflow: "hidden" }} />;
+  return <div ref={mountRef} className="stage-view" />;
 }

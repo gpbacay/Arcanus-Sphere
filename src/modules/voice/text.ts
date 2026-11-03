@@ -13,13 +13,15 @@ export function forSpeech(text: string): string {
 
 // ponytail: phrase lists, not a classifier. Add a phrase when a boot line is the wrong kind of sentence.
 const OPENING = /\b(hello|hi|hey|good (?:morning|afternoon|evening|day)|welcome|i(?:'m| am)\b|my name is)\b/i;
+// A boot line that invents a job is not an introduction. The model has no workplace.
+const INVENTED = /\b(team|employee|colleague|coworker|company|hired|joined|member of)\b/i;
 const SIGN_OFF =
   /\b(thank(?:s| you)|goodbye|bye|farewell|see you|take care|you(?:'re| are) welcome|hope to hear|hear from you|glad to\b[^.]{0,40}\bhelp|have a (?:good|nice|great)|until next|talk soon)\b/i;
 
 /** A boot line that opens the meeting: a greeting or a self-introduction, never a sign-off. */
 export function isIntroduction(line: string): boolean {
   const text = line.trim();
-  return text.split(/\s+/).length >= 3 && OPENING.test(text) && /\barcanus\b/i.test(text) && !SIGN_OFF.test(text);
+  return text.split(/\s+/).length >= 3 && OPENING.test(text) && /\barcanus\b/i.test(text) && !SIGN_OFF.test(text) && !INVENTED.test(text);
 }
 
 /** The greeting sentence in a model reply: quotes and a leading name stripped, one-word stubs skipped. */

@@ -24,6 +24,7 @@
   --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
   --panel-w: min(420px, calc(100vw - 24px));
   --gap: 12px;
+  --glass: rgba(14, 16, 20, 0.4);
   --sidebar: rgba(14, 16, 20, 0.92);
   --sidebar-foreground: #e6e9ee;
   --sidebar-primary: #88a8cc;
@@ -61,6 +62,7 @@ html.light {
   --sidebar-accent-foreground: #12161c;
   --sidebar-border: rgba(18, 22, 28, 0.12);
   --sidebar-ring: #3c5e84;
+  --glass: rgba(255, 255, 255, 0.55);
 }
 
 /* Tokens the ARCANE Chain of Thought component reads through Tailwind. */
@@ -127,6 +129,17 @@ body {
 .app-stage {
   position: absolute;
   inset: 0;
+}
+
+.stage-view {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.stage-view canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* The sphere's stand-in: while three.js loads, and for good without WebGL. Breathes faster as Arcanus works. */
@@ -894,23 +907,65 @@ html.light .btn-primary:hover {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   :root {
     --gap: 8px;
   }
 
-  .panel {
-    top: auto;
-    height: min(52dvh, 640px);
-    right: var(--gap);
-    width: auto;
+  /* Chrome in its own rows. The orb's canvas is the only thing in the middle row, so nothing covers it. */
+  .app-shell {
+    --nav-w: 0px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 34dvh);
+    grid-template-areas: "nav" "status" "stage" "foot" "chat";
+    width: 100%;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
   }
-
+  .app-nav {
+    grid-area: nav;
+  }
+  .engines {
+    grid-area: status;
+  }
+  .app-stage {
+    grid-area: stage;
+    position: relative;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .stage-view {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+  }
   .stage-foot {
-    left: 0;
-    right: 0;
-    top: calc(var(--gap) + 196px);
+    grid-area: foot;
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
     bottom: auto;
+    padding: 2px 12px 6px;
+  }
+  .panel {
+    grid-area: chat;
+    position: relative;
+    inset: auto;
+    width: auto;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    overflow: hidden;
+    border-radius: 18px 18px 0 0;
+    background: var(--glass);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.22);
+  }
+  .caption {
+    background: var(--glass);
   }
 }
 
@@ -984,41 +1039,51 @@ html.light .btn-primary:hover {
 }
 
 @media (max-width: 767px) {
-  .app-shell {
-    --nav-w: 0px;
-  }
   .engines {
-    top: calc(var(--gap) + 56px);
-    right: var(--gap);
-    left: var(--gap);
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
     width: auto;
-    flex-flow: row wrap;
-    gap: 4px;
+    margin: 6px 8px 0;
+    flex-flow: row nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .engine,
+  .power {
+    flex: none;
+    background: var(--glass);
+    box-shadow: none;
   }
   .engine {
     grid-template-columns: auto auto auto;
-    padding: 4px 8px 5px;
+    padding: 6px 10px;
   }
   .power {
-    padding: 4px 8px;
+    padding: 6px 10px;
   }
   .engine-detail {
     display: none;
   }
   .stage-tools {
-    top: calc(var(--gap) + 136px);
+    position: relative;
+    top: auto;
     bottom: auto;
-    left: 50%;
-    width: auto;
+    left: auto;
+    width: 100%;
     height: auto;
-    padding: 6px;
+    padding: 2px 8px 4px;
     overflow: visible;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: var(--panel);
-    backdrop-filter: blur(18px);
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
     flex-direction: row;
-    transform: translateX(-50%);
+    justify-content: center;
+    transform: none;
   }
   .tools-sep {
     width: 1px;
@@ -1203,14 +1268,22 @@ html.light .btn-primary:hover {
 
 @media (max-width: 767px) {
   .app-nav {
+    position: relative;
+    top: auto;
     right: auto;
     bottom: auto;
+    left: auto;
     flex-direction: row;
     justify-content: flex-start;
     width: auto;
-    height: 48px;
+    height: auto;
+    min-height: 44px;
+    margin: 8px 8px 0;
+    justify-self: start;
     padding: 4px 8px 4px 6px;
     gap: 2px;
+    background: var(--glass);
+    box-shadow: none;
   }
   .app-nav-brand {
     flex-direction: row;

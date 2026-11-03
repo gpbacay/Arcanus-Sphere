@@ -2,10 +2,10 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { think } from "@/modules/brain";
-import { personality } from "@/modules/harness";
+import { identityBrief, introduction, personality } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
-import { isEcho, isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
+import { isEcho, takeSentences, voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { Store, errorText, useStore } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
@@ -19,7 +19,7 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 // While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
 const busy = () => live.state.reply !== null || !power.state.on;
 
-const SYSTEM = `You are Arcanus, a local AI assistant that lives in the user's browser as a glowing 3D sphere. ${personality.line} Gianne Bacay created you. You run on the user's device: SmolVLM writes replies, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation. Answer clearly and briefly. If asked who you are or who made you, say you are Arcanus, created by Gianne Bacay.`;
+const SYSTEM = `You are Arcanus. ${identityBrief} ${personality.line} Answer clearly and briefly, using only these facts about yourself. If you do not know something about yourself, say so. Do not invent a job, a team, a company, or a personal history.`;
 const NO_MODEL =
   "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolVLM shows ready.";
 
@@ -29,7 +29,9 @@ function buildTurns(prior: Msg[], user: Msg, facts?: string[]): Turn[] {
   const quote = user.replyToId ? prior.find((m) => m.id === user.replyToId) : undefined;
   let content = user.text;
   if (quote) content = `About this earlier message: "${quote.text.slice(0, 300)}"\n\n${content}`;
-  if (facts?.length) content = `Facts about Arcanus:\n${facts.map((f) => `- ${f}`).join("\n")}\n\nUsing these facts, answer: ${content}`;
+  if (facts?.length) {
+    content = `Facts about Arcanus, and only these:\n${facts.map((f) => `- ${f}`).join("\n")}\n\nAnswer from these facts. Do not add a job, a team, or a personal history.\n\n${content}`;
+  }
   const history = prior.slice(-6).map((m): Turn => ({ role: m.role, content: m.text }));
   return [{ role: "system", content: SYSTEM }, ...history, { role: "user", content }];
 }
@@ -37,17 +39,10 @@ function buildTurns(prior: Msg[], user: Msg, facts?: string[]): Turn[] {
 const sayAll = (text: string) => takeSentences(`${text}\n`).sentences.forEach((s) => voice.say(s));
 const lastRole = (messages: Msg[], role: Msg["role"]) => messages.findLastIndex((m) => m.role === role);
 
-/** The line Arcanus composed for this boot. Empty until the model writes one. */
+/** The boot line. A fact, not a sentence the model writes. */
 export const greeting = new Store({ text: "" });
 
-let greetGen = 0;
-let greetJob = 0;
 let listening = false;
-
-function bootAsk() {
-  const when = new Date().toLocaleString(undefined, { weekday: "long", hour: "numeric", minute: "2-digit", second: "2-digit" });
-  return `It is ${when}. Introduce yourself.`;
-}
 
 function onPointer() {
   voice.unlock();
@@ -71,92 +66,24 @@ function silence() {
   window.removeEventListener("pointerdown", onPointer);
 }
 
-function waitReady(mine: number) {
-  return new Promise<void>((resolve) => {
-    const check = () => {
-      const status = llm.state.state.status;
-      if (mine !== greetGen || !power.state.on || status === "ready" || status === "error") {
-        dropL();
-        dropP();
-        resolve();
-      }
-    };
-    const dropL = llm.state.subscribe(check);
-    const dropP = power.subscribe(check);
-    check();
-  });
-}
-
-/** Drop a boot greeting still being written, and the line from the last one. */
+/** Drop a boot greeting still on screen. */
 export function cancelGreet() {
-  greetGen++;
   greeting.set({ text: "" });
   silence();
-  if (!greetJob) return;
-  greetJob = 0;
-  llm.stop();
 }
 
-/** Ask SmolVLM for this boot's greeting. Nothing is written ahead of time. */
+/** Show the introduction at once. Speak it when the voice is ready, or on the next tap. */
 export function greet() {
   if (!power.state.on) return;
-  const mine = ++greetGen;
-  watchGesture();
-  void runGreet(mine);
-}
-
-async function runGreet(mine: number) {
-  if (greetJob) llm.stop();
-  await waitReady(mine);
-  if (mine !== greetGen || !power.state.on || busy() || llm.state.state.status !== "ready") return;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (mine !== greetGen || !power.state.on || busy()) return;
-    const line = await oneIntro(mine);
-    if (mine !== greetGen || !power.state.on || !isIntroduction(line)) continue;
-    greeting.set({ text: line });
-    if (voice.state.state.off || !voice.state.state.analyser) return;
+  greeting.set({ text: introduction });
+  if (voice.state.state.off) return;
+  if (voice.state.state.analyser) {
     silence();
     voice.cancel();
-    sayAll(line);
+    sayAll(introduction);
     return;
   }
-}
-
-/** One sampled sentence. A sign-off is returned and discarded by the caller. */
-async function oneIntro(mine: number): Promise<string> {
-  greetJob = mine;
-  let shown = "";
-  const take = (text: string) => {
-    const line = openingLine(text);
-    // A short stub may be followed by the introduction. A finished sign-off is not.
-    if (!/[.!?]$/.test(line) || line.split(/\s+/).length < 3) return;
-    if (isIntroduction(line)) greeting.set({ text: line });
-    llm.stop();
-  };
-  try {
-    const written = await llm.generate(
-      [
-        {
-          role: "system",
-          content:
-            `You are Arcanus, just switched on. ${personality.line} One sentence that says the name Arcanus first, greets the person, and offers help. Do not thank them. Do not say goodbye.`,
-        },
-        { role: "user", content: bootAsk() },
-      ],
-      undefined,
-      (piece) => {
-        if (mine !== greetGen) return;
-        shown += piece;
-        take(shown);
-      },
-      { maxNewTokens: 24, fresh: true, sample: true },
-    );
-    return openingLine(written.text || shown);
-  } catch {
-    return openingLine(shown);
-  } finally {
-    if (greetJob === mine) greetJob = 0;
-  }
+  watchGesture();
 }
 
 async function answer(chatId: string, prior: Msg[], user: Msg) {

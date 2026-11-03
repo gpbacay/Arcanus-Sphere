@@ -8,6 +8,8 @@ assert.equal(openingLine("Arcanus: Hello, how can I help you?"), "Hello, how can
 assert.equal(openingLine("  hello there"), "hello there");
 assert.equal(isIntroduction("Good day, how can I help you?"), false);
 assert.equal(isIntroduction("Hello, I am Arcanus. How can I help?"), true);
+assert.equal(isIntroduction("I am Arcanus, created by Gianne Bacay. How can I help?"), true);
+assert.equal(isIntroduction("I am Arcanus, a new member of the team."), false);
 assert.equal(isIntroduction("Hello, I am Arcanus."), true);
 assert.equal(isIntroduction("Thank you!"), false);
 assert.equal(isIntroduction("I hope to hear from you soon."), false);
