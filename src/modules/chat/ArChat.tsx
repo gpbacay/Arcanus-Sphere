@@ -2,14 +2,15 @@
 
 // Talking to Arcanus in AR. Built to stay out of the way of the camera view: the resting state is one round mic button
 // at the bottom, Arcanus's reply floats as a small translucent caption that fades on its own, and the text box only
-// opens when asked. Speech is hands-free: tap the mic, talk, and it sends when you pause.
+// opens when asked. Speech is hands-free and full duplex: tap the mic once, then just talk; each pause sends, and
+// talking over Arcanus interrupts it. Tap again to end.
 import { Keyboard } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { canListen, listen } from "@/modules/listen";
 import { llm } from "@/modules/llm";
 import { voice } from "@/modules/voice";
 import { useStore } from "@/shared/store";
-import { greeting, live, send, stop, useBusy } from "./conversation";
+import { greeting, live, send, stop, talk, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { MAX, chatStore, selectCurrent } from "./store";
 
@@ -22,8 +23,9 @@ const lastText = (role: "user" | "assistant") => (s: typeof chatStore.state) => 
 export function ArChat() {
   const busy = useBusy();
   const speaking = useStore(voice.state, (s) => s.speaking);
-  const phase = useStore(listen.state, (s) => s.phase);
-  const heard = useStore(listen.state, (s) => s.heard);
+  const talking = useStore(listen.state, (s) => s.on);
+  const hearing = useStore(listen.state, (s) => s.hearing);
+  const writing = useStore(listen.state, (s) => s.writing);
   const problem = useStore(listen.state, (s) => s.problem);
   const model = useStore(llm.state, (s) => s.status);
   const pct = useStore(llm.state, (s) => (s.total ? Math.min(99, Math.round((s.loaded / s.total) * 100)) : 0));
@@ -38,7 +40,7 @@ export function ArChat() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // The caption shows while Arcanus works or speaks, then fades after a few seconds. Tapping it clears it.
-  const working = busy || speaking || phase !== "idle";
+  const working = busy || speaking || hearing || writing;
   useEffect(() => {
     if (working || liveText || greeted) return setVisible(true);
     const timer = setTimeout(() => setVisible(false), FADE_MS);
@@ -52,16 +54,6 @@ export function ArChat() {
   // Leaving the page (or the AR view) must never leave the microphone open.
   useEffect(() => () => listen.cancel(), []);
 
-  function talk() {
-    voice.unlock(); // inside the tap, so the browser lets Arcanus's voice play later
-    if (phase === "recording") return listen.stop();
-    if (busy) stop();
-    voice.cancel(); // so Arcanus doesn't hear itself
-    void listen.record((text) => {
-      if (text) send(text);
-    });
-  }
-
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (send(draft)) {
@@ -70,13 +62,19 @@ export function ArChat() {
     }
   }
 
-  const status =
-    phase === "recording" ? (heard ? "Listening… I'll answer when you pause" : "Listening…") : phase === "transcribing" ? "Writing down what you said…" : "";
   const loading = model === "loading" || model === "idle";
   const caption = busy ? liveText || "Thinking…" : greeted || lastReply;
+  // A reply on screen stays readable: "Listening…" only shows when nothing else is up.
+  const status = hearing
+    ? "Hearing you… I'll answer when you pause"
+    : writing
+      ? "Writing down what you said…"
+      : talking && !busy && !speaking && !(visible && caption)
+        ? "Listening… just talk"
+        : "";
 
   return (
-    <div className="arc" data-recording={phase === "recording" || undefined}>
+    <div className="arc" data-recording={talking || undefined}>
       {visible && caption && !status ? (
         <button type="button" className="arc-caption" aria-live="polite" onClick={() => setVisible(false)}>
           {busy && lastAsk ? <span className="arc-ask">{lastAsk}</span> : null}
@@ -123,10 +121,9 @@ export function ArChat() {
               <button
                 type="button"
                 className="arc-mic"
-                data-recording={phase === "recording" || undefined}
-                aria-pressed={phase === "recording"}
-                aria-label={phase === "recording" ? "Finish speaking" : "Talk to Arcanus"}
-                disabled={phase === "transcribing"}
+                data-recording={talking || undefined}
+                aria-pressed={talking}
+                aria-label={talking ? "End the voice conversation" : "Talk to Arcanus"}
                 onClick={talk}
               >
                 <Icon name="mic" size={26} />

@@ -5,7 +5,7 @@ import { canListen, listen } from "@/modules/listen";
 import { voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
-import { send, stop, useBusy } from "./conversation";
+import { send, stop, talk, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { MAX, chatStore, setReplyTo } from "./store";
 
@@ -29,9 +29,10 @@ const never = () => () => undefined;
 export function Composer() {
   const replyTo = useStore(chatStore, (s) => s.replyTo);
   const voiceOn = !useStore(voice.state, (s) => s.off);
-  const phase = useStore(listen.state, (s) => s.phase);
+  const talking = useStore(listen.state, (s) => s.on);
+  const hearing = useStore(listen.state, (s) => s.hearing);
+  const writing = useStore(listen.state, (s) => s.writing);
   const problem = useStore(listen.state, (s) => s.problem);
-  const heard = useStore(listen.state, (s) => s.heard);
   const micOk = useSyncExternalStore(never, canListen, yes);
   const busy = useBusy();
   const on = useStore(power, (s) => s.on);
@@ -45,17 +46,6 @@ export function Composer() {
     setDraft("");
     setImage(null);
     if (inputRef.current) inputRef.current.style.height = "auto";
-  }
-
-  /** Tap to start talking, tap again to finish: the words land in the draft for you to check before sending. */
-  function talk() {
-    if (phase === "recording") return listen.stop();
-    voice.cancel(); // so Arcanus doesn't hear itself
-    void listen.record((text) => {
-      if (!text) return;
-      setDraft((d) => `${d}${d && !/\s$/.test(d) ? " " : ""}${text}`.slice(0, MAX));
-      inputRef.current?.focus();
-    });
   }
 
   async function attach(event: ChangeEvent<HTMLInputElement>) {
@@ -112,7 +102,7 @@ export function Composer() {
           value={draft}
           maxLength={MAX}
           rows={2}
-          placeholder={!on ? "Arcanus is off" : phase === "recording" ? (heard ? "Listening… I'll write it down when you pause" : "Listening…") : phase === "transcribing" ? "Writing down what you said…" : "Message Arcanus"}
+          placeholder={!on ? "Arcanus is off" : !talking ? "Message Arcanus" : hearing ? "Hearing you… I'll answer when you pause" : writing ? "Writing down what you said…" : "Listening… just talk, or talk over Arcanus to interrupt"}
           aria-label="Message Arcanus"
           disabled={!on}
           onChange={(e) => {
@@ -136,11 +126,11 @@ export function Composer() {
             <button
               type="button"
               className="icon-btn"
-              data-recording={phase === "recording" || undefined}
-              aria-pressed={phase === "recording"}
-              aria-label={phase === "recording" ? "Finish speaking" : "Speak your message"}
-              title={phase === "recording" ? "Finish now" : "Speak your message"}
-              disabled={!on || phase === "transcribing"}
+              data-recording={talking || undefined}
+              aria-pressed={talking}
+              aria-label={talking ? "End the voice conversation" : "Talk to Arcanus"}
+              title={talking ? "End the voice conversation" : "Talk to Arcanus, hands-free"}
+              disabled={!on}
               onClick={talk}
             >
               <Icon name="mic" />

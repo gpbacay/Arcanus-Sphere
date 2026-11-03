@@ -1,5 +1,5 @@
 // Silero VAD v5 (Silero Team, MIT; public/silero_vad.onnx, 2.3 MB): says how likely each 32 ms of audio is speech.
-// Frames of 512 samples at 16 kHz go in, one probability per frame comes out, in order. The model is stateful: it
+// Frames of 512 samples at 16 kHz go in, and come back with their probability, in order. The model is stateful: it
 // carries a hidden state and the last 64 samples of the previous frame, so a frame is judged in its context.
 import * as ort from "onnxruntime-web/wasm";
 
@@ -9,7 +9,7 @@ ort.env.wasm.numThreads = 1; // a tiny model: one thread leaves the cores to Whi
 
 const FRAME = 512;
 const CONTEXT = 64;
-const post = (message: unknown) => self.postMessage(message);
+const post = (message: unknown, transfer: Transferable[] = []) => self.postMessage(message, { transfer });
 
 let session: Promise<ort.InferenceSession> | null = null;
 let state: ort.Tensor = new ort.Tensor("float32", new Float32Array(2 * 128), [2, 1, 128]);
@@ -20,7 +20,7 @@ const sr = new ort.Tensor("int64", BigInt64Array.from([16000n]), []);
 let model = "";
 const load = () => (session ??= ort.InferenceSession.create(model));
 
-self.onmessage = ({ data }: MessageEvent<{ type: string; model?: string; i?: number; samples?: Float32Array }>) => {
+self.onmessage = ({ data }: MessageEvent<{ type: string; model?: string; sid?: number; samples?: Float32Array }>) => {
   if (data.type === "load") {
     model = data.model!; // an absolute URL: a bundled worker lives at a blob: address, where "/x" means nothing
     load().then(
@@ -36,15 +36,21 @@ self.onmessage = ({ data }: MessageEvent<{ type: string; model?: string; i?: num
       context = new Float32Array(CONTEXT);
     });
   } else if (data.type === "frame") {
-    const { i, samples } = data;
+    const { sid, samples } = data as { sid: number; samples: Float32Array };
     queue = queue.then(async () => {
-      const input = new Float32Array(CONTEXT + FRAME);
-      input.set(context);
-      input.set(samples!, CONTEXT);
-      context = samples!.slice(FRAME - CONTEXT);
-      const out = await (await load()).run({ input: new ort.Tensor("float32", input, [1, input.length]), state, sr });
-      state = out.stateN;
-      post({ type: "prob", i, p: out.output.data[0] as number });
+      let p = 0;
+      try {
+        const input = new Float32Array(CONTEXT + FRAME);
+        input.set(context);
+        input.set(samples, CONTEXT);
+        context = samples.slice(FRAME - CONTEXT);
+        const out = await (await load()).run({ input: new ort.Tensor("float32", input, [1, input.length]), state, sr });
+        state = out.stateN;
+        p = out.output.data[0] as number;
+      } catch {
+        // one bad frame scores as silence; it must never stall the frames behind it
+      }
+      post({ type: "prob", sid, p, samples }, [samples.buffer]);
     });
   }
 };

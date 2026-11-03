@@ -1,12 +1,20 @@
-// Whisper tiny.en (OpenAI, MIT; ONNX build by onnx-community) on ONNX Runtime Web, off the main thread. Speech in as
-// 16 kHz mono samples, text out. English only, about 41 MB at 8-bit.
-// ponytail: tiny.en for the small download. Swap MODEL for "onnx-community/whisper-base.en" (~80 MB) if it mishears.
+// Whisper base.en (OpenAI, MIT; ONNX build by onnx-community) on ONNX Runtime Web, off the main thread. Speech in as
+// 16 kHz mono samples, text out. English only. The encoder stays full precision: an 8-bit Whisper encoder mishears
+// badly and often returns nothing. On the GPU when there is one (SmolVLM keeps to the CPU), else on the CPU.
 import { pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 
-const MODEL = "onnx-community/whisper-tiny.en";
+const MODEL = "onnx-community/whisper-base.en";
 const post = (message: unknown) => self.postMessage(message);
 
 let loading: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
+
+async function hasGpu() {
+  try {
+    return Boolean(await (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu?.requestAdapter());
+  } catch {
+    return false;
+  }
+}
 
 function load() {
   loading ??= (async () => {
@@ -21,9 +29,14 @@ function load() {
       }
       post({ type: "progress", loaded, total });
     };
-    // CPU (WASM): like SmolVLM, which leaves the GPU alone. Whisper tiny is quick enough there.
-    const asr = (await pipeline("automatic-speech-recognition", MODEL, { dtype: "q8", device: "wasm", progress_callback })) as unknown as AutomaticSpeechRecognitionPipeline;
-    post({ type: "ready", device: "wasm" });
+    const device = (await hasGpu()) ? "webgpu" : "wasm";
+    const asr = (await pipeline("automatic-speech-recognition", MODEL, {
+      device,
+      dtype: { encoder_model: "fp32", decoder_model_merged: device === "webgpu" ? "q4" : "q8" },
+      progress_callback,
+    })) as unknown as AutomaticSpeechRecognitionPipeline;
+    await asr(new Float32Array(16000)); // compiles the GPU shaders now, not on the first thing you say
+    post({ type: "ready", device });
     return asr;
   })();
   loading.catch((err: unknown) => {
@@ -33,17 +46,18 @@ function load() {
   return loading;
 }
 
-// Whisper writes these for silence and noise: "[BLANK_AUDIO]", "(music)", "*sigh*".
+// Whisper writes these for silence and noise: "[BLANK_AUDIO]", "(music)", "*sigh*", and a lone "you".
 const NOISE = /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g;
+const HALLUCINATION = /^(?:you\.?|thanks for watching!?|\W*)$/i;
 
 self.onmessage = async ({ data }: MessageEvent<{ type: string; id?: number; samples?: Float32Array }>) => {
   try {
     if (data.type === "load") await load();
     else if (data.type === "transcribe") {
       const asr = await load();
-      const out = await asr(data.samples!, { chunk_length_s: 30, stride_length_s: 5 });
+      const out = await asr(data.samples!);
       const text = (Array.isArray(out) ? out.map((o) => o.text).join(" ") : out.text).replace(NOISE, " ").replace(/\s+/g, " ").trim();
-      post({ type: "text", id: data.id, text });
+      post({ type: "text", id: data.id, text: HALLUCINATION.test(text) ? "" : text });
     }
   } catch (err) {
     if (data.type === "transcribe") post({ type: "error", id: data.id, message: err instanceof Error ? err.message : String(err) });

@@ -20,13 +20,15 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 180 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
+Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 320 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
 
 ## Speech to text
 
-Tap the mic in the composer and talk. Arcanus stops listening when you pause (about a second of silence) and writes what you said into the message box, so you can check it before sending. Tap the mic again to finish early.
+Tap the mic once and just talk: it's a hands-free, full-duplex conversation. The microphone stays open; each time you pause (about 0.7 s) Arcanus sends what you said, answers aloud, and keeps listening. Talk over it and it stops mid-sentence to hear you. Tap the mic again to end the conversation.
 
-The words come from the browser's own speech recognition (the same technology as Gianne's portfolio chat), so unlike the rest of Arcanus **it is not on-device**: Chrome and Safari send the audio to their speech service, and it needs a connection. Silero VAD (`public/silero_vad.onnx`, 2.3 MB, MIT) still runs on-device: it scores every 32 ms of microphone audio for speech, which is how Arcanus knows you've stopped. If VAD can't load, recording still works and stops when you tap. In a browser with no speech recognition (Firefox), or when it hears nothing, Whisper (tiny.en, ~41 MB, English) writes down the clip on the device instead; it is only downloaded then. The microphone needs HTTPS (or localhost).
+Everything runs on the device. Silero VAD (`public/silero_vad.onnx`, 2.3 MB, MIT) scores every 32 ms of microphone audio for speech; `src/modules/listen/segment.ts` cuts each utterance out of the stream; Whisper base.en (English) writes it down in a worker while the mic keeps listening, on WebGPU when there is one (about 206 MB) or WebAssembly (about 136 MB). Its encoder stays full precision, because an 8-bit Whisper encoder mishears and often returns nothing.
+
+While Arcanus speaks, only clear, sustained speech interrupts it, and anything heard that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers. Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
 
 ## 3D studio and AR
 
@@ -58,7 +60,7 @@ src/
     brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
     llm/          SmolVLM: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
-    listen/       speech to text: browser speech recognition, microphone frames, Silero VAD (vad.worker.ts), Whisper tiny.en fallback (listen.worker.ts)
+    listen/       speech to text, full duplex: microphone frames, Silero VAD (vad.worker.ts), utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
     offline/      service worker registration, online status

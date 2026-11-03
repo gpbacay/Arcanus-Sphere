@@ -8,7 +8,7 @@ import { cancelGreet, ChatFallback, ChatPanel, greet, greeting, hydrateChats, st
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
-import { AppNav } from "@/modules/shell/AppNav";
+import { AppNav } from "@/modules/shell";
 import { Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
 import { Boundary } from "@/shared/boundary";

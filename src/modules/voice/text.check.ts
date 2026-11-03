@@ -1,6 +1,6 @@
 // Run: node src/modules/voice/text.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { forSpeech, isIntroduction, openingLine, takeSentences } from "./text.ts";
+import { forSpeech, isEcho, isIntroduction, openingLine, takeSentences } from "./text.ts";
 
 assert.equal(forSpeech("**Hi** see [docs](http://x)."), "Hi see docs.");
 assert.equal(openingLine('"Yes. Good day, how can I help you?"'), "Good day, how can I help you?");
@@ -16,4 +16,7 @@ assert.equal(isIntroduction("We've been up for a few minutes but so far it's all
 assert.deepEqual(takeSentences("One. Two! Thr"), { sentences: ["One.", "Two!"], rest: "Thr" });
 assert.deepEqual(takeSentences("A long clause, then more", 10), { sentences: ["A long clause,"], rest: "then more" });
 assert.deepEqual(takeSentences("Short, still", 80), { sentences: [], rest: "Short, still" });
+assert.equal(isEcho("the time is three", "Hello. The time is three fifteen."), true);
+assert.equal(isEcho("what is the weather like", "The time is three fifteen."), false);
+assert.equal(isEcho("", "Anything."), false);
 console.log("speech text ok");

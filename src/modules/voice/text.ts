@@ -51,3 +51,11 @@ export function takeSentences(buffer: string, long = 80): { sentences: string[];
   }
   return { sentences: parts.map((s) => s.trim()).filter(Boolean), rest };
 }
+
+/** Whether words heard while Arcanus was speaking are mostly its own: the microphone picking up the speaker. */
+export function isEcho(heard: string, said: string): boolean {
+  const words = (s: string) => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];
+  const pool = new Set(words(said));
+  const w = words(heard);
+  return w.length >= 2 && w.filter((x) => pool.has(x)).length / w.length >= 0.7;
+}

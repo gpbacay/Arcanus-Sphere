@@ -3,8 +3,9 @@
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { think } from "@/modules/brain";
 import { personality } from "@/modules/harness";
+import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
-import { isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
+import { isEcho, isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { Store, errorText, useStore } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
@@ -297,6 +298,33 @@ export function discard(what: Removal) {
   if (reply && (what.kind === "all" || (what.kind === "chat" && what.id === reply.chatId))) stop();
   remove(what);
 }
+
+/**
+ * Talk hands-free, full duplex: one tap opens the mic until the next. Each pause sends what you said, Arcanus answers
+ * aloud, and speaking over it stops it mid-sentence. Call from a click: it unlocks audio and asks for the mic.
+ */
+export function talk() {
+  voice.unlock();
+  if (listen.state.state.on) return listen.cancel();
+  if (!power.state.on) return;
+  let said = ""; // what Arcanus was saying when you started, to tell your words from its echo
+  void listen.converse({
+    strict: () => voice.state.state.speaking,
+    onSpeech: () => {
+      said = voice.state.state.speaking ? live.state.reply?.text || greeting.state.text || lastAssistant() : "";
+      cancelGreet();
+      if (live.state.reply) stop();
+      voice.cancel();
+    },
+    onText: (text) => {
+      if (said && isEcho(text, said)) return;
+      if (live.state.reply) stop(); // a reply begun from something typed meanwhile: what you said now wins
+      send(text);
+    },
+  });
+}
+
+const lastAssistant = () => currentChat()?.messages.findLast((m) => m.role === "assistant")?.text ?? "";
 
 /** Read a reply aloud, turning the voice on if it was off. */
 export function speak(text: string) {
