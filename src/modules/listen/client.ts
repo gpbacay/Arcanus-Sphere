@@ -1,11 +1,11 @@
 "use client";
 
 // Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open: the mic is
-// captured as 16 kHz frames (an AudioWorklet), Silero VAD (vad.worker.ts) scores each one for speech, the segmenter
+// captured as 16 kHz frames (an AudioWorklet), each is scored for speech by its loudness (Loudness, segment.ts), the segmenter
 // (segment.ts) cuts out each thing you say when you pause, and Whisper (listen.worker.ts) writes it down while the mic
 // keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can stop it: barge-in.
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
-import { FRAME, RATE, Segmenter } from "./segment";
+import { FRAME, Loudness, RATE, Segmenter } from "./segment";
 
 export type Talk = {
   /** Someone started speaking (clearly, if Arcanus was talking): stop talking over them. */
@@ -39,7 +39,7 @@ class Frames extends AudioWorkletProcessor {
 registerProcessor("arcanus-frames", Frames);
 `;
 
-type Session = { sid: number; stream: MediaStream; ctx: AudioContext; seg: Segmenter; talk: Talk };
+type Session = { sid: number; stream: MediaStream; ctx: AudioContext; seg: Segmenter; loud: Loudness; talk: Talk };
 
 class Listen {
   state = new Store<LoadState & { on: boolean; hearing: boolean; writing: boolean; problem: string }>({
@@ -50,7 +50,6 @@ class Listen {
     problem: "",
   });
   private worker: Promise<Worker> | null = null;
-  private vad: Promise<Worker> | null = null;
   private pending = new Map<number, Pending>();
   private seq = 0;
   private sid = 0; // bumped by every open and close, so frames and words from an ended session are dropped
@@ -58,11 +57,9 @@ class Listen {
   private queue: Promise<unknown> = Promise.resolve(); // one transcription at a time, in the order things were said
   private jobs = 0;
 
-  /** Load Silero VAD (2 MB) and Whisper. Safe to call again; the way to retry after an error. */
+  /** Load Whisper. Safe to call again; the way to retry after an error. */
   start(): Promise<unknown> {
-    const vad = this.startVad();
-    vad.catch(() => undefined);
-    return Promise.all([this.whisper(), vad]);
+    return this.whisper();
   }
 
   private whisper() {
@@ -75,21 +72,6 @@ class Listen {
     });
     this.worker.catch(() => (this.worker = null));
     return this.worker;
-  }
-
-  private startVad() {
-    this.vad ??= new Promise<Worker>((resolve, reject) => {
-      const worker = new Worker(new URL("./vad.worker.ts", import.meta.url), { type: "module" });
-      worker.onmessage = ({ data }) => {
-        if (data.type === "ready") resolve(worker);
-        else if (data.type === "error") reject(new Error(String(data.message)));
-        else if (data.type === "prob") this.scored(data.sid as number, data.samples as Float32Array, data.p as number);
-      };
-      worker.onerror = (event) => reject(new Error(event.message));
-      worker.postMessage({ type: "load", model: new URL("/silero_vad.onnx", location.origin).href });
-    });
-    this.vad.catch(() => (this.vad = null));
-    return this.vad;
   }
 
   /** Whether this browser can record at all. */
@@ -114,22 +96,13 @@ class Listen {
       await ctx.resume();
       const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
       await ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
-      let vad: Worker;
-      try {
-        vad = await this.startVad();
-      } catch {
-        throw new Error("Arcanus can't tell when you speak: voice detection didn't load. Check the Speech pill, then try again.");
-      }
       if (sid !== this.sid) throw new Error("cancelled"); // while the mic was opening: the catch closes it quietly
-      vad.postMessage({ type: "reset" });
       const node = new AudioWorkletNode(ctx, "arcanus-frames");
-      node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
-        if (sid === this.sid) vad.postMessage({ type: "frame", sid, samples: data }, [data.buffer]);
-      };
+      node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => this.scored(sid, data);
       const mute = ctx.createGain(); // a worklet only runs while it is connected to the output; silence it
       mute.gain.value = 0;
       ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
-      this.session = { sid, stream, ctx, seg: new Segmenter(), talk };
+      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk };
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop());
       void ctx?.close();
@@ -144,11 +117,11 @@ class Listen {
     }
   }
 
-  /** One frame was scored: feed the segmenter, and act on a start or a finished utterance. */
-  private scored(sid: number, samples: Float32Array, p: number) {
+  /** One frame came in: score it, feed the segmenter, and act on a start or a finished utterance. */
+  private scored(sid: number, samples: Float32Array) {
     const s = this.session;
     if (!s || s.sid !== sid) return;
-    const out = s.seg.push(samples, p, s.talk.strict());
+    const out = s.seg.push(samples, s.loud.score(samples), s.talk.strict());
     if (out === "start") {
       this.state.set({ hearing: true });
       s.talk.onSpeech();
@@ -202,7 +175,7 @@ export const canListen = Listen.supported;
 
 export const listenEngine: Engine = {
   name: "Speech",
-  detail: "Whisper base · Silero VAD",
+  detail: "Whisper base",
   state: listen.state,
   start: () => void listen.start().catch(() => undefined),
 };

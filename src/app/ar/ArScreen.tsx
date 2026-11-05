@@ -17,6 +17,7 @@ const ENGINES = [brainEngine, llmEngine, voiceEngine, listenEngine];
 export function ArScreen() {
   const busy = useBusy();
   const analyser = useStore(voice.state, (s) => s.analyser);
+  const speaking = useStore(voice.state, (s) => s.speaking);
 
   useEffect(() => {
     hydrateChats();
@@ -28,8 +29,9 @@ export function ArScreen() {
     return () => cancelGreet();
   }, []);
 
+  // Same inputs as the studio's sphere: the thinking boost only until the voice starts, then the voice drives it.
   return (
-    <ArView analyser={analyser} activity={busy ? 0.55 : 0}>
+    <ArView analyser={analyser} activity={busy && !speaking ? 0.55 : 0}>
       <ArChat />
     </ArView>
   );

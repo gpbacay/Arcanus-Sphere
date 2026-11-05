@@ -20,15 +20,13 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  * - Speaking (`analyser`): everything whirls several times faster and shakes, and the shells, rings and core each
  *   twitch in size at their own random moments, as if the orb were talking. The brightness stays the same.
  *
- * This file is the orb alone, with no renderer: the studio (SphereScene) and the AR view (ArScene) each add `root`
+ * This file is the orb alone, with no renderer: the studio (SphereScene) and the AR view (ar.ts) each add `root`
  * to their own three.js scene and call `update(dt)` once per frame.
  */
 export type Orb = {
   /** Add this to a scene. The studio and AR views wrap it in their own group to move, turn and resize the orb. */
   root: THREE.Object3D;
   update: (dt: number) => void;
-  /** Go dark and play the boot-up animation again, as if Arcanus had just been switched on. */
-  reboot: () => void;
   dispose: () => void;
 };
 
@@ -507,5 +505,5 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     coreGlow.value = (1 + 0.25 * talk * (0.5 + 0.5 * jump) + 0.35 * pulse) * lit * flick;
   };
 
-  return { root: gltf.scene, update, reboot: () => (power = 0), dispose: () => gltf.scene.traverse(disposeDraw) };
+  return { root: gltf.scene, update, dispose: () => gltf.scene.traverse(disposeDraw) };
 }

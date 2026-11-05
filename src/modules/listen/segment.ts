@@ -1,13 +1,13 @@
-// Cutting a live microphone into utterances. Each 32 ms frame comes in with Silero's speech probability; out comes
+// Cutting a live microphone into utterances. Each 32 ms frame comes in with a speech score (Loudness); out comes
 // "start" when someone is clearly talking, and the clip (with a little sound around it) once they pause. Pure, so
 // segment.check.ts runs it in Node.
 
-export const RATE = 16000; // what Whisper and Silero both expect
-export const FRAME = 512; // 32 ms: the size Silero scores at a time
+export const RATE = 16000; // what Whisper expects
+export const FRAME = 512; // 32 ms
 const FPS = RATE / FRAME;
 
-const ON = 0.5; // a frame at or above this is speech (Silero's recommended threshold)
-const OFF = 0.35; // and speech has to drop below this to count as a pause (Silero's hysteresis: ON - 0.15)
+const ON = 0.5; // a frame at or above this is speech
+const OFF = 0.35; // and speech has to drop below this to count as a pause
 const START = 6; // frames of speech in a row (~0.2 s) before it counts: a click or a cough never does
 // While Arcanus is talking, its own voice can leak into the mic: only clear, sustained speech interrupts it.
 // ponytail: fixed thresholds. Tune STRICT_* if Arcanus interrupts itself on your speakers, or ignores you.
@@ -51,5 +51,25 @@ export class Segmenter {
     this.run = 0;
     this.talking = false;
     this.quiet = 0;
+  }
+}
+
+/**
+ * A speech score in 0..1 from how loud a frame is over the room's noise: no model to download, nothing to run but a sum.
+ * The noise floor starts at the first frame, drops at once to anything quieter, and creeps up only slowly (faster in
+ * the gaps between words), so talking barely lifts it while a room that gets louder is caught up with in seconds.
+ * ponytail: plain loudness, so a loud TV counts as talk. Tune the 6 / 15 dB if it misses soft voices or hears noise.
+ */
+export class Loudness {
+  private floor: number | null = null; // dBFS
+
+  score(frame: Float32Array) {
+    let sum = 0;
+    for (const x of frame) sum += x * x;
+    const db = 10 * Math.log10(sum / frame.length + 1e-10);
+    this.floor ??= db;
+    const p = Math.min(1, Math.max(0, (db - this.floor - 6) / 15));
+    this.floor += (db - this.floor) * (db < this.floor ? 0.3 : p < OFF ? 0.02 : 0.001);
+    return p;
   }
 }

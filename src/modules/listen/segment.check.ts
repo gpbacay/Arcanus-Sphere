@@ -1,6 +1,6 @@
 // Run: node src/modules/listen/segment.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { FRAME, Segmenter } from "./segment.ts";
+import { FRAME, Loudness, Segmenter } from "./segment.ts";
 
 const run = (probs: number[], strict = false) => {
   const seg = new Segmenter();
@@ -24,4 +24,13 @@ assert.equal(run([...s(10, 0.9), ...s(30, 0.4), ...s(10, 0.9)]).length, 1);
 // While Arcanus speaks, middling probabilities (its echo) never start an utterance; clear speech does.
 assert.equal(run(s(60, 0.7), true).length, 0);
 assert.equal(run(s(60, 0.95), true)[0][1], "start");
+// Loudness: a quiet room scores as silence, a voice 30 dB over it as speech, and back to quiet as silence again.
+const loud = new Loudness();
+const tone = (amp: number) => Float32Array.from({ length: FRAME }, (_, i) => amp * Math.sin(i / 3));
+const quiet = tone(0.001);
+for (let i = 0; i < 20; i++) assert.ok(loud.score(quiet) < 0.35);
+assert.ok(loud.score(tone(0.05)) >= 0.8);
+for (let i = 0; i < 60; i++) loud.score(tone(0.05)); // two seconds of talking
+assert.ok(loud.score(tone(0.05)) >= 0.5, "talking must not lift the floor to itself");
+assert.ok(loud.score(quiet) < 0.35);
 console.log("segment ok");

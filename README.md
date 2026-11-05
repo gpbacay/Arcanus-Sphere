@@ -26,7 +26,7 @@ Open [http://localhost:3000](http://localhost:3000). The first visit downloads a
 
 Tap the mic once and just talk: it's a hands-free, full-duplex conversation. The microphone stays open; each time you pause (about 0.7 s) Arcanus sends what you said, answers aloud, and keeps listening. Talk over it and it stops mid-sentence to hear you. Tap the mic again to end the conversation.
 
-Everything runs on the device. Silero VAD (`public/silero_vad.onnx`, 2.3 MB, MIT) scores every 32 ms of microphone audio for speech; `src/modules/listen/segment.ts` cuts each utterance out of the stream; Whisper base.en (English) writes it down in a worker while the mic keeps listening, on WebGPU when there is one (about 206 MB) or WebAssembly (about 136 MB). Its encoder stays full precision, because an 8-bit Whisper encoder mishears and often returns nothing.
+Everything runs on the device. Every 32 ms of microphone audio is scored for speech by its loudness over the room's noise (no model to load); `src/modules/listen/segment.ts` cuts each utterance out of the stream; Whisper base.en (English) writes it down in a worker while the mic keeps listening, on WebGPU when there is one (about 206 MB) or WebAssembly (about 136 MB). Its encoder stays full precision, because an 8-bit Whisper encoder mishears and often returns nothing.
 
 While Arcanus speaks, only clear, sustained speech interrupts it, and anything heard that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers. Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
 
@@ -60,7 +60,7 @@ src/
     brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
     llm/          SmolVLM: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
-    listen/       speech to text, full duplex: microphone frames, Silero VAD (vad.worker.ts), utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
+    listen/       speech to text, full duplex: microphone frames, loudness voice detection and utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
     offline/      service worker registration, online status

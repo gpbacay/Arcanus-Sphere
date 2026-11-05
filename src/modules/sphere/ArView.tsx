@@ -19,6 +19,7 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
   const [phase, setPhase] = useState<"idle" | "starting" | "running" | "error">("idle");
   const [error, setError] = useState("");
   const [hint, setHint] = useState(true);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     alive.current = true;
@@ -48,7 +49,7 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
     }
     setPhase("starting");
     try {
-      const stop = await startAr(mount.current!, { onReady: () => setPhase("running"), onError: fail }, { analyser: () => analyserRef.current, boost: () => activityRef.current });
+      const stop = await startAr(mount.current!, { onReady: () => setPhase("running"), onError: fail, onLock: setLocked }, { analyser: () => analyserRef.current, boost: () => activityRef.current });
       if (alive.current) stopRef.current = stop;
       else stop();
     } catch (cause) {
@@ -65,7 +66,13 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
       </Link>
       {phase === "running" ? (
         <>
-          {hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · pinch to resize · twist to turn · hold out your open palm to pick it up</p>}
+          {locked ? (
+            <p className="ar-hint" role="status">
+              Orb locked in place · tap it or anywhere to unlock
+            </p>
+          ) : (
+            hint && <p className="ar-hint">Tap a surface to place the orb · drag it to move · tap it to lock it in place · pinch to resize · twist to turn</p>
+          )}
           {children}
         </>
       ) : (

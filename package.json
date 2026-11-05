@@ -7,7 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/modules/sphere/palm.check.ts && node src/shared/lru.check.ts && node src/modules/listen/segment.check.ts",
+    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/shared/lru.check.ts && node src/modules/listen/segment.check.ts",
     "orb": "node scripts/export-orb.mjs",
     "postinstall": "node scripts/copy-8thwall-engine.mjs",
     "copy:8thwall": "node scripts/copy-8thwall-engine.mjs",
@@ -16,7 +16,6 @@
   "dependencies": {
     "@8thwall/engine-binary": "^1.0.0",
     "@huggingface/transformers": "3.8.1",
-    "@mediapipe/tasks-vision": "^1.2.0",
     "@types/three": "^0.180.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",

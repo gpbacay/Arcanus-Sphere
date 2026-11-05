@@ -3,7 +3,6 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { loadOrb, ORB_BLOOM, type OrbInputs } from "./orb";
-import { createPalm, type Frame, type Palm } from "./palm";
 
 /**
  * Arcanus's orb in the real world, using the 8th Wall XR engine (XR8) for world tracking. The engine files are
@@ -13,7 +12,7 @@ import { createPalm, type Frame, type Palm } from "./palm";
  * Copyright © 2026 Niantic Spatial, Inc. All rights reserved. License: https://github.com/8thwall/engine/blob/main/LICENSE
  *
  * Touch: drag the orb to move it along surfaces, tap a surface to put it there, pinch to resize, twist to turn.
- * Hand: hold out an open palm and the orb shrinks onto it and follows (palm.ts). Take the hand away and it stays put.
+ * Tap the orb to lock it where it is: no drag or surface tap moves it until you tap the orb (or anywhere) again.
  */
 
 type Hit = { type: string; position: { x: number; y: number; z: number } };
@@ -30,8 +29,6 @@ type Xr8 = {
     xrScene: () => { scene: THREE.Scene; camera: THREE.PerspectiveCamera; renderer: THREE.WebGLRenderer };
   };
   XrConfig: { device: () => { ANY: unknown } };
-  CameraPixelArray: { pipelineModule: (options: object) => { onProcessGpu: (args: unknown) => unknown } };
-  addCameraPipelineModule: (module: object) => void;
   addCameraPipelineModules: (modules: object[]) => void;
   clearCameraPipelineModules: () => void;
   run: (options: object) => void;
@@ -51,12 +48,8 @@ const START_DISTANCE = 1.5; // metres in front of the camera
 const REST = 1.45; // the orb's radius in its own units
 const SCALE_START = 0.2; // a ~30 cm radius orb
 const SCALE_RANGE = [0.04, 1.2] as const;
-const PALM_SCALE = 0.035; // a ~5 cm radius orb: small enough to sit in a hand
-const PALM_FRAME = 320; // the longest side, in pixels, of the camera copy the hand tracker looks at
-const ORB_GAIN = 1.3; // the plate is lifted a little over the studio: a camera feed is a far busier backdrop than black
 const ORB_OPACITY = 1.6; // how much the orb covers the camera behind it, from its brightness: solid at the core, a veil at the halo
 const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const rest = new THREE.Vector3(); // where the orb sits on the palm this frame
 
 let loading: Promise<Xr8> | undefined;
 function loadEngine(): Promise<Xr8> {
@@ -79,10 +72,10 @@ function loadEngine(): Promise<Xr8> {
   return loading;
 }
 
-export type ArEvents = { onReady: () => void; onError: (message: string) => void };
+export type ArEvents = { onReady: () => void; onError: (message: string) => void; onLock?: (locked: boolean) => void };
 
 /** Starts the camera and the orb inside `container`. Resolves to a function that stops everything. */
-export async function startAr(container: HTMLElement, { onReady, onError }: ArEvents, inputs: OrbInputs = {}): Promise<() => void> {
+export async function startAr(container: HTMLElement, { onReady, onError, onLock }: ArEvents, inputs: OrbInputs = {}): Promise<() => void> {
   const [xr8, orb] = await Promise.all([loadEngine(), loadOrb(inputs)]);
 
   const canvas = document.createElement("canvas");
@@ -99,7 +92,7 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   const bloomScene = new THREE.Scene();
   bloomScene.add(rig);
   const glowMat = new THREE.RawShaderMaterial({
-    uniforms: { tDiffuse: { value: null }, uGain: { value: ORB_GAIN }, uOpacity: { value: ORB_OPACITY } },
+    uniforms: { tDiffuse: { value: null }, uOpacity: { value: ORB_OPACITY } },
     vertexShader: /* glsl */ `
       attribute vec3 position;
       attribute vec2 uv;
@@ -112,12 +105,12 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
     fragmentShader: /* glsl */ `
       precision highp float;
       uniform sampler2D tDiffuse;
-      uniform float uGain;
       uniform float uOpacity;
       varying vec2 vUv;
       void main() {
-        // Linear to sRGB here, what an OutputPass would do: one full-screen pass fewer.
-        vec3 c = texture2D(tDiffuse, vUv).rgb * uGain;
+        // Linear to sRGB here, what the studio's OutputPass does: one full-screen pass fewer. No extra gain, so the orb
+        // is exactly as bright as in the studio.
+        vec3 c = texture2D(tDiffuse, vUv).rgb;
         c = mix(pow(c, vec3(0.41666)) * 1.055 - 0.055, c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308))));
         // The orb covers the camera behind it in proportion to how bright it is there, so it reads as a thing, not a tint.
         float a = clamp(max(c.r, max(c.g, c.b)) * uOpacity, 0.0, 1.0);
@@ -143,9 +136,11 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   let composer: EffectComposer | null = null;
   let placed = false;
   let stopped = false;
-  let palm: Palm | null = null;
-  let held = false; // resting on a palm as of the last frame
-  let regrow: number | null = null; // the size to grow back to once let go of the palm
+  let locked = false; // tapped in place: nothing moves it until it is tapped again (or anywhere else is)
+  const lock = (next: boolean) => {
+    locked = next;
+    onLock?.(next);
+  };
 
   /** Where the finger points in the world: a detected surface if SLAM has one, else the ground plane. */
   const pick = (clientX: number, clientY: number) => {
@@ -175,11 +170,12 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   };
 
   // The engine sizes the canvas to the camera feed; keep it filling the screen instead (also when the phone turns).
-  // Pixel ratio matches the studio (capped at 2). Ratio 1 made every trace a full CSS pixel wide.
+  // Pixel ratio capped at 1.5, under the studio's 2: the bloom plate is the frame's main cost and this roughly halves it
+  // on a 3x phone. Ratio 1 made every trace a full CSS pixel wide.
   const layout = () => {
     canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none";
     if (!renderer) return;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
     renderer.setPixelRatio(ratio);
     renderer.setSize(container.clientWidth, container.clientHeight, false);
     composer?.setPixelRatio(ratio);
@@ -201,7 +197,6 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
   };
 
   const down = (event: PointerEvent) => {
-    palm?.suppress(); // placed by touch: the palm leaves it alone until the hand goes away
     canvas.setPointerCapture(event.pointerId);
     touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (touches.size === 1) {
@@ -219,27 +214,26 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) moved = true;
     touch.x = event.clientX;
     touch.y = event.clientY;
-    if (touches.size === 1 && grabbed) {
+    if (touches.size === 1 && grabbed && moved && !locked) {
       const point = pick(event.clientX, event.clientY);
       if (point) putOn(point);
     } else if (touches.size === 2 && pinch) {
       const now = pair();
       const scale = pinch.scale * (now.distance / pinch.distance);
-      regrow = null; // resizing by hand wins over growing back
       rig.scale.setScalar(Math.min(SCALE_RANGE[1], Math.max(SCALE_RANGE[0], scale)));
       rig.rotation.y = pinch.turn - (now.angle - pinch.angle); // a clockwise twist on screen turns the orb clockwise from above
     }
   };
   const up = (event: PointerEvent) => {
-    const tap = touches.size === 1 && !grabbed && !moved && performance.now() - start.at < 350;
-    const dropped = touches.size === 1 && grabbed && moved; // let go after dragging the orb somewhere new
+    const tap = touches.size === 1 && !moved && performance.now() - start.at < 350;
     touches.delete(event.pointerId);
     if (touches.size < 2) pinch = null;
-    if (tap) {
+    if (tap && grabbed) lock(!locked); // tapped the orb: lock it here, or let it go again
+    else if (tap && locked) lock(false); // tapped elsewhere: unlock only, the next tap places it
+    else if (tap) {
       const point = pick(event.clientX, event.clientY);
       if (point) putOn(point);
     }
-    if (tap || dropped) orb.reboot(); // wherever Arcanus lands, it boots up there
     grabbed = false;
   };
   canvas.addEventListener("pointerdown", down);
@@ -263,7 +257,6 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
     } catch {
       // already stopped
     }
-    palm?.stop();
     orb.dispose();
     composer?.dispose();
     glow.geometry.dispose();
@@ -314,41 +307,15 @@ export async function startAr(container: HTMLElement, { onReady, onError }: ArEv
         camera.position.set(0, CAMERA_HEIGHT, 0);
         xr8.XrController.updateCameraProjectionMatrix({ origin: camera.position, facing: camera.quaternion });
         onReady();
-        // The hand tracker loads after the camera is up, so AR starts at once. Only when it is ready does the engine start
-        // handing out camera pixels, so until then (or if it never loads) the hand costs nothing.
-        palm = createPalm({
-          camera: () => camera,
-          size: () => ({ w: container.clientWidth, h: container.clientHeight }),
-          onReady: () => {
-            // Handing out pixels means reading them back from the GPU, which waits for the last frame to finish drawing:
-            // the whole frame stalls. So only on the frames the hand tracker will actually look at, a few a second.
-            const pixels = xr8.CameraPixelArray.pipelineModule({ luminance: false, maxDimension: PALM_FRAME });
-            xr8.addCameraPipelineModule({ ...pixels, onProcessGpu: (args: unknown) => (orb.root.visible && palm?.wants(performance.now()) ? pixels.onProcessGpu(args) : undefined) });
-          },
-        });
       },
       onCanvasSizeChange: () => layout(),
-      onUpdate: ({ processGpuResult }: { processGpuResult?: { camerapixelarray?: Frame } }) => {
+      onUpdate: () => {
         const dt = Math.min(clock.getDelta(), 0.05);
         if (camera && !placed) {
           // First frame with a real camera pose: float the orb at the middle of the screen.
           placed = true;
           const ahead = new THREE.Vector3(0, 0, -START_DISTANCE).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
           rig.position.copy(camera.getWorldPosition(new THREE.Vector3())).add(ahead);
-        }
-        if (palm) {
-          if (orb.root.visible) palm.offer(processGpuResult?.camerapixelarray, performance.now());
-          const holding = palm.holding();
-          if (holding && !held) regrow = rig.scale.x; // picked up: remember the size to come back to
-          held = holding;
-          if (holding) {
-            // Shrink onto the palm and follow it: the orb rests on it, its centre one radius up, as on any surface.
-            rig.scale.setScalar(rig.scale.x + (PALM_SCALE - rig.scale.x) * (1 - Math.exp(-dt * 10)));
-            rig.position.lerp(rest.copy(palm.target).setY(palm.target.y + REST * rig.scale.x), 1 - Math.exp(-dt * 22));
-          } else if (regrow !== null) {
-            rig.scale.setScalar(rig.scale.x + (regrow - rig.scale.x) * (1 - Math.exp(-dt * 6)));
-            if (Math.abs(rig.scale.x - regrow) < 0.002) regrow = null;
-          }
         }
         orb.update(dt);
       },

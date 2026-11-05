@@ -17,16 +17,3 @@ mkdirSync(dest, { recursive: true });
 cpSync(src, dest, { recursive: true });
 console.log("[copy-8thwall-engine] Copied the engine to public/external/xr");
 
-// The hand tracker (MediaPipe) that lets Arcanus rest on your palm. Its worker (public/palm.worker.js) is a plain static
-// file, so the library is served the same way instead of being bundled.
-const hands = join(root, "node_modules", "@mediapipe", "tasks-vision");
-if (existsSync(hands)) {
-  const out = join(root, "public", "external", "mediapipe");
-  rmSync(out, { recursive: true, force: true });
-  mkdirSync(out, { recursive: true });
-  cpSync(join(hands, "vision_bundle.mjs"), join(out, "vision_bundle.mjs"));
-  cpSync(join(hands, "wasm"), join(out, "wasm"), { recursive: true });
-  console.log("[copy-8thwall-engine] Copied the hand tracker to public/external/mediapipe");
-} else {
-  console.warn("[copy-8thwall-engine] @mediapipe/tasks-vision is not installed; palm tracking will be unavailable.");
-}
