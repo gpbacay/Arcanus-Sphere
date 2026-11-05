@@ -40,20 +40,13 @@ export function Thread() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [current?.messages]);
+  }, [current?.messages, line, writingHere]);
 
   if (!hydrated || !current) return <ThreadSkeleton />;
   const lastAssistant = current.messages.findLastIndex((m) => m.role === "assistant");
 
   return (
     <div className="thread" role="log" aria-label="Conversation">
-      {current.messages.length === 0 && !writingHere && line ? (
-        <div className="empty">
-          <p className="empty-title" aria-live="polite">
-            {line}
-          </p>
-        </div>
-      ) : null}
       {current.messages.map((message, index) => (
         <Message
           key={message.id}
@@ -64,6 +57,11 @@ export function Thread() {
           canRetry={message.role === "assistant" && index === lastAssistant}
         />
       ))}
+      {line && !writingHere ? (
+        <article className="msg" data-role="assistant" aria-live="polite">
+          <div className="msg-bubble">{line}</div>
+        </article>
+      ) : null}
       <LiveReply chatId={current.id} />
       <div ref={endRef} />
     </div>

@@ -257,65 +257,6 @@ body {
   }
 }
 
-.stage-foot {
-  position: absolute;
-  left: calc(var(--nav-w, 0px) + var(--gap));
-  right: 0;
-  bottom: 18px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 0 24px;
-  pointer-events: none;
-}
-
-.caption {
-  max-width: 600px;
-  margin: 0;
-  padding: 7px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--glass-sheen), var(--glass);
-  backdrop-filter: var(--glass-blur);
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.45;
-  text-align: center;
-  text-wrap: balance;
-}
-
-.stage-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.stage-state::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-.stage-state[data-state="idle"] {
-  color: var(--ok);
-}
-.stage-state[data-state="thinking"] {
-  color: var(--think);
-}
-.stage-state[data-state="speaking"] {
-  color: var(--speak);
-}
-.stage-state[data-state="thinking"]::before,
-.stage-state[data-state="speaking"]::before {
-  animation: pulse 0.9s ease-in-out infinite;
-}
-
 /* —— Chat pane —— */
 .panel {
   position: absolute;
@@ -676,22 +617,6 @@ textarea.field {
   border-top: 1px solid var(--line);
 }
 
-.empty {
-  padding: 2px 0;
-  color: var(--text-muted);
-}
-.empty p {
-  margin: 0 0 6px;
-}
-.empty-title {
-  color: var(--text);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: -0.015em;
-  text-wrap: balance;
-}
-
 .msg {
   display: flex;
   flex-direction: column;
@@ -1034,13 +959,7 @@ textarea.field {
   transform: scaleX(-1);
 }
 
-@media (min-width: 768px) {
-  [data-slot="sidebar-wrapper"]:has([data-side="right"][data-state="expanded"]:not([data-collapsible="offcanvas"])) .stage-foot {
-    right: var(--sidebar-width);
-  }
-}
-
-/* —— Left rail: mark, orb tools, About, Settings. Dialogs, not routes, so the sphere stays up. —— */
+/* —— Left rail: mark, About, Settings. Dialogs, not routes, so the sphere stays up. —— */
 .app-nav {
   position: absolute;
   z-index: 25;
@@ -1082,21 +1001,21 @@ textarea.field {
   color: var(--text);
 }
 
-/* 3D orb tools: sit inside the left rail, between the mark and About. */
+/* 3D orb tools: one horizontal row at the top center, above the sphere. */
 .stage-tools {
   position: absolute;
-  top: calc(var(--gap) + 54px);
-  bottom: calc(var(--gap) + 90px);
-  left: var(--gap);
+  top: var(--gap);
+  left: 50%;
   z-index: 26;
   display: flex;
-  flex-direction: column;
+  flex-flow: row nowrap;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  width: var(--nav-w);
-  padding: 4px 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--gap));
+  padding: 4px;
+  transform: translateX(-50%);
 }
 .stage-tools .icon-btn {
   width: 36px;
@@ -1108,9 +1027,10 @@ textarea.field {
   box-shadow: inset 0 0 0 1px rgba(111, 224, 255, 0.3);
 }
 .tools-sep {
-  width: 18px;
-  height: 1px;
-  margin: 4px 0;
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
   background: var(--line-strong);
 }
 
@@ -1297,7 +1217,6 @@ textarea.field {
     --gap: 8px;
   }
 
-  /* The subtitle sits on the stage cell, so a reply never resizes the orb. */
   .app-shell {
     --nav-w: 0px;
     display: grid;
@@ -1393,39 +1312,14 @@ textarea.field {
     height: auto;
     min-height: 0;
   }
-  .stage-foot {
-    grid-area: stage;
-    position: relative;
-    align-self: end;
-    z-index: 30;
-    inset: auto;
-    width: 100%;
-    min-height: 0;
-    margin-bottom: 48px; /* sit on the canvas, just above the tool row */
-    padding: 6px 12px;
-  }
-  .caption {
-    font-size: 13.5px;
-  }
-
   .stage-tools {
-    position: relative;
-    inset: auto;
-    flex-direction: row;
-    justify-content: center;
-    width: 100%;
-    height: auto;
-    padding: 2px 8px 6px;
-    overflow: visible;
+    top: 6px;
+    max-width: calc(100% - 16px);
+    padding: 2px;
   }
   .stage-tools .icon-btn {
     width: 40px;
     height: 40px; /* a finger-sized target */
-  }
-  .tools-sep {
-    width: 1px;
-    height: 18px;
-    margin: 0 4px;
   }
 
   .panel {

@@ -4,7 +4,7 @@
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a status pill.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
-import { cancelGreet, ChatFallback, ChatPanel, greet, greeting, hydrateChats, stopReply, useBusy } from "@/modules/chat";
+import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
@@ -69,33 +69,17 @@ export default function Home() {
   );
 }
 
-/** The sphere and its caption. Its own component, so voice updates re-render only this, never the chat. */
+/** The sphere. Its own component, so voice updates re-render only this, never the chat. Replies live in the chat. */
 function Stage() {
   const busy = useBusy();
   const analyser = useStore(voice.state, (s) => s.analyser);
   const speaking = useStore(voice.state, (s) => s.speaking);
-  const caption = useStore(voice.state, (s) => s.caption);
-  const greetLine = useStore(greeting, (s) => s.text);
   const on = useStore(power, (s) => s.on);
-  const changing = useStore(power, (s) => s.changing);
   const state = !on ? "off" : speaking ? "speaking" : busy ? "thinking" : "idle";
-  const label = changing ? (on ? "booting" : "shutting down") : state === "idle" ? "on this device" : state;
   return (
-    <>
-      <div className="app-stage">
-        {/* Paradee's audio runs through this analyser, so the sphere moves with the voice. */}
-        <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} />
-      </div>
-      <div className="stage-foot">
-        {(caption || greetLine) && on ? (
-          <p className="caption" aria-hidden>
-            {caption || greetLine}
-          </p>
-        ) : null}
-        <span className="stage-state" data-state={state}>
-          {label}
-        </span>
-      </div>
-    </>
+    <div className="app-stage">
+      {/* Paradee's audio runs through this analyser, so the sphere moves with the voice. */}
+      <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} />
+    </div>
   );
 }
