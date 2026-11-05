@@ -14,7 +14,6 @@ import { voice, voiceEngine } from "@/modules/voice";
 import { Boundary } from "@/shared/boundary";
 import { power, restorePower } from "@/shared/power";
 import { useStore } from "@/shared/store";
-import { restoreTheme } from "@/shared/theme";
 import { Engines } from "@/shared/ui/engines";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
@@ -27,7 +26,6 @@ export default function Home() {
     hydrateChats();
     voice.restore();
     restorePower();
-    restoreTheme();
     // A click anywhere, including the power switch, lets the boot greeting be spoken once it's written.
     const unlock = () => voice.unlock();
     window.addEventListener("pointerdown", unlock);
@@ -58,7 +56,7 @@ export default function Home() {
   }, [on]);
 
   return (
-    <SidebarProvider defaultOpen className="h-dvh overflow-hidden" style={{ "--sidebar-width": "calc(min(420px, 100vw - 24px) + 24px)" } as React.CSSProperties}>
+    <SidebarProvider defaultOpen className="h-dvh overflow-hidden" style={{ "--sidebar-width": "calc(min(372px, 100vw - 20px) + 20px)" } as React.CSSProperties}>
       <main className="app-shell">
         <Stage />
         <AppNav />
