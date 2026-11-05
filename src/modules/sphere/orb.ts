@@ -3,11 +3,19 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /**
  * Arcanus's body: a holographic orb of gold circuit traces on three nested shells, loose broken rings and a 3D core.
- * The shape is public/orb.glb. Each frame the CPU only turns and resizes the parts.
+ * Each shell is a layer of separate thick sections, and every ring is a solid bar with a box cross-section, cut into
+ * slices. Shell sections rise and sink along their outward direction, ring slices along the ring's axis, so a ring
+ * stays a ring while its pieces step up and down.
+ * The shape is public/orb.glb. Each frame the CPU only turns and resizes the parts; the GPU raises and sinks each shell
+ * section and ring slice on its own.
  * Every shell and every ring is its own part: it turns on its own axes at its own speed, drifting in pace and direction
- * so no two move alike.
- * - Idle: the parts drift slowly and faint pulses run along the traces. Now and then, a few parts at random hold still
- *   and tick forward in small quick steps, like clockwork, then go back to turning smoothly.
+ * so no two move alike. Nothing ever passes through anything else: each part keeps to its own band of distance from
+ * the core (laid out and checked by scripts/export-orb.mjs), and every lift and size change here stays inside it.
+ * - Idle: faint pulses run along the traces, and the orb has two rhythms.
+ *   The core and the shells beat like a resting heart, lub-dub about 55 times a minute: on every beat some shell
+ *   sections spring up while others drop, the core rings ripple, and the core and shells swell a touch.
+ *   The outer rings tick round like clockwork, in small quick steps, and every few seconds, at random, they blink like
+ *   eyes: their slices snap up or down and back, and a ring or two may swing back the other way, swell or shrink.
  * - Thinking (`boost`): the parts turn faster, with a small flutter in size.
  * - Speaking (`analyser`): everything whirls several times faster and shakes, and the shells, rings and core each
  *   twitch in size at their own random moments, as if the orb were talking. The brightness stays the same.
@@ -34,7 +42,8 @@ export type OrbInputs = {
 };
 
 /** Bloom the studio composites over the orb. AR uses the same numbers so the two views stay one look. */
-export const ORB_BLOOM = { strength: 0.55, radius: 0.35, threshold: 0.08 } as const;
+// Kept low and tight with a high threshold: only pads and pulses bloom, so the traces stay crisp instead of a haze.
+export const ORB_BLOOM = { strength: 0.28, radius: 0.15, threshold: 0.25 } as const;
 
 const GOLD = new THREE.Color("#ff9a2e");
 const HOT = new THREE.Color("#fff1c9");
@@ -47,15 +56,67 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const LINE_VERTEX = /* glsl */ `
   uniform float uTime;
   uniform float uPhase;
+  uniform float uTalk;
+  uniform float uBoost;
+  uniform float uLift;
+  uniform vec2 uReach; // the furthest a shell section (x) or ring slice (y) ever moves, as a share of its distance
+  uniform vec4 uBeat; // xyz: the side the shell sections lift toward, w: how strong the heartbeat is (0 when busy)
+  uniform float uBeatAge; // seconds since the last heartbeat began at the very centre
+  uniform float uWave; // seconds the heartbeat takes to travel one unit out from the centre
+  uniform float uScatter; // 0: one side of a shell rises and the other sinks; 1: scattered sections rise, others sink
+  uniform float uBeatSeed;
+  uniform float uBlink; // the outer rings' blink, 0..1
+  uniform float uBlinkSeed;
   attribute float along;
   attribute float seed;
+  #ifdef PANELS
+  attribute vec4 panel; // the shell section or ring slice this vertex belongs to: the way it moves, and a seed
+  #endif
   varying float vAlong;
   varying float vTwinkle;
   varying float vHead;
   varying float vTip;
   varying float vFire;
+  varying float vRaise;
   float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+  // Smooth random in [-1, 1]: a new level every whole step of x, eased into from the last one.
+  float wander(float x, float id) {
+    float i = floor(x);
+    return mix(hash(i + id), hash(i + 1.0 + id), smoothstep(0.0, 1.0, x - i)) * 2.0 - 1.0;
+  }
+  // A pulse over 0..1: a quick rise, then a slower fall; 0 outside. Matches bump() in orb.ts.
+  float bump(float x) { return x < 0.3 ? smoothstep(0.0, 0.3, x) : 1.0 - smoothstep(0.3, 1.0, x); }
+  // Lub-dub, \`age\` seconds after the beat reached this point. Matches heartAt() in orb.ts.
+  float heart(float age) { return bump(age / 0.22) + 0.6 * bump((age - 0.28) / 0.2); }
   void main() {
+    vec3 p = position;
+    vRaise = 0.0;
+    #ifdef PANELS
+    // Every shell section and ring slice rises and sinks on its own, each at its own pace. Thinking: a restless wander.
+    // Talking: quick, uneven jumps, as if it were speaking. Idle, the shells and core beat like a heart (a slow breath
+    // between beats), while the outer rings blink like eyes.
+    float kind = floor(panel.w); // 0: shell section, 1: outer ring slice, 2: core ring slice
+    float id = panel.w * 97.0;
+    float beats = kind == 1.0 ? 0.0 : 1.0;
+    float breathe = sin(uTime * (0.35 + hash(id) * 1.1) + hash(id + 1.0) * 6.28) * beats;
+    float think = wander(uTime * (1.2 + hash(id + 2.0) * 2.0), id + 3.0);
+    float speak = wander(uTime * (4.0 + hash(id + 4.0) * 10.0), id + 5.0);
+    // A heartbeat: on each pulse some sections spring up while others drop. Core ring slices pick at random, so the
+    // ring ripples around its circle.
+    float side = clamp(dot(panel.xyz, uBeat.xyz) * 2.0, -1.0, 1.0);
+    float pick = hash(id + uBeatSeed);
+    float scattered = pick > 0.66 ? 1.0 : (pick < 0.33 ? -1.0 : 0.0);
+    // The beat travels out from the centre like a wave: the further out, the later it arrives, and within a shell it
+    // reaches the sections on the beat's side first, each a touch early or late.
+    float arrive = length(position) * uWave + (0.5 - 0.5 * dot(panel.xyz, uBeat.xyz)) * 0.1 + hash(id + 6.0) * 0.05;
+    float beat = (kind == 0.0 ? mix(side, scattered, uScatter) : scattered) * heart(uBeatAge - arrive) * uBeat.w * beats;
+    // A blink: every slice of an outer ring snaps up or down and back, quick as an eyelid.
+    float blink = (hash(id + uBlinkSeed) > 0.5 ? 1.0 : -1.0) * uBlink * (1.0 - beats);
+    float raw = breathe * 0.2 + think * 0.35 * uBoost + speak * uTalk + beat * 0.6 + blink * 0.8;
+    // Held to the reach the orb was laid out for, so a lifted section or slice never touches its neighbour.
+    vRaise = clamp(raw, -1.0, 1.0) * (kind == 0.0 ? uReach.x : uReach.y) * uLift;
+    p += panel.xyz * vRaise * length(position);
+    #endif
     vAlong = along;
     vTwinkle = 0.65 + 0.35 * sin(uTime * (1.0 + seed * 2.5) + seed * 50.0);
     // A pulse of light runs down each trace, each at its own pace.
@@ -67,7 +128,7 @@ const LINE_VERTEX = /* glsl */ `
     float t = fract(cycle) / 0.3; // the spike runs down the trace in the first part of the turn
     vTip = t * 1.25 - 0.1;
     vFire = fires * step(t, 1.0) * (1.0 - smoothstep(0.6, 1.0, t));
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   }
 `;
 
@@ -82,6 +143,7 @@ const LINE_FRAGMENT = /* glsl */ `
   varying float vHead;
   varying float vTip;
   varying float vFire;
+  varying float vRaise;
   void main() {
     float pulse = smoothstep(0.15, 0.0, abs(vAlong - vHead)) * uFlow;
     float spike = 0.0;
@@ -90,7 +152,8 @@ const LINE_FRAGMENT = /* glsl */ `
       spike = (behind >= 0.0 ? exp(-behind * 14.0) : exp(behind * 45.0)) * vFire;
     }
     // Thousands of lines overlap, so brightness is only ever this line's own base, scaled.
-    float glow = uBase * (vTwinkle + pulse * 4.0 + spike * 5.0) * uPower;
+    // A raised shell section catches more light, a sunken one less.
+    float glow = uBase * (vTwinkle + pulse * 4.0 + spike * 5.0) * uPower * (1.0 + vRaise * 6.0);
     vec3 color = mix(uColor, uHot, clamp(pulse * 0.6 + spike, 0.0, 1.0));
     gl_FragColor = vec4(color * glow, 1.0);
   }
@@ -118,9 +181,6 @@ const CORE_FRAGMENT = /* glsl */ `
 
 // ------------------------------------------------------------------ component
 
-/** At most this many parts tick like clockwork at once while idle, so it stays "some", never "all". */
-const MAX_TICKING = 5;
-
 /**
  * A twitch: a random target in [-1, 1] picked anew every 30 to 90 ms and chased almost at once, so the value jumps
  * from one level to another instead of gliding like a sine wave would.
@@ -141,8 +201,14 @@ const tick = (w: Twitch, t: number, snap: number) => {
  * `axes` weights how much it turns about x, y and z: a ring mostly spins in its own plane.
  * `jitter` (from its distance to the core) scales that shake and twitch: the core quivers, the far shells stay calm.
  */
+type Kind = "shell" | "ring" | "core" | "wires";
+
 type Mover = {
   obj: THREE.Object3D;
+  kind: Kind;
+  /** How far it may shrink and grow before it would reach halfway to its neighbour (baked by export-orb.mjs). */
+  shrink: number;
+  grow: number;
   spin: number;
   axes: [number, number, number];
   drift: number[];
@@ -152,25 +218,33 @@ type Mover = {
   jitter: number;
   /** Boot-up and shutdown: the orb comes on from the core outward, so the farther the part, the later it starts. */
   delay: number;
+  radius: number;
   twitch: Twitch;
-  // Clockwork: for stretches at random, an idle part holds still and moves in small quick steps instead of turning
-  // smoothly. `want` is where its smooth turn has got to, `held` the last step, `shown` what is drawn.
-  ticking: boolean;
-  until: number;
+  // Clockwork: an idle outer ring holds still and moves in small quick steps instead of turning smoothly, every
+  // `period` seconds or so. `want` is where its smooth turn has got to, `held` the last step, `shown` what is drawn.
   period: number;
   nextTick: number;
   ready: boolean;
   want: number[];
   held: number[];
   shown: number[];
+  // A gesture on a blink: for `actLen` seconds from `actStart`, it swings back the other way, swells or shrinks.
+  act: "turn" | "grow" | "shrink";
+  actStart: number;
+  actLen: number;
 };
 
 // Full jitter at the core, fading with distance to 12% at the outermost rings (radius ~1.45).
 // ponytail: linear falloff; tune the 1.5 / 1.3 if the shells read too still or too busy.
 const jitterAt = (radius: number) => Math.min(1, Math.max(0.12, (1.5 - radius) / 1.3));
 
-const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, axes: [number, number, number] = [1, 1, 1]): Mover => ({
+type PartData = { kind: Kind; radius: number; spin: number; size: number; axes?: [number, number, number]; shrink?: number; grow?: number };
+
+const mover = (obj: THREE.Object3D, { kind, radius, spin, size, axes = [1, 1, 1], shrink = 0.5, grow = 1.5 }: PartData): Mover => ({
   obj,
+  kind,
+  shrink,
+  grow,
   spin,
   axes,
   drift: [rand(0.05, 0.35), rand(0.05, 0.35), rand(0.05, 0.35)],
@@ -179,22 +253,44 @@ const mover = (obj: THREE.Object3D, radius: number, spin: number, size: number, 
   size,
   jitter: jitterAt(radius),
   delay: Math.min(1, radius / 1.45) * 0.5,
+  radius,
   twitch: twitch(),
-  ticking: Math.random() < 0.3,
-  until: rand(0, 5),
   period: rand(0.3, 1.1),
   nextTick: 0,
   ready: false,
   want: [0, 0, 0],
   held: [0, 0, 0],
   shown: [0, 0, 0],
+  act: "turn",
+  actStart: 0,
+  actLen: 0,
 });
+
+const ACTS = ["turn", "grow", "shrink"] as const;
+const BEAT = 60 / 55; // seconds between heartbeats: a calm resting pulse, about 55 a minute
+// Seconds a heartbeat takes to travel one unit out from the centre: the eye beats first, then the core, then each shell
+// in turn. Keep WAVE * 1.05 + 0.15 (the outer shell's latest start) + 0.48 (one lub-dub) under BEAT * 0.92.
+const WAVE = 0.3;
 
 const BOOT = 1.0; // seconds from dark to fully on
 const SHUT = 0.7; // seconds from fully on to dark
 const smooth = (x: number) => {
   const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
+};
+/**
+ * A size change `dev` (0 is as baked) squeezed softly into [shrink - 1, grow - 1]: small changes pass as they are,
+ * big ones flatten out before the part would reach its neighbour.
+ */
+const within = (dev: number, shrink: number, grow: number) => {
+  const room = dev > 0 ? grow - 1 : 1 - shrink;
+  return room > 0 ? room * Math.tanh(dev / room) : 0;
+};
+/** The shape of a pulse over `len` seconds from `start`: a quick rise to 1, then a slower fall back to 0. */
+const bump = (t: number, start: number, len: number) => {
+  const x = len ? (t - start) / len : 1;
+  if (x <= 0 || x >= 1) return 0;
+  return x < 0.3 ? smooth(x / 0.3) : 1 - smooth((x - 0.3) / 0.7);
 };
 
 const disposeDraw = (object: THREE.Object3D) => {
@@ -215,9 +311,30 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     uPhase: { value: 0 },
     uFlow: { value: 0.35 },
     uPower: { value: 0 },
+    uTalk: { value: 0 },
+    uBoost: { value: 0 },
+    uLift: { value: 1 },
+    uReach: { value: new THREE.Vector2() },
+    uBeat: { value: new THREE.Vector4() },
+    uBeatAge: { value: 10 },
+    uWave: { value: WAVE },
+    uScatter: { value: 0 },
+    uBeatSeed: { value: 0 },
+    uBlink: { value: 0 },
+    uBlinkSeed: { value: 0 },
   };
+  const reach = (gltf.scene.userData as { reach?: { shell: number; ring: number } }).reach;
+  if (!reach) throw new Error("orb.glb has no reach: re-run npm run orb");
+  shared.uReach.value.set(reach.shell, reach.ring);
+  // Heartbeat (the core and shells): lub-dub, like a resting heart. Blinks (the outer rings): every few seconds at
+  // random, now and then twice in a row, like eyes.
+  let nextBeat = 1;
+  let beatAt = -10;
+  let nextBlink = rand(2, 4);
+  let blinkAt = -10;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const motion = reduced ? 0.25 : 1;
+  shared.uLift.value = motion;
   const spectrum = new Uint8Array(256);
   const ease = (from: number, to: number, attack: number, release: number) => from + (to - from) * (to > from ? attack : release);
   let talk = 0;
@@ -230,16 +347,22 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
   const movers: Mover[] = [];
   const coreGlow = { value: 1 };
   gltf.scene.traverse((obj) => {
-    const data = obj.userData as { part?: boolean; radius?: number; spin?: number; size?: number; axes?: [number, number, number]; base?: number };
-    if (data.part && data.radius != null && data.spin != null && data.size != null) movers.push(mover(obj, data.radius, data.spin, data.size, data.axes));
+    const data = obj.userData as Partial<PartData> & { part?: boolean; base?: number };
+    if (data.part) movers.push(mover(obj, data as PartData));
     if (obj instanceof THREE.LineSegments) {
       const along = obj.geometry.getAttribute("_along");
       const seed = obj.geometry.getAttribute("_seed");
+      const panel = obj.geometry.getAttribute("_panel");
       if (along) obj.geometry.setAttribute("along", along);
       if (seed) obj.geometry.setAttribute("seed", seed);
+      if (panel) obj.geometry.setAttribute("panel", panel);
+      // Raised sections reach past the baked bounds.
+      if (panel) obj.frustumCulled = false;
       (obj.material as THREE.Material).dispose();
       obj.material = new THREE.ShaderMaterial({
-        uniforms: { ...shared, uBase: { value: data.base ?? 0.13 } },
+        defines: panel ? { PANELS: "" } : {},
+        // ponytail: one global dimmer for the denser sliced shells; tune 0.8 (or the baked bases) if it reads too dark.
+        uniforms: { ...shared, uBase: { value: (data.base ?? 0.13) * 0.8 } },
         vertexShader: LINE_VERTEX,
         fragmentShader: LINE_FRAGMENT,
         transparent: true,
@@ -259,8 +382,10 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       });
     }
   });
-  const mouth = gltf.scene.getObjectByName("core");
-  if (!mouth || movers.length === 0) throw new Error("orb.glb is missing the orb parts");
+  const core = gltf.scene.getObjectByName("core");
+  const mouth = gltf.scene.getObjectByName("core-eye");
+  if (!core || !mouth || movers.length === 0) throw new Error("orb.glb is missing the orb parts");
+  const { shrink: mouthShrink = 0.5, grow: mouthGrow = 1.25 } = mouth.userData as { shrink?: number; grow?: number };
 
   const update = (dt: number) => {
     // Power: ramp toward the switch. Fully dark costs nothing: nothing is drawn or moved.
@@ -293,6 +418,41 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     const busy = Math.max(talk, boost);
     shared.uFlow.value = 0.35 + 0.15 * busy;
     shared.uPhase.value += dt * (0.15 + boost * 0.3 + talk * 0.8);
+    shared.uTalk.value = talk;
+    shared.uBoost.value = boost;
+
+    // Both idle rhythms fade out while Arcanus thinks or talks.
+    const calm = (1 - smooth(busy / 0.3)) * power;
+    if (t >= nextBeat) {
+      // A new beat: a fresh pick of which sections and slices rise and which drop.
+      beatAt = t;
+      nextBeat = t + BEAT * rand(0.92, 1.08);
+      const axis = new THREE.Vector3().randomDirection();
+      shared.uBeat.value.set(axis.x, axis.y, axis.z, 0);
+      shared.uScatter.value = Math.random() < 0.5 ? 1 : 0;
+      shared.uBeatSeed.value = rand(0, 100);
+    }
+    // Lub-dub: a strong pulse, then a softer one right after, reaching each part `delay` seconds after the centre.
+    const heartAt = (delay: number) => (bump(t, beatAt + delay, 0.22) + 0.6 * bump(t, beatAt + delay + 0.28, 0.2)) * calm;
+    const pulse = heartAt(0); // the eye, at the very centre, beats first
+    shared.uBeat.value.w = calm;
+    shared.uBeatAge.value = t - beatAt;
+    if (t >= nextBlink) {
+      blinkAt = t;
+      nextBlink = t + (Math.random() < 0.2 ? 0.4 : rand(2.5, 7)); // now and then a double blink
+      shared.uBlinkSeed.value = rand(0, 100);
+      // Now and then a blink also sets a ring or two off on a gesture.
+      if (busy < 0.15 && power === 1 && Math.random() < 0.5) {
+        const rings = movers.filter((m) => m.kind === "ring");
+        for (let n = Math.floor(rand(1, 3)); n > 0; n--) {
+          const m = rings[Math.floor(Math.random() * rings.length)];
+          m.act = ACTS[Math.floor(Math.random() * ACTS.length)];
+          m.actStart = t;
+          m.actLen = rand(0.5, 1.2);
+        }
+      }
+    }
+    shared.uBlink.value = bump(t, blinkAt, 0.25) * calm;
 
     // Each part: its own drifting turn, much faster while talking, with a random shake on top and a twitching size.
     // Thinking only flutters a little and slowly: the twitch is smoothed harder for it.
@@ -300,8 +460,6 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     const shake = talk * 0.045 * motion * dt * 60;
     const flutter = Math.max(talk, boost * 0.35) * motion;
     const snap = 1 - Math.exp(-dt * (boost > talk ? 12 : 45));
-    let ticking = 0;
-    for (const m of movers) if (m.ticking) ticking++;
     const tickSnap = 1 - Math.exp(-dt * 30);
     for (const m of movers) {
       const { rotation } = m.obj;
@@ -313,20 +471,15 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
         m.shown = [...m.want];
         m.ready = true;
       }
+      // A gesture, if this part is in one: swing back the other way (fast), or swell, or shrink.
+      const act = bump(t, m.actStart, m.actLen) * motion;
+      const turn = m.act === "turn" ? 1 - 6 * act : 1;
+      const swell = m.act === "grow" ? 1 + 0.15 * act : m.act === "shrink" ? 1 - 0.15 * act : 1;
       // Each part keeps turning smoothly in `want`; it is drawn from there, or stepped in clockwork fashion.
       for (let i = 0; i < 3; i++) {
-        m.want[i] += pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.jitter * m.axes[i];
+        m.want[i] += turn * pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.jitter * m.axes[i];
       }
-      if (t >= m.until) {
-        if (!m.ticking && ticking >= MAX_TICKING) {
-          m.until = t + rand(1, 3); // enough parts are ticking already: wait
-        } else {
-          m.ticking = !m.ticking;
-          ticking += m.ticking ? 1 : -1;
-          m.until = t + (m.ticking ? rand(2, 5) : rand(4, 11));
-        }
-      }
-      const clockwork = m.ticking && busy < 0.15 && motion === 1;
+      const clockwork = m.kind === "ring" && busy < 0.15 && motion === 1 && act === 0;
       if (clockwork && t >= m.nextTick) {
         m.nextTick = t + m.period * rand(0.85, 1.15);
         // A tick: catch up with the smooth turn in one quick step, with a small mechanical shiver.
@@ -337,7 +490,10 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       rotation.set(m.shown[0], m.shown[1], m.shown[2]);
       // Each part grows out of the core as the power comes up, and falls back into it as it goes down.
       const grown = Math.max(0.001, smooth((power - m.delay) / 0.5));
-      m.obj.scale.setScalar((1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap)) * grown);
+      // The core and shells swell a touch on each heartbeat; the rings don't beat.
+      const heart = m.kind === "shell" || m.kind === "core" ? 1 + 0.03 * heartAt(m.radius * WAVE) * motion : 1;
+      const size = (1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap)) * swell * heart;
+      m.obj.scale.setScalar((1 + within(size - 1, m.shrink, m.grow)) * grown);
     }
 
     // The core is the mouth: while talking its size twitches between small and large in quick jumps, and it glows a
@@ -345,8 +501,10 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     const jump = tick(coreTwitch, t, snap);
     // The core is first to light and last to go out, and it flickers with the rest.
     const lit = smooth(power / 0.3);
-    mouth.scale.setScalar((1 + (talk * 0.7 + boost * 0.12) * jump * motion) * (0.3 + 0.7 * lit));
-    coreGlow.value = (1 + 0.25 * talk * (0.5 + 0.5 * jump)) * lit * flick;
+    // Only the eye itself jumps, inside the cage, so it never breaks through it.
+    mouth.scale.setScalar(1 + within(((talk * 0.7 + boost * 0.12) * jump + 0.12 * pulse) * motion, mouthShrink, mouthGrow));
+    core.scale.setScalar(0.3 + 0.7 * lit);
+    coreGlow.value = (1 + 0.25 * talk * (0.5 + 0.5 * jump) + 0.35 * pulse) * lit * flick;
   };
 
   return { root: gltf.scene, update, reboot: () => (power = 0), dispose: () => gltf.scene.traverse(disposeDraw) };

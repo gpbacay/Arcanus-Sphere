@@ -27,7 +27,7 @@ type Props = {
   resetKey?: number;
 };
 
-const GRID_Y = -1.6; // just under the outermost ring (radius ~1.45)
+const GRID_Y = -1.75; // just under the outermost ring (out to ~1.69 at its largest)
 const SCALE_RANGE = [0.3, 3] as const;
 const NARROW = 720;
 // Phone: the canvas is only the free band under the chrome, so the orb can sit in the middle of it.
