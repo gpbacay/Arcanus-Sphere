@@ -22,6 +22,10 @@ type Mood = "off" | "ready" | "thinking" | "speaking";
 export function ChatPanel() {
   const { isMobile } = useSidebar();
   const [collapsed, setCollapsed] = useState(false);
+  // Phone opens on the sphere. The chat row only exists while this panel is open.
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 767px)").matches) setCollapsed(true);
+  }, []);
   const busy = useBusy();
   const on = useStore(power, (s) => s.on);
   const speaking = useStore(voice.state, (s) => s.speaking);
