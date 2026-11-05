@@ -171,16 +171,27 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
 
   // The engine sizes the canvas to the camera feed; keep it filling the screen instead (also when the phone turns).
   // Pixel ratio capped at 1.5, under the studio's 2: the bloom plate is the frame's main cost and this roughly halves it
-  // on a 3x phone. Ratio 1 made every trace a full CSS pixel wide.
+  // on a 3x phone. Ratio 1 made every trace a full CSS pixel wide, so it is only the floor when frames run slow (onUpdate).
+  let sharpness = 1.5;
+  let plate = ""; // the size the bloom plate was last made at: resizing it reallocates a dozen render targets
   const layout = () => {
     canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none";
     if (!renderer) return;
-    const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
-    renderer.setPixelRatio(ratio);
-    renderer.setSize(container.clientWidth, container.clientHeight, false);
-    composer?.setPixelRatio(ratio);
-    composer?.setSize(container.clientWidth, container.clientHeight);
+    const ratio = Math.min(window.devicePixelRatio || 1, sharpness);
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    // Mobile browsers fire resize all the time (the address bar sliding): only touch what actually changed.
+    if (canvas.width !== Math.floor(w * ratio) || canvas.height !== Math.floor(h * ratio)) {
+      renderer.setPixelRatio(ratio);
+      renderer.setSize(w, h, false);
+    }
+    if (composer && plate !== `${w}x${h}@${ratio}`) {
+      plate = `${w}x${h}@${ratio}`;
+      composer.setPixelRatio(ratio);
+      composer.setSize(w, h);
+    }
   };
+  let slow = 0; // seconds of slow frames, less the fast ones since
   layout();
   window.addEventListener("resize", layout);
   window.visualViewport?.addEventListener("resize", layout);
@@ -310,7 +321,16 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
       },
       onCanvasSizeChange: () => layout(),
       onUpdate: () => {
-        const dt = Math.min(clock.getDelta(), 0.05);
+        const raw = clock.getDelta();
+        const dt = Math.min(raw, 0.05);
+        // Running under ~25 fps for two seconds straight: drop the resolution a step (1.5 -> 1.25 -> 1). It never goes
+        // back up, so it can't flip back and forth.
+        slow = raw > 1 / 25 ? slow + raw : Math.max(0, slow - raw);
+        if (slow > 2 && sharpness > 1) {
+          sharpness -= 0.25;
+          slow = 0;
+          layout();
+        }
         if (camera && !placed) {
           // First frame with a real camera pose: float the orb at the middle of the screen.
           placed = true;
