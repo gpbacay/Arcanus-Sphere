@@ -2,12 +2,15 @@
 // (CORS), so this fetches a page or a search for it and hands back text. It runs only when you browse or ask Arcanus
 // to look something up; your chats never come here.
 //   GET /api/web?url=https://…  -> Page   (title + readable text with links)
-//   GET /api/web?q=…            -> { results, engine }
+//   GET /api/web?q=…            -> { results, engine, brief? }   (free-search, else DuckDuckGo, else Wikipedia)
+//   GET /api/web?open=https://… -> { opened, url }   (the machine's browser)
 // ponytail: DNS is checked before each hop, not pinned for the connection (rebinding can slip through). No rate limit:
 // add one before deploying this somewhere public.
+import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { readDuckDuckGo, readHtml, readWikipedia, type Result } from "@/shared/html";
+import { readBrief, readDuckDuckGo, readHtml, readWikipedia, type Page, type Result } from "@/shared/html";
+import { freeSearch } from "./free-search";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +70,22 @@ async function body(res: Response) {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-async function search(q: string): Promise<{ results: Result[]; engine: string }> {
+/** Open `url` in the machine's browser. The address is one argument, never a shell string. */
+function launch(url: string) {
+  const child = process.platform === "win32"
+    ? spawn("rundll32", ["url.dll,FileProtocolHandler", url], { detached: true, stdio: "ignore", windowsHide: true })
+    : spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+async function search(q: string): Promise<{ results: Result[]; engine: string; brief?: string }> {
+  try {
+    const brief = (await freeSearch().research(q)).slice(0, 3500);
+    const results = readBrief(brief);
+    if (brief) return { results, engine: "free-search", brief };
+  } catch {
+    /* uvx missing, or the engines blocked this process: DuckDuckGo below */
+  }
   try {
     const { res } = await get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`);
     const results = readDuckDuckGo(await body(res));
@@ -79,6 +97,11 @@ async function search(q: string): Promise<{ results: Result[]; engine: string }>
   return { results: readWikipedia(JSON.parse(await body(res))), engine: "Wikipedia" };
 }
 
+function pageFromMarkdown(url: string, markdown: string): Page {
+  const title = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || new URL(url).hostname;
+  return { url, title, text: markdown.slice(0, 60_000) };
+}
+
 const reply = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
 
 export async function GET(request: Request) {
@@ -87,10 +110,23 @@ export async function GET(request: Request) {
   if (site && site !== "same-origin") return reply({ error: "Not available to other sites." }, 403);
   const params = new URL(request.url).searchParams;
   const q = params.get("q")?.trim().slice(0, 300);
+  const open = params.get("open")?.trim();
   const target = params.get("url")?.trim();
   try {
+    if (open) {
+      const url = new URL(open);
+      await checkTarget(url);
+      launch(url.href);
+      return reply({ opened: true, url: url.href });
+    }
     if (q) return reply(await search(q));
-    if (!target) return reply({ error: "Pass ?url= or ?q=." }, 400);
+    if (!target) return reply({ error: "Pass ?url=, ?q=, or ?open=." }, 400);
+    try {
+      const markdown = await freeSearch().fetch(target);
+      if (markdown.trim()) return reply(pageFromMarkdown(target, markdown));
+    } catch {
+      /* the relay's own fetch below */
+    }
     const { res, url } = await get(target);
     if (!res.ok) return reply({ error: `The site answered ${res.status}.` }, 502);
     const type = res.headers.get("content-type") ?? "";

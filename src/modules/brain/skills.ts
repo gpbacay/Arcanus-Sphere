@@ -5,12 +5,13 @@ import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Hippocampus } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
-import { callTool, connectMcp, introduction, matchTool, personalityReply } from "@/modules/harness";
-import { browse, search } from "@/modules/web";
+import { callTool, connectMcp, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
+import { browse, openUserBrowser, search } from "@/modules/web";
+import { browserUrl, commandTool, mergeCall, WEB_TOOLS } from "@/modules/web/navigate";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
-import { cityIn, toolArguments } from "./arc1";
-import { ASK_WEB, LINK, ROUTES, type Route } from "./routes";
+import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
+import { ASK_WEB, ROUTES, type Route } from "./routes";
 import { calculate, findExpression, tellTime, zoneFor } from "./tools";
 
 /**
@@ -41,6 +42,12 @@ export function selfNotes(text: string) {
 }
 
 const route = (name: string) => ROUTES.find((r) => r.route === name)!;
+
+/** Arguments for a harness tool: ARC 1's, when it chose the tool; otherwise it reads an MCP tool's fields. */
+async function argumentsFor(text: string, tool: Tool, arc: { name: string; arguments: Record<string, unknown> } | null) {
+  if (arc?.name === tool.name) return arc.arguments;
+  return tool.mcp ? toolArguments(text, tool) : {};
+}
 
 export const CHAT: Skill = route("chat");
 
@@ -95,25 +102,37 @@ export const SKILLS: Skill[] = [
   {
     ...route("web"),
     async run(text) {
-      const link = text.match(LINK)?.[0];
+      // A plain command names the tool. Otherwise ARC 1 chooses among open, search, and read. SmolLM2 only writes
+      // the answer from what the tool returned.
+      const fallback = commandTool(text);
+      const offered = fallback ? WEB_TOOLS.filter((tool) => tool.name === fallback.name) : WEB_TOOLS;
+      const arc = await chooseTool(text, offered, fallback ? { [fallback.name]: 1 } : undefined);
+      const call = mergeCall(arc, fallback) ?? { name: "search_web" as const, arguments: { query: text.replace(ASK_WEB, "").trim() || text } };
+      const by = arc?.name === call.name ? "ARC 1" : "the command";
       try {
-        if (link) {
-          const page = await browse(link);
+        if (call.name === "open_browser") {
+          const url = browserUrl(call.arguments.site ?? "", call.arguments.query ?? "");
+          await openUserBrowser(url);
           return {
-            step: { label: "Read a web page", description: page.url, results: [page.title] },
+            step: { label: "Opened in your browser", description: `${by} · open_browser`, results: [url] },
+            reply: `Opened it in your browser: ${url}`,
+          };
+        }
+        if (call.name === "read_page" && call.arguments.url) {
+          const page = await browse(call.arguments.url);
+          return {
+            step: { label: "Read a web page", description: `${by} · read_page`, results: [page.title] },
             facts: [plainText(page.text)],
             source: `The web page "${page.title}" (${page.url})`,
           };
         }
-        // ponytail: the whole request, less the "search for" and "online": ARC 1 was measured here and dropped words
-        // that matter ("the population of japan" became "japan"). Search engines read full sentences well.
-        const query = text.replace(ASK_WEB, "").replace(/\s+(?:online|on the (?:web|internet))\s*[?.!]*$/i, "").trim() || text;
-        const { results, engine } = await search(query);
-        if (!results.length) return { step: { label: "Searched the web", description: query }, reply: `I searched the web for "${query}" and found nothing.` };
+        const query = call.arguments.query?.trim() || text;
+        const { results, engine, brief } = await search(query);
+        if (!brief && !results.length) return { step: { label: "Searched the web", description: `${by} · ${query}` }, reply: `I searched the web for "${query}" and found nothing.` };
         const top = results.slice(0, 4);
         return {
-          step: { label: `Searched ${engine}`, description: query, results: top.map((r) => r.title) },
-          facts: top.map((r) => `${r.title}: ${r.snippet} (${r.url})`),
+          step: { label: `Searched ${engine}`, description: `${by} · ${query}`, results: top.map((r) => r.title) },
+          facts: brief ? [brief] : top.map((r) => `${r.title}: ${r.snippet} (${r.url})`),
           source: `Web search results for "${query}"`,
         };
       } catch (err) {
@@ -140,13 +159,22 @@ export const SKILLS: Skill[] = [
           return { step: { label: "MCP", description: url }, reply: "That server didn't connect." };
         }
       }
-      const tool = matchTool(text);
+      const tools = listTools();
+      const specs = tools.map((tool) => {
+        const parameters = schemaParameters(tool.schema);
+        return {
+          name: tool.name,
+          description: tool.description || tool.name,
+          parameters: parameters.length ? parameters : [{ name: "input", type: "string", description: "The words from the message this tool should use", required: false }],
+        };
+      });
+      const arc = await chooseTool(text, specs);
+      const tool = (arc && tools.find((item) => item.name === arc.name)) || matchTool(text);
       if (!tool) return null;
-      // ARC 1 reads an MCP tool's fields from the message; the harness fills in what it missed.
-      const args = tool.mcp ? await toolArguments(text, tool) : {};
+      const args = await argumentsFor(text, tool, arc);
       const read = Object.entries(args).map(([k, v]) => `${k} = ${String(v)}`);
       return {
-        step: { label: `Tool · ${tool.name}`, description: tool.mcp ? `MCP ${tool.mcp}` : "Harness", results: read.length ? [`ARC 1 read: ${read.join(", ")}`] : undefined },
+        step: { label: `Tool · ${tool.name}`, description: arc?.name === tool.name ? "ARC 1 chose this tool" : tool.mcp ? `MCP ${tool.mcp}` : "Harness", results: read.length ? [`ARC 1 read: ${read.join(", ")}`] : undefined },
         reply: await callTool(tool.name, text, args),
       };
     },

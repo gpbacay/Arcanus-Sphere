@@ -80,6 +80,26 @@ export function readDuckDuckGo(html: string): Result[] {
     });
 }
 
+/** Links in a free-search brief: markdown [title](url) or "Title — <https://…>". */
+export function readBrief(markdown: string): Result[] {
+  const results: Result[] = [];
+  const push = (title: string, url: string) => {
+    const href = url.replace(/[).,]+$/, "");
+    if (!/^https?:\/\//i.test(href) || results.some((r) => r.url === href)) return;
+    results.push({ title: title.replace(/^\d+\s*/, "").replace(/\s+[—–-]\s*$/, "").trim() || href, url: href, snippet: "" });
+  };
+  for (const line of markdown.split("\n")) {
+    const linked = line.match(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/);
+    if (linked) push(linked[1], linked[2]);
+    else {
+      const auto = line.match(/^(?:[-*]\s*)?(?:\[\d+\]\s*)?(.+?)\s+[—–-]\s+<?(https?:\/\/[^\s>]+)>?/);
+      if (auto) push(auto[1], auto[2]);
+    }
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
 /** Results from the Wikipedia search API (list=search, format=json). */
 export function readWikipedia(json: unknown, lang = "en"): Result[] {
   const hits = (json as { query?: { search?: { title?: string; snippet?: string }[] } })?.query?.search ?? [];

@@ -28,6 +28,8 @@ export type Route = {
 
 export const LINK = /\bhttps?:\/\/[^\s<>"')\]]+/i;
 export const ASK_WEB = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look\s+up|browse(?:\s+to)?|find\s+online)\s+/i;
+/** "go to youtube", "open github", "browse to wikipedia.org": open the user's browser, not the reader. */
+export const GO = /^(?:please\s+)?(?:go to|navigate to|take me to|pull up|open|browse to)\b/i;
 
 export const ROUTES: Route[] = [
   {
@@ -112,9 +114,13 @@ export const ROUTES: Route[] = [
       "find this on the internet",
       "browse to wikipedia.org",
       "summarize this article https://example.com/post",
+      "go to youtube and search asmr",
+      "open github",
+      "take me to wikipedia",
     ],
     claim(text) {
       if (/^connect mcp\s/i.test(text)) return undefined; // an MCP server's address belongs to the tool skill
+      if (GO.test(text)) return "asked to open a site";
       return LINK.test(text) ? "a link" : ASK_WEB.test(text) ? "asked to search the web" : undefined;
     },
   },

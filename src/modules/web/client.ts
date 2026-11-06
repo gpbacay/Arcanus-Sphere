@@ -6,7 +6,7 @@ import type { Page, Result } from "@/shared/html";
 import { openPane } from "@/shared/pane";
 import { Store, errorText } from "@/shared/store";
 
-export type View = { kind: "page"; page: Page } | { kind: "results"; query: string; results: Result[]; engine: string };
+export type View = { kind: "page"; page: Page } | { kind: "results"; query: string; results: Result[]; engine: string; brief?: string };
 
 export const browser = new Store({
   view: null as View | null,
@@ -45,7 +45,7 @@ async function load(target: string): Promise<View> {
   try {
     const query = target.startsWith("search:") ? target.slice(7) : "";
     const view: View = query
-      ? { kind: "results", query, ...(await relay<{ results: Result[]; engine: string }>(`q=${encodeURIComponent(query)}`)) }
+      ? { kind: "results", query, ...(await relay<{ results: Result[]; engine: string; brief?: string }>(`q=${encodeURIComponent(query)}`)) }
       : { kind: "page", page: await relay<Page>(`url=${encodeURIComponent(target)}`) };
     if (mine === seq) browser.set({ view, loading: "" });
     return view;
@@ -80,8 +80,24 @@ export async function browse(url: string): Promise<Page> {
   return view.page;
 }
 
-/** Search the web in Arcanus's browser. */
+/** Search the web in Arcanus's browser. `brief` is the page text free-search read, when it ran. */
 export async function search(query: string) {
   const view = await go(`search:${query}`);
-  return view.kind === "results" ? view : { results: [], engine: "", query };
+  return view.kind === "results" ? view : { results: [] as Result[], engine: "", query, brief: undefined as string | undefined };
+}
+
+/** Open an address in the user's browser. A popup blocker falls through to the app's relay, which launches it. */
+export async function openUserBrowser(url: string) {
+  const popped = window.open(url, "_blank", "noopener,noreferrer");
+  if (!popped) await fetch(`/api/web?open=${encodeURIComponent(url)}`).catch(() => undefined);
+  const { history, at } = browser.state;
+  const next = [...history.slice(0, at + 1), url];
+  browser.set({
+    history: next,
+    at: next.length - 1,
+    loading: "",
+    error: "",
+    view: { kind: "page", page: { url, title: "Opened in your browser", text: `Opened in your browser.\n\n[${url}](${url})` } },
+  });
+  openPane("browser");
 }

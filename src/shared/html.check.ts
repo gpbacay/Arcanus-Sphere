@@ -1,6 +1,6 @@
 // Run: node src/shared/html.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { decode, plainText, readDuckDuckGo, readHtml, readWikipedia } from "./html.ts";
+import { decode, plainText, readBrief, readDuckDuckGo, readHtml, readWikipedia } from "./html.ts";
 
 assert.equal(decode("a &amp; b &#39;c&#x27; &bogus; &#0;"), "a & b 'c' &bogus; &#0;");
 
@@ -22,6 +22,12 @@ const ddg = readDuckDuckGo(
    <a rel="nofollow" class="result__a" href="https://duckduckgo.com/y.js?ad_domain=x">Ad</a>`
 );
 assert.deepEqual(ddg, [{ title: "Mount Everest", url: "https://en.wikipedia.org/wiki/Mount_Everest", snippet: "8,849 m tall." }]);
+
+const brief = readBrief("# Research\n- [1] Everest — <https://en.wikipedia.org/wiki/Mount_Everest>\nSee [NOAA](https://www.noaa.gov/).\n- [1] Everest — <https://en.wikipedia.org/wiki/Mount_Everest>");
+assert.deepEqual(brief, [
+  { title: "Everest", url: "https://en.wikipedia.org/wiki/Mount_Everest", snippet: "" },
+  { title: "NOAA", url: "https://www.noaa.gov/", snippet: "" },
+]);
 
 const wiki = readWikipedia({ query: { search: [{ title: "Mount Everest", snippet: 'Earth&#039;s <span class="searchmatch">highest</span>' }] } });
 assert.deepEqual(wiki, [{ title: "Mount Everest", url: "https://en.wikipedia.org/wiki/Mount_Everest", snippet: "Earth's highest" }]);

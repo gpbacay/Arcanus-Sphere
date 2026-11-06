@@ -1,7 +1,7 @@
 // Arcanus's System 1. Hippocampus (remembered phrasings) with Occipital (letter-level recall, for typos) decides which
 // skill a message needs, in well under a millisecond (routes.ts). Skills (skills.ts) answer what they can without the
-// language model, with ARC 1 reading their arguments (arc1.ts, loaded on first use); everything else
-// goes to SmolLM2.
+// language model. ARC 1 chooses the tool and reads its arguments (arc1.ts, loaded on first use); SmolLM2
+// only writes the reply.
 //
 // Hippocampus learns as it is used: from claims (a link, a sum: certain, so worth remembering how they were worded)
 // and from /teach, a correction. What it learned is kept in .arcanus/routing.json, which you can read and edit.

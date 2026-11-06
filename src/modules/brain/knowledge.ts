@@ -23,7 +23,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "browser",
     title: "Browser: the internet",
     content:
-      "Arcanus has its own browser. It can search the web and read pages as text, through the app's relay, only when you browse or ask it to look something up; your chats are never sent. Paste a link or say search for something, or use /browse. Ask Arcanus about a page to have it read along with your messages.",
+      "Arcanus can search the web and read pages for context, through free-search when it is available and through the app's relay otherwise. Your chats are never sent. Say go to a site, for example go to youtube and search ASMR, and it opens that in your browser. Paste a link or say search for something, or use /browse, and it reads the page. Ask Arcanus about a page to have it read along with your messages.",
   },
   {
     id: "identity",
@@ -64,7 +64,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "arc1",
     title: "Argument reader: ARC 1",
     content:
-      "ARC 1 from ARCANE is a 1.3 million parameter System 1 model. It does not write text. In about 10 milliseconds it reads a skill's arguments from the words of a message, such as the city in a question about the time somewhere or the fields a connected MCP tool needs, so Arcanus can answer it without the language model.",
+      "ARC 1 from ARCANE is a 1.3 million parameter System 1 model. It does not write text. It chooses which tool a web or tool request needs, and reads that tool's arguments from the words of the message, such as the site in go to youtube and search ASMR, the city in a question about the time, or the fields a connected MCP tool needs. SmolLM2 only writes the reply. Hippocampus still decides whether a message is chat, the time, math, or the web.",
   },
   {
     id: "memory",

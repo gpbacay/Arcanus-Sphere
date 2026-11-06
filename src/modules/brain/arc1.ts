@@ -1,6 +1,6 @@
-// ARC 1 reads a skill's arguments out of a message: the city in "what time is it in New York", the fields of an MCP
-// tool. It anchors spans of the message's own words, so it cannot make a value up. Measured on held-out messages it
-// found the city 6 of 6 times; it routes poorly, so it is not in the routing vote (routes.ts).
+// ARC 1 reads a skill's arguments out of a message, and picks which offered tool applies. It anchors spans of the
+// message's own words, so it cannot make a value up. Measured on held-out messages it found the city 6 of 6 times.
+// It routes whole conversations poorly, so Hippocampus still chooses the skill (routes.ts); ARC 1 chooses the tool.
 import { load, type Arc1Agent } from "./arcane/web.mjs";
 
 let agent: Promise<Arc1Agent> | null = null;
@@ -34,6 +34,39 @@ export async function cityIn(text: string): Promise<string | null> {
 const SIMPLE = new Set(["string", "number", "integer", "boolean"]);
 type Property = { type?: unknown; description?: unknown; enum?: unknown };
 export type ToolSchema = { properties?: Record<string, unknown>; required?: unknown };
+export type ToolSpec = {
+  name: string;
+  description: string;
+  parameters: { name: string; type: string; description: string; required?: boolean; enum?: string[] }[];
+};
+
+/** JSON Schema properties ARC 1 can anchor: simple types, or an enum. */
+export function schemaParameters(schema?: ToolSchema): ToolSpec["parameters"] {
+  const required = Array.isArray(schema?.required) ? schema.required.map(String) : [];
+  return Object.entries(schema?.properties ?? {}).flatMap(([name, raw]) => {
+    const p = (raw ?? {}) as Property;
+    const type = String((Array.isArray(p.type) ? p.type.find((t) => t !== "null") : p.type) ?? "string");
+    const options = Array.isArray(p.enum) ? p.enum.map(String) : undefined;
+    if (!options && !SIMPLE.has(type)) return [];
+    return [{ name, type, description: String(p.description ?? name), enum: options, required: required.includes(name) }];
+  });
+}
+
+/**
+ * Which offered tool applies, and its arguments, or null when none fires or ARC 1 is unavailable.
+ * `prior` forces a tool the command already named (1 = certain); without it ARC 1 chooses.
+ */
+export async function chooseTool(text: string, tools: ToolSpec[], prior?: Record<string, number>): Promise<{ name: string; arguments: Record<string, unknown> } | null> {
+  const offered = tools.filter((tool) => tool.parameters.length);
+  if (!offered.length) return null;
+  try {
+    const out = await (await arc1()).run(text, offered, prior ? { toolPrior: prior } : {});
+    const call = out.function_calls[0];
+    return call ? { name: call.name, arguments: call.arguments ?? {} } : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * An MCP tool's arguments read from `text` by its JSON Schema (simple-typed fields only), or {} when ARC 1 can't
@@ -42,19 +75,6 @@ export type ToolSchema = { properties?: Record<string, unknown>; required?: unkn
  * city "celsius"). The schema's `required` matters: with every field optional it read almost nothing.
  */
 export async function toolArguments(text: string, tool: { name: string; description: string; schema?: ToolSchema }): Promise<Record<string, unknown>> {
-  const required = Array.isArray(tool.schema?.required) ? tool.schema.required.map(String) : [];
-  const parameters = Object.entries(tool.schema?.properties ?? {}).flatMap(([name, raw]) => {
-    const p = (raw ?? {}) as Property;
-    const type = String((Array.isArray(p.type) ? p.type.find((t) => t !== "null") : p.type) ?? "string");
-    const options = Array.isArray(p.enum) ? p.enum.map(String) : undefined;
-    if (!options && !SIMPLE.has(type)) return [];
-    return [{ name, type, description: String(p.description ?? name), enum: options, required: required.includes(name) }];
-  });
-  if (!parameters.length) return {};
-  try {
-    const out = await (await arc1()).run(text, [{ name: tool.name, description: tool.description, parameters }], { toolPrior: { [tool.name]: 1 } });
-    return out.function_calls[0]?.arguments ?? {};
-  } catch {
-    return {};
-  }
+  const chosen = await chooseTool(text, [{ name: tool.name, description: tool.description, parameters: schemaParameters(tool.schema) }], { [tool.name]: 1 });
+  return chosen?.arguments ?? {};
 }

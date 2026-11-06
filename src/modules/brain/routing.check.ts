@@ -78,4 +78,6 @@ assert.ok(aboutGrounded / aboutAll >= GROUNDED_FLOOR, "too few questions about A
 assert.ok(chatGrounded / chatAll <= FALSE_GROUNDING_CEILING, "too many chat messages are grounded in Arcanus's notes");
 // A number shared with a math seed ("what is 12 * 7") is not arithmetic.
 assert.equal((await decide(routerMemory(), "I have 12 apples")).route, "chat");
+assert.equal((await decide(routerMemory(), "go to youtube and search ASMR")).route, "web");
+assert.equal((await decide(routerMemory(), "go to youtube and search ASMR")).claimed, "asked to open a site");
 console.log("routing ok");
