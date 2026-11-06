@@ -55,6 +55,9 @@ export function takeSentences(buffer: string, long = 80): { sentences: string[];
   return { sentences: parts.map((s) => s.trim()).filter(Boolean), rest };
 }
 
+/** `text` without a sentence cut off at the end (a reply stopped at its token cap); whole if it has no full stop yet. */
+export const wholeSentences = (text: string) => text.match(/^[\s\S]*[.!?…]/)?.[0] ?? text;
+
 /** Whether words heard while Arcanus was speaking are mostly its own: the microphone picking up the speaker. */
 export function isEcho(heard: string, said: string): boolean {
   const words = (s: string) => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];

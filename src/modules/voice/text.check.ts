@@ -1,6 +1,9 @@
 // Run: node src/modules/voice/text.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { forSpeech, isEcho, isIntroduction, openingLine, takeSentences } from "./text.ts";
+import { forSpeech, isEcho, isIntroduction, openingLine, takeSentences, wholeSentences } from "./text.ts";
+
+assert.equal(wholeSentences("One. Two is cut o"), "One.");
+assert.equal(wholeSentences("No full stop yet"), "No full stop yet");
 
 assert.equal(forSpeech("**Hi** see [docs](http://x)."), "Hi see docs.");
 assert.equal(openingLine('"Yes. Good day, how can I help you?"'), "Good day, how can I help you?");

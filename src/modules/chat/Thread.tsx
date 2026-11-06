@@ -35,17 +35,57 @@ export function Thread() {
   const editingId = useStore(chatStore, (s) => s.editingId);
   const writingHere = useStore(live, (s) => Boolean(s.reply && s.reply.chatId === current?.id));
   const busy = useBusy();
-  const endRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true); // follow the newest text unless you scrolled up to read
 
+  // Keep the bottom in view whenever the thread grows: a message, a streamed token, a thinking step opening.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [current?.messages, writingHere]);
+    const el = threadRef.current;
+    if (!el) return;
+    pinned.current = true;
+    const follow = () => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    };
+    const sizes = new ResizeObserver(follow); // a child growing without any text changing (a trace unfolding)
+    const watch = () => {
+      sizes.disconnect();
+      for (const child of el.children) sizes.observe(child);
+    };
+    const changes = new MutationObserver((records) => {
+      if (records.some((r) => r.target === el)) watch();
+      follow();
+    });
+    changes.observe(el, { childList: true, subtree: true, characterData: true });
+    watch();
+    follow();
+    return () => {
+      sizes.disconnect();
+      changes.disconnect();
+    };
+  }, [hydrated, current?.id]);
+
+  // Sending a message (or a reply starting) always jumps back to the bottom, even if you had scrolled up.
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el || !writingHere) return;
+    pinned.current = true;
+    el.scrollTop = el.scrollHeight;
+  }, [writingHere]);
 
   if (!hydrated || !current) return <ThreadSkeleton />;
   const lastAssistant = current.messages.findLastIndex((m) => m.role === "assistant");
 
   return (
-    <div className="thread" role="log" aria-label="Conversation">
+    <div
+      ref={threadRef}
+      className="thread"
+      role="log"
+      aria-label="Conversation"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      }}
+    >
       {current.messages.map((message, index) => (
         <Message
           key={message.id}
@@ -57,7 +97,6 @@ export function Thread() {
         />
       ))}
       <LiveReply chatId={current.id} />
-      <div ref={endRef} />
     </div>
   );
 }
@@ -177,15 +216,9 @@ function BootTrace({ id, saved }: { id: string; saved?: ThoughtStep[] }) {
 /** The reply being written. The only part of the thread that re-renders per token. */
 function LiveReply({ chatId }: { chatId: string }) {
   const reply = useStore(live, (s) => s.reply);
-  const ref = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    ref.current?.scrollIntoView({ block: "end" });
-  }, [reply?.text]);
-
   if (!reply || reply.chatId !== chatId) return null;
   return (
-    <article ref={ref} className="msg" data-role="assistant" aria-busy="true">
+    <article className="msg" data-role="assistant" aria-busy="true">
       <div className="msg-trace">
         <ChainOfThoughtTrace label="Arcanus is thinking" steps={reply.trace} thinking open />
       </div>

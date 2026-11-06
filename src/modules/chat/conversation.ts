@@ -7,7 +7,7 @@ import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
-import { isEcho, isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
+import { isEcho, isIntroduction, openingLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
@@ -26,10 +26,21 @@ const busy = () => live.state.reply !== null || !power.state.on;
 // The date is in, so the model never guesses it; the abilities are in, so it never offers ones it doesn't have.
 const system = () =>
   `You are Arcanus. ${identityBrief} ${personality.line} You can ${abilities.join(", ")}. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}. Answer clearly and briefly. About yourself, use only these facts. If you do not know something, say so instead of guessing. Do not invent a job, a team, a company, or a personal history.`;
+// Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
+const SPOKEN = " You are speaking out loud in a live conversation: reply in one or two short sentences, in plain words, with no lists.";
+const VOICE_TOKENS = 70; // about three short sentences
+const VOICE_HISTORY = 4;
+const BOOKS = /\b(books?|chapters?|library|shelf|my notes)\b/i; // a spoken turn searches the user's books only when asked
+const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
+const FILLERS = ["Let me think.", "Hmm, let me see.", "One moment."]; // two words or more, so isEcho can tell them from you
 const NO_MODEL =
   "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolLM2 shows ready.";
 
 let gen = 0;
+/** Set by talk() around send(): the message about to be answered was spoken, not typed. */
+let viaVoice = false;
+/** The filler Arcanus last said while thinking, so its own echo isn't mistaken for you (see talk()). */
+let fillerLine = "";
 
 // ------------------------------------------------------------------ context
 // What the model reads besides the message, most important first, fitted into a character budget (harness assemble):
@@ -57,14 +68,15 @@ async function buildTurns(
   user: Msg,
   plan: Plan,
   skill: Skill | undefined,
-  from: string
+  from: string,
+  spoken: boolean
 ): Promise<{ turns: Turn[]; step: ThoughtStep | null; evidence: string[]; context: string }> {
   const text = ask(user, skill);
   // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
   const [rules, notes, passages] = await Promise.all([
     instructions().catch(() => ""),
     memories().catch(() => []),
-    !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
+    !skill && plan.route === "chat" && !plan.facts && (!spoken || BOOKS.test(text)) ? recallPassages(text).catch(() => []) : [],
   ]);
   const pinned = pane.state.pinned;
   const recalled = recallNotes(text, notes);
@@ -108,9 +120,9 @@ async function buildTurns(
   // which would otherwise be read back as fact.
   const history = prior
     .filter((m) => !m.kind && m.text)
-    .slice(-HISTORY)
+    .slice(spoken ? -VOICE_HISTORY : -HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
-  const base = system();
+  const base = system() + (spoken ? SPOKEN : "");
   const prompt = standing ? `${base}\n\n${standing.label}:\n${standing.text}` : base;
   const step: ThoughtStep | null = report.length
     ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
@@ -360,6 +372,10 @@ async function compose(chatId: string, id: string, mine: number) {
 async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   stopGreeting();
   interrupted(); // whatever was still running belonged to the reply this one replaces
+  const spoken = viaVoice;
+  viaVoice = false;
+  fillerLine = "";
+  let filler: ReturnType<typeof setTimeout> | undefined;
   const mine = ++gen;
   const stale = () => mine !== gen;
   const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });
@@ -405,7 +421,14 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       return;
     }
 
-    const built = await buildTurns(prior, user, plan, skill, decision);
+    // If the first words are slow, say so out loud rather than leave a silence. Cleared once any sentence is spoken.
+    if (spoken && !voice.state.state.off && voice.state.state.analyser)
+      filler = setTimeout(() => {
+        if (stale() || voice.state.state.speaking) return;
+        fillerLine = FILLERS[Math.floor(Math.random() * FILLERS.length)];
+        voice.say(fillerLine);
+      }, FILLER_MS);
+    const built = await buildTurns(prior, user, plan, skill, decision, spoken);
     if (stale()) return;
     if (built.step) trace = [...trace, built.step];
     const writing = (description: string): ThoughtStep => ({ label: "SmolLM2", description, status: "active" });
@@ -418,19 +441,25 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     let spoke = false;
     let result;
     try {
-      result = await llm.generate(built.turns, (piece) => {
-        if (stale()) return;
-        // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
-        shown += piece;
-        const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
-        unspoken = rest;
-        spoke ||= sentences.length > 0;
-        sentences.forEach((s) => voice.say(s));
-        if (sentences.length) speaking ??= voiced(generating);
-        revise(generating, { content: shown, detail: "SmolLM2 is writing" });
-        show([...trace, writing("Writing on this device")], shown);
-      });
+      result = await llm.generate(
+        built.turns,
+        (piece) => {
+          if (stale()) return;
+          // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
+          shown += piece;
+          const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
+          unspoken = rest;
+          spoke ||= sentences.length > 0;
+          if (spoke) clearTimeout(filler);
+          sentences.forEach((s) => voice.say(s));
+          if (sentences.length) speaking ??= voiced(generating);
+          revise(generating, { content: shown, detail: "SmolLM2 is writing" });
+          show([...trace, writing("Writing on this device")], shown);
+        },
+        { maxNewTokens: spoken ? VOICE_TOKENS : undefined }
+      );
     } catch (err) {
+      clearTimeout(filler);
       settle(generating, { failed: true, detail: errorText(err) });
       // Without SmolLM2, recalled notes are still an answer; anything else gets an honest "not now".
       // Arcanus's own notes are short enough to read out; a web page or search results are not.
@@ -443,14 +472,18 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       ]);
       return;
     }
+    clearTimeout(filler);
     if (stale()) return;
-    if (unspoken.trim()) {
+    // A spoken reply that hit its token cap ends mid-sentence: don't say, or keep, the broken end.
+    const cutOff = spoken && result.tokens >= VOICE_TOKENS;
+    if (unspoken.trim() && !cutOff) {
       voice.say(unspoken);
       speaking ??= voiced(generating);
     }
     speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
-    const text = result.text || shown.trim() || "…";
+    const written = result.text || shown.trim() || "…";
+    const text = cutOff ? wholeSentences(written) : written;
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
@@ -477,6 +510,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   } catch (err) {
     // Whatever broke, the reply ends here, so Arcanus is never left stuck thinking.
     interrupted();
+    clearTimeout(filler);
     thought("execute", "Something failed", { parents: [root], detail: errorText(err) });
     finish("That didn't run. Try it once more.", [...trace, { label: "Something failed", description: errorText(err) }]);
   }
@@ -680,7 +714,7 @@ export function talk() {
   // never for noise or its own voice leaking back into the mic.
   let over = false; // Arcanus was talking while this was said, so it may be its own echo
   let hearing: string | null = null; // the Graph of Thought's thought for what is being heard right now
-  const said = () => live.state.reply?.text || lastAssistant();
+  const said = () => `${live.state.reply?.text || lastAssistant()} ${fillerLine}`;
   const interrupt = () => {
     cancelGreet();
     voice.cancel();
@@ -711,7 +745,9 @@ export function talk() {
       settle(id, { content: text, detail: "heard through the microphone" });
       interrupt();
       heard = id; // the reply's root: send() answers at once, so it takes this
+      viaVoice = true;
       send(text);
+      viaVoice = false; // send() refused it (busy), so the next typed message isn't taken for speech
       heard = null;
     },
   });
