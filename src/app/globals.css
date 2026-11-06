@@ -53,8 +53,8 @@
   --font-ui: var(--font-gilroy), "Gilroy", "Segoe UI", sans-serif;
   --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --r: 6px; /* panes */
-  --r-sm: 4px; /* controls */
+  --r: 0; /* panes: sharp corners, by the owner */
+  --r-sm: 0; /* controls */
   --panel-w: min(372px, calc(100vw - 20px));
   --gap: 10px;
 
@@ -70,6 +70,13 @@
 
 /* Tokens the ARCANE Chain of Thought component reads through Tailwind. */
 @theme inline {
+  /* Sharp corners everywhere (Tailwind rounded-xs…xl); rounded-full circles stay round. */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
   --color-foreground: var(--text);
   --color-muted-foreground: var(--text-muted);
   --color-border: var(--line-strong);
@@ -121,7 +128,7 @@ body {
 }
 ::-webkit-scrollbar-thumb {
   background: var(--surface-3);
-  border-radius: 6px;
+  border-radius: 0;
 }
 
 .truncate {
@@ -530,7 +537,7 @@ textarea.field {
   font-family: var(--font-mono);
   font-size: 0.92em;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
@@ -568,7 +575,7 @@ textarea.field {
 .msg[data-role="user"] .msg-bubble {
   padding: 6px 10px;
   border: 1px solid rgba(111, 224, 255, 0.24);
-  border-radius: var(--r) var(--r) 1px var(--r);
+  border-radius: 0;
   background: linear-gradient(180deg, rgba(111, 224, 255, 0.13), rgba(111, 224, 255, 0.07));
 }
 .msg[data-role="assistant"] .msg-bubble {
@@ -1013,7 +1020,7 @@ textarea.field {
   margin-right: 2px;
   padding: 0 5px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
@@ -1073,7 +1080,7 @@ textarea.field {
   left: calc(var(--nav-w) + 2 * var(--gap));
   display: flex;
   flex-direction: column;
-  width: min(480px, calc(100vw - var(--nav-w) - var(--panel-w) - 6 * var(--gap)));
+  width: min(var(--panel-w), calc(100vw - var(--nav-w) - var(--panel-w) - 6 * var(--gap))); /* as wide as the chat */
   min-width: 280px;
   animation: scan-in 0.45s var(--ease) both;
 }
@@ -1395,7 +1402,7 @@ textarea.field {
   width: 34px;
   height: 18px;
   border: 1px solid var(--line-strong);
-  border-radius: 3px;
+  border-radius: 0;
   background: rgba(2, 5, 9, 0.6);
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
@@ -1407,7 +1414,7 @@ textarea.field {
   left: 3px;
   width: 10px;
   height: 10px;
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--text-faint);
   transition: transform 0.25s var(--ease), background 0.2s, box-shadow 0.2s;
 }

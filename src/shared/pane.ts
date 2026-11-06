@@ -6,7 +6,7 @@ export type PaneName = "files" | "browser" | "mind";
 /** A file or web page handed to Arcanus. It goes into the model's context with each message until removed. */
 export type Pinned = { label: string; text: string; href?: string };
 
-export const pane = new Store<{ open: PaneName | null; pinned: Pinned | null }>({ open: null, pinned: null });
+export const pane = new Store<{ open: PaneName | null; pinned: Pinned | null }>({ open: "mind", pinned: null }); // the Graph of Thought is open from the start
 
 export const openPane = (name: PaneName) => pane.set({ open: name });
 export const togglePane = (name: PaneName) => pane.set({ open: pane.state.open === name ? null : name });

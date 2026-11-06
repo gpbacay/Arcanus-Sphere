@@ -172,7 +172,7 @@ export function ChainOfThoughtStep({
           {!last && <Line depth={depth - 1} className="-left-[15px] bottom-0 top-0" />}
           <span
             aria-hidden
-            className="absolute -left-[15px] top-0 h-[9px] w-[15px] rounded-bl-[6px] border-b border-l"
+            className="absolute -left-[15px] top-0 h-[9px] w-[15px] border-b border-l"
             style={{ borderColor: rail(depth) }}
           />
         </>
