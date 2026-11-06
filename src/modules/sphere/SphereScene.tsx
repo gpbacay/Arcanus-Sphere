@@ -65,7 +65,7 @@ function makeGrid() {
   const grid = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2),
     new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color("#4f9cff") } },
+      uniforms: { uColor: { value: new THREE.Color("#6fe0ff") } },
       vertexShader: GRID_VERTEX,
       fragmentShader: GRID_FRAGMENT,
       transparent: true,
