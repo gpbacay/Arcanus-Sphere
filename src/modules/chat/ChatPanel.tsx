@@ -33,18 +33,16 @@ export function ChatPanel() {
 
   if (collapsed) {
     return (
-      <aside className="rail" aria-label="Arcanus chat (collapsed)">
-        <button type="button" className="icon-btn" aria-label="Open chat" title="Open chat" onClick={() => setCollapsed(false)}>
-          <Icon name="left" />
-        </button>
-        <Logo state={mood} size={18} />
+      // Minimized: only the header stays, docked on the bottom edge at the pane's full width.
+      <aside className="rail" aria-label="Arcanus chat (minimized)">
+        <Header mood={mood} collapsed onToggle={() => setCollapsed(false)} />
       </aside>
     );
   }
 
   const body = (
     <>
-      <Header mood={mood} onHide={() => setCollapsed(true)} />
+      <Header mood={mood} onToggle={() => setCollapsed(true)} />
       <Thread />
       <UndoBar />
       <Suggestions />
@@ -87,7 +85,7 @@ function useStatusText(mood: Mood) {
   const note = saved === "text" ? " · storage full: images not saved" : saved === "none" ? " · can't save on this device" : "";
   const text =
     mood === "off"
-      ? "Off · switch Arcanus on to talk"
+      ? "Off · type /run to switch Arcanus on"
       : mood === "thinking"
       ? "Thinking on this device"
       : mood === "speaking"
@@ -100,7 +98,7 @@ function useStatusText(mood: Mood) {
   return text + note;
 }
 
-function Header({ mood, onHide }: { mood: Mood; onHide: () => void }) {
+function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?: boolean; onToggle: () => void }) {
   const menuId = useId();
   const current = useStore(chatStore, selectCurrent);
   const chats = useStore(chatStore, (s) => s.chats);
@@ -224,8 +222,14 @@ function Header({ mood, onHide }: { mood: Mood; onHide: () => void }) {
       >
         <Icon name="trash" />
       </button>
-      <button type="button" className="icon-btn" aria-label="Hide chat" title="Hide chat" onClick={onHide}>
-        <Icon name="right" />
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={collapsed ? "Expand chat" : "Minimize chat"}
+        title={collapsed ? "Expand chat" : "Minimize chat"}
+        onClick={onToggle}
+      >
+        <Icon name={collapsed ? "up" : "down"} />
       </button>
     </header>
   );
@@ -246,13 +250,13 @@ function UndoBar() {
 }
 
 function Suggestions() {
-  const empty = useStore(chatStore, (s) => selectCurrent(s)?.messages.length === 0);
+  const empty = useStore(chatStore, (s) => !selectCurrent(s)?.messages.some((m) => m.role === "user"));
   const busy = useBusy();
   const on = useStore(power, (s) => s.on);
-  if (!empty || busy || !on) return null;
+  if (on && (!empty || busy)) return null;
   return (
     <div className="suggestions">
-      {SUGGESTIONS.map((s) => (
+      {(on ? SUGGESTIONS : ["/run"]).map((s) => (
         <button key={s} type="button" className="chip" onClick={() => send(s)}>
           {s}
         </button>

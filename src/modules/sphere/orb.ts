@@ -195,9 +195,9 @@ const tick = (w: Twitch, t: number, snap: number) => {
 
 /**
  * One part that moves on its own. It turns about its axes at `spin` rad/s, each axis drifting in pace and sometimes
- * reversing (`rate` swings through zero). While Arcanus talks it also shakes and its size twitches by up to `size`.
+ * reversing (`rate` swings through zero). While Arcanus talks its size twitches by up to `size`; its turn keeps pace.
  * `axes` weights how much it turns about x, y and z: a ring mostly spins in its own plane.
- * `jitter` (from its distance to the core) scales that shake and twitch: the core quivers, the far shells stay calm.
+ * `jitter` (from its distance to the core) scales that twitch: the core quivers most, the far shells least.
  */
 type Kind = "shell" | "ring" | "core" | "wires";
 
@@ -452,10 +452,9 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     }
     shared.uBlink.value = bump(t, blinkAt, 0.25) * calm;
 
-    // Each part: its own drifting turn, much faster while talking, with a random shake on top and a twitching size.
-    // Thinking only flutters a little and slowly: the twitch is smoothed harder for it.
-    const pace = (1 + boost * 2.5 + talk * 7) * whirl * motion * dt;
-    const shake = talk * 0.045 * motion * dt * 60;
+    // Each part: its own drifting turn and a twitching size. Talking never speeds the turn up: the parts only swell
+    // and shrink with the voice, like a mouth. Thinking flutters a little and slowly: the twitch is smoothed harder for it.
+    const pace = (1 + boost * 2.5) * whirl * motion * dt;
     const flutter = Math.max(talk, boost * 0.35) * motion;
     const snap = 1 - Math.exp(-dt * (boost > talk ? 12 : 45));
     const tickSnap = 1 - Math.exp(-dt * 30);
@@ -475,7 +474,7 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       const swell = m.act === "grow" ? 1 + 0.15 * act : m.act === "shrink" ? 1 - 0.15 * act : 1;
       // Each part keeps turning smoothly in `want`; it is drawn from there, or stepped in clockwork fashion.
       for (let i = 0; i < 3; i++) {
-        m.want[i] += turn * pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]) + (Math.random() - 0.5) * shake * m.jitter * m.axes[i];
+        m.want[i] += turn * pace * m.spin * m.axes[i] * (Math.sin(t * m.drift[i] + m.phase[i]) + m.bias[i]);
       }
       const clockwork = m.kind === "ring" && busy < 0.15 && motion === 1 && act === 0;
       if (clockwork && t >= m.nextTick) {
@@ -490,7 +489,9 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
       const grown = Math.max(0.001, smooth((power - m.delay) / 0.5));
       // The core and shells swell a touch on each heartbeat; the rings don't beat.
       const heart = m.kind === "shell" || m.kind === "core" ? 1 + 0.03 * heartAt(m.radius * WAVE) * motion : 1;
-      const size = (1 + flutter * m.size * m.jitter * tick(m.twitch, t, snap)) * swell * heart;
+      // While talking the far rings and shells swell too, not just the parts near the core.
+      const reach = m.jitter + (1 - m.jitter) * talk * 0.6;
+      const size = (1 + flutter * m.size * reach * tick(m.twitch, t, snap)) * swell * heart;
       m.obj.scale.setScalar((1 + within(size - 1, m.shrink, m.grow)) * grown);
     }
 

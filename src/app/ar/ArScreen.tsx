@@ -43,10 +43,8 @@ export function ArScreen() {
   useEffect(() => {
     hydrateChats();
     voice.restore();
-    void offlineReady().then(() => {
-      void bootInTurn();
-      greet();
-    });
+    greet(ENGINES);
+    void offlineReady().then(() => void bootInTurn());
     return () => cancelGreet();
   }, []);
 

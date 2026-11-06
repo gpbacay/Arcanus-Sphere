@@ -1,7 +1,7 @@
 "use client";
 
 // The composition root: the only place that knows every module. Modules talk through their public APIs
-// (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a status pill.
+// (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a line in the chat's boot log.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
@@ -14,7 +14,6 @@ import { voice, voiceEngine } from "@/modules/voice";
 import { Boundary } from "@/shared/boundary";
 import { power, restorePower } from "@/shared/power";
 import { useStore } from "@/shared/store";
-import { Engines } from "@/shared/ui/engines";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
 const ENGINES = [brainEngine, llmEngine, voiceEngine, listenEngine];
@@ -43,11 +42,12 @@ export default function Home() {
     }
     // Engines start once the service worker controls the page, so everything they download is kept for offline use.
     // Each loads on its own: a slow or failed one never holds up the others. Off at load: nothing downloads yet.
+    // The boot message goes up first, so the chat shows each model waiting, then loading.
+    greet(ENGINES);
     let current = true;
     void offlineReady().then(() => {
       if (!current) return;
       for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
-      greet();
     });
     return () => {
       current = false;
@@ -60,7 +60,6 @@ export default function Home() {
       <main className="app-shell">
         <Stage />
         <AppNav />
-        <Engines engines={ENGINES} />
         <Boundary fallback={<ChatFallback />}>
           <ChatPanel />
         </Boundary>

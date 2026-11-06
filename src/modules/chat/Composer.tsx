@@ -5,7 +5,7 @@ import { canListen, listen } from "@/modules/listen";
 import { voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
-import { send, stop, talk, useBusy } from "./conversation";
+import { COMMANDS, send, stop, talk, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { MAX, chatStore, setReplyTo } from "./store";
 
@@ -38,11 +38,15 @@ export function Composer() {
   const on = useStore(power, (s) => s.on);
   const [draft, setDraft] = useState("");
   const [image, setImage] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Typing "/" opens the command list, narrowed as you type; arrows pick, Tab completes, Enter runs.
+  const matches = /^\/\w*$/.test(draft) ? COMMANDS.filter((c) => c.name.startsWith(draft.toLowerCase())) : [];
+  const pick = Math.min(active, matches.length - 1);
 
-  function submit() {
-    if (!send(draft, image)) return;
+  function submit(text = draft) {
+    if (!send(text, image)) return;
     setDraft("");
     setImage(null);
     if (inputRef.current) inputRef.current.style.height = "auto";
@@ -95,23 +99,50 @@ export function Composer() {
           </button>
         </div>
       ) : null}
-      <div className="composer-box">
+      {matches.length ? (
+        <div className="commands" role="listbox" aria-label="Commands">
+          {matches.map((c, i) => (
+            <button
+              key={c.name}
+              type="button"
+              role="option"
+              aria-selected={i === pick}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => submit(c.name)}
+            >
+              <code>{c.name}</code>
+              <span>{c.hint}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="composer-box" data-command={draft.startsWith("/") || undefined}>
         <textarea
           id={COMPOSER_ID}
           ref={inputRef}
           value={draft}
           maxLength={MAX}
           rows={2}
-          placeholder={!on ? "Arcanus is off" : !talking ? "Message Arcanus" : hearing ? "Hearing you… I'll answer when you pause" : writing ? "Writing down what you said…" : "Listening… just talk, or talk over Arcanus to interrupt"}
-          aria-label="Message Arcanus"
-          disabled={!on}
+          placeholder={!on ? "Arcanus is off · type /run to start it" : !talking ? "Message Arcanus, or / for commands" : hearing ? "Hearing you… I'll answer when you pause" : writing ? "Writing down what you said…" : "Listening… just talk, or talk over Arcanus to interrupt"}
+          aria-label="Message Arcanus or type a command"
           onChange={(e) => {
             setDraft(e.target.value);
+            setActive(0);
             e.target.style.height = "auto";
             e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (matches.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+              e.preventDefault();
+              setActive((pick + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+            } else if (matches.length && e.key === "Tab") {
+              e.preventDefault();
+              setDraft(matches[pick].name);
+            } else if (matches.length && e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit(matches[pick].name);
+            } else if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
             } else if (e.key === "Escape" && replyTo) setReplyTo(null);
@@ -119,7 +150,7 @@ export function Composer() {
         />
         <div className="composer-bar">
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={attach} />
-          <button type="button" className="icon-btn" aria-label="Attach an image" title="Attach an image" disabled={busy} onClick={() => fileRef.current?.click()}>
+          <button type="button" className="icon-btn" aria-label="Attach an image" title="Attach an image" disabled={busy || !on} onClick={() => fileRef.current?.click()}>
             <Icon name="image" />
           </button>
           {micOk ? (
@@ -147,14 +178,14 @@ export function Composer() {
             <Icon name={voiceOn ? "voice" : "mute"} />
           </button>
           <span className="count" data-warn={draft.length > MAX - 200}>
-            {draft.length}/{MAX}
+            {draft.length > MAX * 0.8 ? `${draft.length}/${MAX}` : null}
           </span>
           {busy ? (
             <button type="button" className="send" data-stop aria-label="Stop" title="Stop" onClick={stop}>
               <Icon name="stop" />
             </button>
           ) : (
-            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!on || (!draft.trim() && !image)}>
+            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!draft.trim() && !image}>
               <Icon name="send" />
             </button>
           )}

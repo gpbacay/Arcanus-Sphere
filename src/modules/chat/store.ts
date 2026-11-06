@@ -12,6 +12,8 @@ export interface Msg {
   /** A downscaled JPEG data URL. */
   image?: string;
   trace?: ThoughtStep[];
+  /** "boot": Arcanus's introduction, its trace the boot log. "command": a terminal command or its output, kept out of the model's context. */
+  kind?: "boot" | "command";
 }
 
 export interface Chat {
@@ -85,6 +87,7 @@ function readSaved(): { chats: Chat[]; currentId: string } {
                   replyToId: typeof m.replyToId === "string" ? m.replyToId : undefined,
                   image: typeof m.image === "string" && m.image.startsWith("data:image/") ? m.image : undefined,
                   trace: asTrace(m.trace),
+                  kind: m.kind === "boot" || m.kind === "command" ? m.kind : undefined,
                 },
               ]
             : []

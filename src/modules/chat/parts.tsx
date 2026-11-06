@@ -12,8 +12,8 @@ const PATHS = {
   mute: "M4 9v6h4l5 4V5L8 9zM17 9l4 6M21 9l-4 6",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4",
   chevron: "M6 9l6 6 6-6",
-  left: "M15 6l-6 6 6 6",
-  right: "M9 6l6 6-6 6",
+  up: "M6 15l6-6 6 6",
+  down: "M6 9l6 6 6-6",
   check: "M5 12l5 5 9-10",
 };
 

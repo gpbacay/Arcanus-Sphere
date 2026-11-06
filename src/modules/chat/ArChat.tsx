@@ -10,7 +10,7 @@ import { canListen, listen } from "@/modules/listen";
 import { llm } from "@/modules/llm";
 import { voice } from "@/modules/voice";
 import { useStore } from "@/shared/store";
-import { greeting, live, send, stop, talk, useBusy } from "./conversation";
+import { live, send, stop, talk, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { MAX, chatStore, selectCurrent } from "./store";
 
@@ -30,7 +30,6 @@ export function ArChat() {
   const model = useStore(llm.state, (s) => s.status);
   const pct = useStore(llm.state, (s) => (s.total ? Math.min(99, Math.round((s.loaded / s.total) * 100)) : 0));
   const liveText = useStore(live, (s) => s.reply?.text ?? "");
-  const greeted = useStore(greeting, (s) => s.text);
   const lastReply = useStore(chatStore, lastText("assistant"));
   const lastAsk = useStore(chatStore, lastText("user"));
   const micOk = useSyncExternalStore(never, canListen, yes);
@@ -42,10 +41,11 @@ export function ArChat() {
   // The caption shows while Arcanus works or speaks, then fades after a few seconds. Tapping it clears it.
   const working = busy || speaking || hearing || writing;
   useEffect(() => {
-    if (working || liveText || greeted) return setVisible(true);
+    setVisible(true);
+    if (working || liveText) return;
     const timer = setTimeout(() => setVisible(false), FADE_MS);
     return () => clearTimeout(timer);
-  }, [working, liveText, lastReply, greeted]);
+  }, [working, liveText, lastReply]);
 
   useEffect(() => {
     if (typing) inputRef.current?.focus();
@@ -63,7 +63,7 @@ export function ArChat() {
   }
 
   const loading = model === "loading" || model === "idle";
-  const caption = busy ? liveText || "Thinking…" : greeted || lastReply;
+  const caption = busy ? liveText || "Thinking…" : lastReply;
   // A reply on screen stays readable: "Listening…" only shows when nothing else is up.
   const status = hearing
     ? "Hearing you… I'll answer when you pause"
