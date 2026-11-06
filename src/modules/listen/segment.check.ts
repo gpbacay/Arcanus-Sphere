@@ -24,13 +24,23 @@ assert.equal(run([...s(10, 0.9), ...s(30, 0.4), ...s(10, 0.9)]).length, 1);
 // While Arcanus speaks, middling probabilities (its echo) never start an utterance; clear speech does.
 assert.equal(run(s(60, 0.7), true).length, 0);
 assert.equal(run(s(60, 0.95), true)[0][1], "start");
+// Room noise flickering between OFF and ON after speech still ends the turn.
+assert.equal(run([...s(10, 0.9), ...Array.from({ length: 60 }, (_, i) => (i % 2 ? 0.45 : 0.1))]).length, 2);
+
 // Loudness: a quiet room scores as silence, a voice 30 dB over it as speech, and back to quiet as silence again.
 const loud = new Loudness();
 const tone = (amp: number) => Float32Array.from({ length: FRAME }, (_, i) => amp * Math.sin(i / 3));
 const quiet = tone(0.001);
-for (let i = 0; i < 20; i++) assert.ok(loud.score(quiet) < 0.35);
-assert.ok(loud.score(tone(0.05)) >= 0.8);
-for (let i = 0; i < 60; i++) loud.score(tone(0.05)); // two seconds of talking
-assert.ok(loud.score(tone(0.05)) >= 0.5, "talking must not lift the floor to itself");
-assert.ok(loud.score(quiet) < 0.35);
+const feed = (frame: Float32Array, n: number) => Array.from({ length: n }, () => loud.score(frame)).at(-1)!;
+assert.ok(feed(quiet, 20) < 0.35);
+assert.ok(loud.score(tone(0.05)) < 0.5, "one loud frame (a click) is not speech");
+assert.ok(feed(tone(0.05), 5) >= 0.8);
+assert.ok(feed(tone(0.05), 60) >= 0.5, "talking must not lift the floor to itself");
+assert.ok(feed(quiet, 10) < 0.35);
+// A fan switched on: loud at first, then the new floor within ~5 s, so it can't hold the mic open.
+assert.ok(feed(tone(0.01), 10) >= 0.5);
+assert.ok(feed(tone(0.01), 200) < 0.35);
+// Digital silence (a muted mic) doesn't drag the floor down, or the room would score as speech after it.
+feed(new Float32Array(FRAME), 30);
+assert.ok(loud.score(tone(0.01)) < 0.35);
 console.log("segment ok");

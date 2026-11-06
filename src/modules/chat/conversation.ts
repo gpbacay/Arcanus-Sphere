@@ -312,24 +312,28 @@ export function discard(what: Removal) {
 
 /**
  * Talk hands-free, full duplex: one tap opens the mic until the next. Each pause sends what you said, Arcanus answers
- * aloud, and speaking over it stops it mid-sentence. Call from a click: it unlocks audio and asks for the mic.
+ * aloud, and speaking over it turns it down at once and stops it once your words are written. Call from a click: it unlocks audio and asks for the mic.
  */
 export function talk() {
   voice.unlock();
   if (listen.state.state.on) return listen.cancel();
   if (!power.state.on) return;
-  let said = ""; // what Arcanus was saying when you started, to tell your words from its echo
+  // Arcanus keeps talking (and thinking) while the mic listens. A sound only turns it down; it stops for real words,
+  // never for noise or its own voice leaking back into the mic.
+  let over = false; // Arcanus was talking while this was said, so it may be its own echo
   void listen.converse({
     strict: () => voice.state.state.speaking,
     onSpeech: () => {
-      said = voice.state.state.speaking ? live.state.reply?.text || lastAssistant() : "";
-      cancelGreet();
-      if (live.state.reply) stop();
-      voice.cancel();
+      over = voice.state.state.speaking;
+      if (over) voice.duck(true);
     },
     onText: (text) => {
-      if (said && isEcho(text, said)) return;
-      if (live.state.reply) stop(); // a reply begun from something typed meanwhile: what you said now wins
+      const echo = (over || voice.state.state.speaking) && isEcho(text, live.state.reply?.text || lastAssistant());
+      over = false;
+      if (!text || echo) return voice.duck(false);
+      cancelGreet();
+      voice.cancel();
+      if (live.state.reply) stop(); // what you said now wins over the reply being written
       send(text);
     },
   });

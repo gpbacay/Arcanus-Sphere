@@ -3,14 +3,15 @@
 // Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open: the mic is
 // captured as 16 kHz frames (an AudioWorklet), each is scored for speech by its loudness (Loudness, segment.ts), the segmenter
 // (segment.ts) cuts out each thing you say when you pause, and Whisper (listen.worker.ts) writes it down while the mic
-// keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can stop it: barge-in.
+// keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can turn it down, and
+// stop it once the words show it was you, not noise or its own echo: barge-in.
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
 import { FRAME, Loudness, RATE, Segmenter } from "./segment";
 
 export type Talk = {
-  /** Someone started speaking (clearly, if Arcanus was talking): stop talking over them. */
+  /** Someone may have started speaking (or it's Arcanus's own echo): turn down, the words will tell. */
   onSpeech: () => void;
-  /** What they said, once they paused. Never empty. */
+  /** What they said, once they paused. Empty when it was noise or couldn't be written down. */
   onText: (text: string) => void;
   /** True while Arcanus is speaking, so its own voice leaking into the mic needs more to count as speech. */
   strict: () => boolean;
@@ -138,9 +139,12 @@ class Listen {
       .then(() => this.transcribe(clip))
       .then(
         (text) => {
-          if (text && this.session === s) s.talk.onText(text);
+          if (this.session === s) s.talk.onText(text);
         },
-        (error: unknown) => this.state.set({ problem: errorText(error) }),
+        (error: unknown) => {
+          this.state.set({ problem: errorText(error) });
+          if (this.session === s) s.talk.onText("");
+        },
       )
       .finally(() => this.state.set({ writing: --this.jobs > 0 }));
   }

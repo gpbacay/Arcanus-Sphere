@@ -16,6 +16,7 @@ class Voice {
   });
   private worker: Promise<Worker> | null = null;
   private ctx: AudioContext | null = null;
+  private out: GainNode | null = null;
   private gen = 0;
   private nextAt = 0;
   private sources = new Set<AudioBufferSourceNode>();
@@ -64,7 +65,8 @@ class Voice {
         const analyser = this.ctx.createAnalyser();
         analyser.fftSize = 512;
         analyser.smoothingTimeConstant = 0.75;
-        analyser.connect(this.ctx.destination);
+        this.out = this.ctx.createGain(); // after the analyser, so ducking quiets the voice but not the sphere
+        analyser.connect(this.out).connect(this.ctx.destination);
         this.state.set({ analyser });
       }
       if (this.ctx.state === "suspended") void this.ctx.resume();
@@ -81,8 +83,14 @@ class Voice {
     void this.start().then((w) => w.postMessage({ type: "speak", gen, text: spoken }), () => undefined);
   }
 
+  /** Turn the voice down while someone may be talking over it (and its echo out of the mic), or back up. */
+  duck(on: boolean) {
+    if (this.ctx && this.out) this.out.gain.setTargetAtTime(on ? 0.2 : 1, this.ctx.currentTime, 0.05);
+  }
+
   /** Stop speaking now and drop every queued sentence. */
   cancel() {
+    this.duck(false);
     this.gen++;
     void this.worker?.then((w) => w.postMessage({ type: "cancel", gen: this.gen }), () => undefined);
     for (const source of this.sources) source.stop();
