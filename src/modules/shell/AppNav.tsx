@@ -1,23 +1,36 @@
 "use client";
 
-import { FolderOpen, Globe, Info, Settings, X } from "lucide-react";
+import { FolderOpen, Globe, Info, Network, Settings, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { pane, togglePane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
+import { mind } from "@/modules/mind";
 import { voice } from "@/modules/voice";
 
 type DialogName = "about" | "settings";
 
-/** Left rail: the mark, Arcanus's files and browser (side panes), then About and Settings (dialogs). */
+/** Left rail: the mark, Arcanus's Graph of Thought, files and browser (side panes), then About and Settings (dialogs). */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
   const side = useStore(pane, (s) => s.open);
+  const thinking = useStore(mind, (s) => s.thoughts.some((t) => t.status === "active"));
   return (
     <nav className="app-nav" aria-label="Arcanus">
       <div className="app-nav-brand" title="Arcanus">
         <Logo size={26} />
       </div>
+      <button
+        type="button"
+        className="app-nav-btn"
+        aria-label="Graph of Thought"
+        title="Graph of Thought: what Arcanus is thinking, live"
+        aria-expanded={side === "mind"}
+        data-live={thinking || undefined}
+        onClick={() => togglePane("mind")}
+      >
+        <Network size={17} aria-hidden />
+      </button>
       <button type="button" className="app-nav-btn" aria-label="Files" title="Files" aria-expanded={side === "files"} onClick={() => togglePane("files")}>
         <FolderOpen size={17} aria-hidden />
       </button>
@@ -69,6 +82,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
       <p>Arcanus is a local assistant created by Gianne Bacay. It answers in this browser, speaks the reply, and the sphere moves with the voice.</p>
       <ul>
         <li>Hippocampus decides what a message needs.</li>
+        <li>The Graph of Thought shows what Arcanus is thinking and doing, live.</li>
         <li>SmolLM2 writes the reply on this device.</li>
         <li>Paradee speaks it. The sphere reacts to that audio.</li>
         <li>Messages stay here. Models download once and are cached.</li>

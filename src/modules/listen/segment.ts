@@ -13,11 +13,17 @@ const START = 6; // frames of speech in a row (~0.2 s) before it counts: a click
 // ponytail: fixed thresholds. Tune STRICT_* if Arcanus interrupts itself on your speakers, or ignores you.
 const STRICT_ON = 0.8;
 const STRICT_START = 12; // ~0.4 s
+// A speech model (Silero) scores a click, a cough or a fan as ~0, so the turn can start and end sooner than with plain loudness.
+const FAST_START = 4; // ~0.13 s
+const FAST_STRICT_START = 8; // ~0.26 s
 const PAUSE = Math.round(0.7 * FPS); // this long under OFF ends the utterance
+const FAST_PAUSE = Math.round(0.5 * FPS);
 const PAD = Math.round(0.3 * FPS); // kept before and after, so the first and last words aren't clipped
 const MAX = Math.round(29 * FPS); // Whisper hears 30 s at a time: a longer turn is cut here and the rest is the next
 
 export class Segmenter {
+  /** True once the scores come from a speech model rather than from loudness: shorter waits, same thresholds. */
+  fast = false;
   private frames: Float32Array[] = []; // before a start: the last few frames; after: the utterance so far
   private run = 0; // speech frames in a row, before a start
   private talking = false;
@@ -32,7 +38,7 @@ export class Segmenter {
     this.frames.push(frame);
     if (!this.talking) {
       this.run = p >= (strict ? STRICT_ON : ON) ? this.run + 1 : 0;
-      if (this.run >= (strict ? STRICT_START : START)) {
+      if (this.run >= (strict ? (this.fast ? FAST_STRICT_START : STRICT_START) : this.fast ? FAST_START : START)) {
         this.talking = true;
         this.quiet = 0;
         this.frames = this.frames.slice(-(PAD + this.run));
@@ -44,7 +50,7 @@ export class Segmenter {
     // Only clear speech resets the pause: a murmur of room noise between OFF and ON neither ends nor extends the turn.
     const was = this.quiet;
     this.quiet = p < OFF ? this.quiet + 1 : p >= ON ? 0 : this.quiet;
-    if (this.quiet < PAUSE && this.frames.length < MAX) {
+    if (this.quiet < (this.fast ? FAST_PAUSE : PAUSE) && this.frames.length < MAX) {
       if (this.quiet === PAD && was < PAD) return "pause";
       return was >= PAD && !this.quiet ? "resume" : null;
     }

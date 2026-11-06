@@ -1,10 +1,11 @@
 // Answering a message: brain decides, the language model writes, the voice speaks, each sentence as it is written.
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
-import { recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
+import { grounding, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { abilities, assemble, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
+import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
 import { isEcho, isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
@@ -49,7 +50,15 @@ const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
-async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): Promise<{ turns: Turn[]; step: ThoughtStep | null }> {
+/** The model's turns, plus the evidence the reply should rest on (for the grounding check) and the Graph of Thought's
+ *  aggregate thought, which the writing grows from. `from` is the thought the context is built for. */
+async function buildTurns(
+  prior: Msg[],
+  user: Msg,
+  plan: Plan,
+  skill: Skill | undefined,
+  from: string
+): Promise<{ turns: Turn[]; step: ThoughtStep | null; evidence: string[]; context: string }> {
   const text = ask(user, skill);
   // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
   const [rules, notes, passages] = await Promise.all([
@@ -58,6 +67,12 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): P
     !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
   ]);
   const pinned = pane.state.pinned;
+  const recalled = recallNotes(text, notes);
+  const sources = [
+    passages.length ? thought("retrieve", `Found ${passages.length} passages in your books`, { parents: [from], results: [...new Set(passages.map((p) => p.book))] }) : null,
+    recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null,
+    pinned ? thought("retrieve", "Reading what you're showing me", { parents: [from], results: [pinned.label] }) : null,
+  ];
   const listed = plan.facts?.map((f) => `- ${f}`).join("\n") ?? "";
   const facts = !listed
     ? ""
@@ -75,7 +90,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): P
         text: passages.length ? `${passages.map((p) => `[${p.book}] ${p.text}`).join("\n\n")}\n\nIf these answer the question, answer from them and name the book.` : "",
         priority: 2,
       },
-      { label: "Notes you remembered", text: recallNotes(text, notes).map((n) => `- ${n.text}`).join("\n"), priority: 3 },
+      { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 3 },
     ],
     BUDGET
   );
@@ -100,7 +115,13 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): P
   const step: ThoughtStep | null = report.length
     ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
     : null;
-  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content }], step };
+  const context = thought("aggregate", "Gathered what SmolLM2 will read", {
+    parents: [from, ...sources],
+    detail: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`,
+    results: report.map(reportLine),
+  });
+  const evidence = [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])];
+  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content }], step, evidence, context };
 }
 
 function reportLine(r: Report[number]) {
@@ -141,18 +162,70 @@ let unwatch: (() => void) | null = null;
 
 /** Keep the boot message's log live until every model settles, then write it into the message. */
 function watchBoot(chatId: string, id: string) {
+  // The Graph of Thought: waking is a root, each model loading a branch of it.
+  wakeId = thought("wake", "Waking up", { active: true, detail: `${engines.length} engines` });
+  const loads = new Map(engines.map((e) => [e, thought("load", e.name, { parents: [wakeId], active: true, detail: e.detail })]));
+  const settleLoads = (stopped = false) => {
+    for (const [e, t] of loads) {
+      const s = e.state.state;
+      const done = s.off || s.status === "ready" || s.status === "error";
+      if (!done && !stopped) continue;
+      settle(t, { failed: s.status === "error", detail: s.off ? "off" : s.status === "error" ? s.error : !done ? "boot stopped" : s.device === "webgpu" ? "ready · WebGPU" : "ready" });
+      loads.delete(e);
+    }
+  };
   const save = () => {
+    settleLoads(true);
+    settle(wakeId, { content: "Awake" });
     offs.forEach((off) => off());
     unwatch = null;
     booting.set({ id: null, steps: [] });
     const trace = engineSteps();
     write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, trace } : m)) }));
   };
-  const update = () => (settled() ? save() : booting.set({ id, steps: engineSteps() }));
+  const update = () => {
+    settleLoads();
+    if (settled()) save();
+    else booting.set({ id, steps: engineSteps() });
+  };
   const offs = engines.map((engine) => engine.state.subscribe(update));
   unwatch = save;
   update();
 }
+
+// ------------------------------------------------------------------ the Graph of Thought (modules/mind)
+
+/** This boot's root thought. */
+let wakeId: string | null = null;
+/** What the mic just heard, as a thought: the root of the reply to it. */
+let heard: string | null = null;
+
+/**
+ * A speak thought for Paradee's voice, under `parent`. It runs until the reply is done (the returned end()) and the
+ * voice has gone quiet, so a pause between two sentences doesn't end it.
+ */
+function voiced(parent: string | null, text = "Speaking the reply") {
+  if (voice.state.state.off) return () => undefined;
+  if (!voice.state.state.analyser) {
+    thought("speak", text, { parents: [parent], detail: "waiting for a tap to unlock audio" });
+    return () => undefined;
+  }
+  const id = thought("speak", text, { parents: [parent], active: true, detail: "Paradee-8M" });
+  let ended = false;
+  const check = () => {
+    if (!ended || voice.state.state.speaking) return;
+    off();
+    settle(id);
+  };
+  const off = voice.state.subscribe(check);
+  return () => {
+    ended = true;
+    check();
+  };
+}
+
+/** The operation a step of the brain's trace stands for in the Graph of Thought. */
+const operationOf = (label: string): Operation => (/recall|search|read a web|grounded|notes/i.test(label) ? "retrieve" : "execute");
 
 let listening = false;
 /** This boot's greeting, once SmolLM2 has written it. */
@@ -261,21 +334,32 @@ async function compose(chatId: string, id: string, mine: number) {
   for (let attempt = 0; attempt < TRIES; attempt++) {
     if (mine !== greetGen || !power.state.on) return;
     composing = true;
-    const written = await llm.generate(turns, () => undefined, { maxNewTokens: 40, sample: true }).finally(() => (composing = false));
+    const writing = thought("generate", "Writing a greeting", { parents: [wakeId], active: true, detail: `try ${attempt + 1} of ${TRIES}` });
+    const written = await llm
+      .generate(turns, () => undefined, { maxNewTokens: 40, sample: true })
+      .catch((err: unknown) => (settle(writing, { failed: true, detail: errorText(err) }), Promise.reject(err)))
+      .finally(() => (composing = false));
     const line = openingLine(written.text);
-    if (mine !== greetGen || !power.state.on) return;
-    if (!isIntroduction(line) || line.split(/\s+/).length > MAX_WORDS || unsupported(line, facts).length > MAX_UNSUPPORTED) continue;
+    if (mine !== greetGen || !power.state.on) return settle(writing, { detail: "stopped" });
+    // The greeting checked against the facts it was given: a line that brings in its own words is thrown away.
+    const invented = unsupported(line, facts);
+    const why = !isIntroduction(line) ? "not a greeting" : line.split(/\s+/).length > MAX_WORDS ? "too long" : invented.length > MAX_UNSUPPORTED ? "made things up" : "";
+    settle(writing, { content: line || "(nothing)", failed: !!why, detail: why ? `thrown away: ${why}` : "kept", results: invented.length ? invented : undefined });
+    if (why) continue;
     bootLine = line;
     write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, text: line } : m)) }));
     if (voice.state.state.off) return;
-    if (voice.state.state.analyser) sayAll(line);
-    else watchGesture();
+    if (voice.state.state.analyser) {
+      sayAll(line);
+      voiced(writing, line)();
+    } else watchGesture();
     return;
   }
 }
 
 async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   stopGreeting();
+  interrupted(); // whatever was still running belonged to the reply this one replaces
   const mine = ++gen;
   const stale = () => mine !== gen;
   const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });
@@ -294,6 +378,12 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     { label: "Read the message", description: user.text },
     { label: "Hippocampus", description: "Deciding what this needs", status: "active" },
   ]);
+  // The Graph of Thought: the message is the root; every thought of this reply grows from it.
+  const root = heard ?? thought("perceive", user.text, { detail: "read from the chat" });
+  heard = null;
+  const decision = skill
+    ? thought("execute", `Running /${skill.name}`, { parents: [root], detail: skill.path })
+    : thought("keep_best", "Hippocampus is deciding what this needs", { parents: [root], active: true });
 
   let trace: ThoughtStep[] = [];
   try {
@@ -301,18 +391,28 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       ? { route: "skill", trace: [{ label: "Read the message", description: user.text }, { label: `Skill · /${skill.name}`, description: skill.path }] }
       : await think(user.text);
     trace = plan.trace;
+    if (!skill) {
+      const [, decided, ...rest] = plan.trace;
+      settle(decision, { content: `Hippocampus chose ${plan.route}`, detail: decided?.description, results: decided?.steps?.[0]?.results?.slice(0, 3) });
+      for (const step of rest) thought(operationOf(step.label), step.label, { parents: [decision], detail: step.description, results: step.results?.slice(0, 4) });
+    }
     if (stale()) return;
     if (plan.reply) {
+      const said = thought("generate", plan.reply, { parents: [decision], detail: "answered without the language model" });
       sayAll(plan.reply);
+      voiced(said)();
       finish(plan.reply, trace);
       return;
     }
 
-    const built = await buildTurns(prior, user, plan, skill);
+    const built = await buildTurns(prior, user, plan, skill, decision);
     if (stale()) return;
     if (built.step) trace = [...trace, built.step];
     const writing = (description: string): ThoughtStep => ({ label: "SmolLM2", description, status: "active" });
-    show([...trace, writing(llm.state.state.status === "ready" ? "Writing on this device" : "Waiting for the model to load on this device")]);
+    const ready = llm.state.state.status === "ready";
+    show([...trace, writing(ready ? "Writing on this device" : "Waiting for the model to load on this device")]);
+    const generating = thought("generate", "", { parents: [built.context], active: true, detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load" });
+    let speaking: (() => void) | null = null;
     let shown = "";
     let unspoken = "";
     let spoke = false;
@@ -326,9 +426,12 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
         unspoken = rest;
         spoke ||= sentences.length > 0;
         sentences.forEach((s) => voice.say(s));
+        if (sentences.length) speaking ??= voiced(generating);
+        revise(generating, { content: shown, detail: "SmolLM2 is writing" });
         show([...trace, writing("Writing on this device")], shown);
       });
     } catch (err) {
+      settle(generating, { failed: true, detail: errorText(err) });
       // Without SmolLM2, recalled notes are still an answer; anything else gets an honest "not now".
       // Arcanus's own notes are short enough to read out; a web page or search results are not.
       const notes = plan.source ? undefined : plan.facts?.join(" ");
@@ -341,20 +444,40 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       return;
     }
     if (stale()) return;
-    if (unspoken.trim()) voice.say(unspoken);
+    if (unspoken.trim()) {
+      voice.say(unspoken);
+      speaking ??= voiced(generating);
+    }
+    speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
-    finish(result.text || shown.trim() || "…", [
+    const text = result.text || shown.trim() || "…";
+    const wrote = result.cached
+      ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
+      : {
+          label: `SmolLM2-${device === "WebGPU" ? "360M" : "135M"} wrote this`,
+          description: `First word in ${(result.firstMs / 1000).toFixed(1)} s · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
+        };
+    settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
+    // ARCANE's Graph of Thought check: each sentence of the reply against the evidence it was given (no model, <1 ms).
+    const grounded = built.evidence.length ? grounding(text, built.evidence) : null;
+    const checked = grounded
+      ? {
+          label: `Checked against its sources: ${Math.round(grounded.score * 100)}% grounded`,
+          description: `${grounded.supported} of ${grounded.sentences} sentences backed by the evidence`,
+          results: grounded.unsupported.slice(0, 3).map((u) => `not in the sources: ${u.slice(0, 70)}`),
+        }
+      : null;
+    if (checked) thought("refine", checked.label, { parents: [generating, built.context], detail: checked.description, results: checked.results });
+    finish(text, [
       ...trace,
-      result.cached
-        ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
-        : {
-            label: `SmolLM2-${device === "WebGPU" ? "360M" : "135M"} wrote this`,
-            description: `First word in ${(result.firstMs / 1000).toFixed(1)} s · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
-          },
+      wrote,
+      ...(checked ? [checked] : []),
       ...(voice.state.state.off ? [] : [{ label: "Paradee-8M spoke it", description: "Sentence by sentence, as it was written" }]),
     ]);
   } catch (err) {
     // Whatever broke, the reply ends here, so Arcanus is never left stuck thinking.
+    interrupted();
+    thought("execute", "Something failed", { parents: [root], detail: errorText(err) });
     finish("That didn't run. Try it once more.", [...trace, { label: "Something failed", description: errorText(err) }]);
   }
 }
@@ -364,6 +487,7 @@ export function stop() {
   gen++;
   llm.stop();
   voice.cancel();
+  interrupted();
   live.set({ reply: null });
   if (!reply) return;
   const partial = reply.text.trim();
@@ -407,8 +531,15 @@ function command(chatId: string, input: string) {
     if (chat) void answer(chatId, chat.messages, { id: crypto.randomUUID(), role: "user", text: input, at: Date.now() }, skill);
     return;
   }
-  const out = (text: string, trace?: ThoughtStep[]) =>
+  // A command in the Graph of Thought: what you typed, then Arcanus carrying it out (learning, for /teach and /remember).
+  const doing = thought(/^\/(teach|remember)$/.test(name) ? "learn" : "execute", input, {
+    parents: [thought("perceive", input, { detail: "a command" })],
+    active: true,
+  });
+  const out = (text: string, trace?: ThoughtStep[]) => {
+    settle(doing, { detail: text.split("\n")[0].slice(0, 120) });
     push(chatId, { id: crypto.randomUUID(), role: "assistant", text, at: Date.now(), kind: "command", trace });
+  };
   const later = (run: () => Promise<string>) => void run().then(out, (err: unknown) => out(`That didn't work: ${errorText(err)}`));
   push(chatId, { id: crypto.randomUUID(), role: "user", text: input, at: Date.now(), kind: "command" });
 
@@ -548,6 +679,7 @@ export function talk() {
   // Arcanus keeps talking (and thinking) while the mic listens. A sound only turns it down; it stops for real words,
   // never for noise or its own voice leaking back into the mic.
   let over = false; // Arcanus was talking while this was said, so it may be its own echo
+  let hearing: string | null = null; // the Graph of Thought's thought for what is being heard right now
   const said = () => live.state.reply?.text || lastAssistant();
   const interrupt = () => {
     cancelGreet();
@@ -559,6 +691,7 @@ export function talk() {
     onSpeech: () => {
       over = voice.state.state.speaking;
       if (over) voice.duck(true);
+      hearing ??= thought("perceive", "Hearing you…", { active: true, detail: "microphone" });
     },
     // Two words that aren't Arcanus's own: it's you, so stop now rather than when you finish.
     onWords: (text) => {
@@ -569,9 +702,17 @@ export function talk() {
     onText: (text) => {
       const echo = (over || voice.state.state.speaking) && isEcho(text, said());
       over = false;
-      if (!text || echo) return voice.duck(false);
+      const id = hearing;
+      hearing = null;
+      if (!text || echo) {
+        settle(id, { content: echo ? "Only my own voice, echoing back" : "Only noise", detail: "ignored" });
+        return voice.duck(false);
+      }
+      settle(id, { content: text, detail: "heard through the microphone" });
       interrupt();
+      heard = id; // the reply's root: send() answers at once, so it takes this
       send(text);
+      heard = null;
     },
   });
 }

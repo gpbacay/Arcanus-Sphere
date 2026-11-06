@@ -20,12 +20,14 @@ const STOP = new Set(
     "when where why how does did have has had been being from into over under than then also just like tell show give know think " +
     "say says said would could should will shall can may might must make made about book books passage chapter author write wrote " +
     "explain describe mean means one any all some more most much many very please me my our its it's i'm " +
-    "today now here hello thanks thank okay yes good great nice well").split(" ")
+    "today now here hello thanks thank okay yes good great nice well because since while though although still even " +
+    "every other another such same each both either neither only own again ever never always often usually really " +
+    "sure yeah yep certainly sorry glad").split(" ")
 );
-const words = (text: string) => [...new Set(text.toLowerCase().match(/\p{L}{3,}/gu) ?? [])].filter((w) => !STOP.has(w));
+export const words = (text: string) => [...new Set(text.toLowerCase().match(/\p{L}{3,}/gu) ?? [])].filter((w) => !STOP.has(w));
 // "whales" and "whale", "eggs" and "egg", "sailed" and "sailor" meet; the shorter stem must start the longer.
-const stem = (w: string) => (w.length > 5 ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
-const same = (a: string, b: string) => (a.length < b.length ? b.startsWith(a) : a.startsWith(b));
+export const stem = (w: string) => (w.length > 5 ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
+export const same = (a: string, b: string) => (a.length < b.length ? b.startsWith(a) : a.startsWith(b));
 
 /**
  * Hippocampus ranks passages against each other (the best always scores 1), so it can't say when none fits. This does:

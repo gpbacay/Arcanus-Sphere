@@ -7,6 +7,7 @@ import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
+import { GraphOfThought } from "@/modules/mind";
 import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
 import { Sphere } from "@/modules/sphere";
@@ -64,6 +65,7 @@ export default function Home() {
         <Stage />
         <AppNav />
         <Boundary fallback={null}>
+          <GraphOfThought />
           <Files />
           <Browser />
         </Boundary>

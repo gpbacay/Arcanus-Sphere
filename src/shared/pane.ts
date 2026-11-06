@@ -1,8 +1,8 @@
-// What sits beside the chat: which side pane is open over the stage (Arcanus's files or its browser, one at a time,
+// What sits beside the chat: which side pane is open over the stage (Arcanus's files, its browser or its Graph of Thought, one at a time,
 // so the sphere stays in view), and the page or file Arcanus is reading along with every message.
 import { Store } from "./store";
 
-export type PaneName = "files" | "browser";
+export type PaneName = "files" | "browser" | "mind";
 /** A file or web page handed to Arcanus. It goes into the model's context with each message until removed. */
 export type Pinned = { label: string; text: string; href?: string };
 

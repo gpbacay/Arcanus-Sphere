@@ -7,7 +7,7 @@
 //   worker ("paradee-v1.2") already keep them in Cache Storage and read that before the network. Caching them here
 //   too would store ~270 MB twice.
 const CACHE = "arcanus-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/icon-192.png", "/icon-512.png"];
+const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/vad/silero_vad.onnx", "/icon-192.png", "/icon-512.png"];
 const CDN = "https://cdn.jsdelivr.net";
 const UNVERSIONED = new Set(["/orb.glb"]); // add a public file here when it is redrawn without changing its name
 

@@ -2,6 +2,7 @@
 // Measures the book shelf (RAG): does a question find the passage that answers it, and does small talk find nothing?
 // Re-run it after changing SIZE, TOP, STOP or fits() in shelf.ts.
 import assert from "node:assert/strict";
+import { grounding } from "./ground.ts";
 import { Shelf, fits } from "./shelf.ts";
 
 // A small "book": one topic per paragraph, so each question has exactly one right passage.
@@ -62,6 +63,18 @@ assert.equal(shelf.search("octopus hearts")[0]?.book, "a.md");
 assert.ok(fits("octopus hearts", "Octopuses have three hearts"));
 assert.ok(!fits("how are you today", "How are you today, reader?")); // no telling word at all
 assert.ok(!fits("octopus recipes with garlic", "The octopus has three hearts.")); // one of three is not enough
+
+// Grounding (ARCANE's Graph of Thought support check): a reply in the evidence's words is backed, an invention isn't.
+const octopus = ["The octopus has three hearts and blue blood, which carries oxygen with a copper-based protein called hemocyanin."];
+const backed = grounding("An octopus has three hearts. Its blood is blue because of hemocyanin.", octopus);
+assert.equal(backed.supported, 2);
+assert.ok(backed.score > 0.8);
+const invented = grounding("An octopus has three hearts. It was first described by Aristotle in Athens.", octopus);
+assert.deepEqual(invented.unsupported, ["It was first described by Aristotle in Athens."]);
+assert.equal(grounding("Sure!", octopus).sentences, 0); // nothing to check
+const g0 = performance.now();
+grounding(BOOK.slice(0, 1200), BOOK.split("\n\n").slice(0, 2));
+console.log(`grounding a reply: ${(performance.now() - g0).toFixed(2)} ms`);
 
 // Speed: a book of about 1 MB, indexed and searched (in the app this runs in a worker).
 const big = Array.from({ length: 85 }, (_, i) => BOOK.replace(/\b(\w)(\w{3,})/g, (_m, a: string, b: string) => b + a + (i % 7))).join("\n\n");

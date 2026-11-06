@@ -1,7 +1,8 @@
 "use client";
 
 // Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open: the mic is
-// captured as 16 kHz frames (an AudioWorklet), each is scored for speech by its loudness (Loudness, segment.ts), the segmenter
+// captured as 16 kHz frames (an AudioWorklet), each is scored for speech by Silero VAD in its own worker (vad.worker.ts;
+// by its loudness, Loudness in segment.ts, until that has loaded or if it can't), the segmenter
 // (segment.ts) cuts out each thing you say when you pause, and Whisper (listen.worker.ts) writes it down while the mic
 // keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can turn it down, and
 // stop it once the words show it was you, not noise or its own echo: barge-in.
@@ -59,6 +60,8 @@ type Session = {
   guess: Promise<string> | null;
   /** Frames left until the words said over Arcanus are written down; 0 when not waiting to. */
   peek: number;
+  /** Frames sent to the voice detector and not scored yet, oldest first. */
+  waiting: Float32Array[];
 };
 
 class Listen {
@@ -76,6 +79,8 @@ class Listen {
   private session: Session | null = null;
   private queue: Promise<unknown> = Promise.resolve(); // one transcription at a time, in the order things were said
   private jobs = 0;
+  private vad: Worker | null = null;
+  private vadReady = false;
 
   /** Load Whisper. Safe to call again; the way to retry after an error. */
   start(): Promise<unknown> {
@@ -105,6 +110,7 @@ class Listen {
     const sid = ++this.sid;
     this.state.set({ on: true, hearing: false, problem: "" });
     void this.start().catch(() => undefined);
+    this.detector();
     let stream: MediaStream | null = null;
     let ctx: AudioContext | null = null;
     try {
@@ -122,7 +128,8 @@ class Listen {
       const mute = ctx.createGain(); // a worklet only runs while it is connected to the output; silence it
       mute.gain.value = 0;
       ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
-      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk, guess: null, peek: 0 };
+      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk, guess: null, peek: 0, waiting: [] };
+      this.session.seg.fast = this.vadReady;
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop());
       void ctx?.close();
@@ -137,12 +144,49 @@ class Listen {
     }
   }
 
-  /** One frame came in: score it, feed the segmenter, and act on a start or a finished utterance. */
+  /** Start the voice detector (Silero VAD) if it isn't running. Until it says ready, frames are scored by loudness. */
+  private detector() {
+    if (this.vad || typeof Worker === "undefined") return;
+    const worker = new Worker(new URL("./vad.worker.ts", import.meta.url), { type: "module" });
+    this.vad = worker;
+    const drop = () => {
+      worker.terminate(); // no detector: loudness it is, and the next open tries again
+      this.vad = null;
+      this.vadReady = false;
+      if (this.session) {
+        this.session.waiting = [];
+        this.session.seg.fast = false;
+      }
+    };
+    worker.onerror = drop;
+    worker.onmessage = ({ data }: MessageEvent<{ type: string; sid?: number; p?: number }>) => {
+      if (data.type === "ready") {
+        this.vadReady = true;
+        if (this.session) this.session.seg.fast = true;
+      } else if (data.type === "error") drop();
+      else if (data.type === "p") {
+        const s = this.session;
+        const frame = s && s.sid === data.sid ? s.waiting.shift() : undefined;
+        if (s && frame) this.heard(s, frame, data.p! >= 0 ? data.p! : s.loud.score(frame));
+      }
+    };
+    worker.postMessage({ type: "load" });
+  }
+
+  /** One frame came in: have it scored, then hear it. */
   private scored(sid: number, samples: Float32Array) {
     const s = this.session;
     if (!s || s.sid !== sid) return;
+    if (this.vadReady) {
+      s.waiting.push(samples);
+      this.vad!.postMessage({ type: "frame", sid, samples: samples.slice() }); // a copy: the segmenter keeps this one
+    } else this.heard(s, samples, s.loud.score(samples));
+  }
+
+  /** A frame and its speech score: feed the segmenter, and act on a start or a finished utterance. */
+  private heard(s: Session, samples: Float32Array, p: number) {
     const strict = s.talk.strict();
-    const out = s.seg.push(samples, s.loud.score(samples), strict);
+    const out = s.seg.push(samples, p, strict);
     if (out === "start") {
       this.state.set({ hearing: true });
       s.peek = strict ? PEEK : 0;

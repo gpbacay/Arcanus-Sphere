@@ -904,6 +904,53 @@ textarea.field {
   background: var(--surface-2);
   color: var(--text);
 }
+/* The Graph of Thought's button glows while Arcanus is thinking, so the rail shows a mind at work even when closed. */
+.app-nav-btn[data-live] {
+  position: relative;
+  color: var(--accent);
+}
+.app-nav-btn[data-live]::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* —— Graph of Thought: Arcanus's live thoughts, one train per message or boot —— */
+.got-train + .got-train {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.got-when {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.got-op {
+  margin-right: 2px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.got-op[data-op="retrieve"],
+.got-op[data-op="keep_best"],
+.got-op[data-op="aggregate"],
+.got-op[data-op="generate"],
+.got-op[data-op="refine"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
 
 /* 3D orb tools: one horizontal row at the top center, above the sphere. */
 .stage-tools {

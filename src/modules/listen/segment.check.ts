@@ -38,6 +38,17 @@ assert.equal(run(s(60, 0.95), true)[0][1], "start");
 // Room noise flickering between OFF and ON after speech still ends the turn.
 assert.ok(run([...s(10, 0.9), ...Array.from({ length: 60 }, (_, i) => (i % 2 ? 0.45 : 0.1))]).at(-1)![1] instanceof Float32Array);
 
+// With a speech model scoring (fast): the turn starts and ends sooner, with the same thresholds.
+const quick = (probs: number[], strict = false) => {
+  const seg = new Segmenter();
+  seg.fast = true;
+  return probs.map((p) => seg.push(new Float32Array(FRAME), p, strict)).flatMap((out, i) => (out ? [[i, out] as const] : []));
+};
+assert.equal(quick([...s(31, 0), ...s(31, 0.9), ...s(31, 0)])[0][0], 34, "starts after 4 speech frames, not 6");
+assert.equal(quick(s(10, 0.95), true)[0][0], 7, "over Arcanus: 8 frames, not 12");
+assert.ok(quick([...s(31, 0.9), ...s(31, 0)]).at(-1)![0] < run([...s(31, 0.9), ...s(31, 0)]).at(-1)![0], "the turn ends sooner");
+assert.equal(quick([...s(10, 0), ...s(3, 0.9), ...s(40, 0)]).length, 0, "a 3-frame blip is still not speech");
+
 // Loudness: a quiet room scores as silence, a voice 30 dB over it as speech, and back to quiet as silence again.
 const loud = new Loudness();
 const tone = (amp: number) => Float32Array.from({ length: FRAME }, (_, i) => amp * Math.sin(i / 3));
