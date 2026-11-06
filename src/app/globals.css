@@ -499,6 +499,72 @@ textarea.field {
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
+.msg-bubble.md {
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+}
+.msg-bubble.md :where(p, ul, ol, pre, blockquote, h1, h2, h3) {
+  margin: 0;
+}
+.msg-bubble.md :where(h1, h2, h3) {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.msg-bubble.md h1 { font-size: 15px; }
+.msg-bubble.md h2 { font-size: 14px; }
+.msg-bubble.md h3 { font-size: 13.5px; }
+.msg-bubble.md a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(111, 224, 255, 0.45);
+}
+.msg-bubble.md a:hover {
+  color: var(--accent-hot);
+  text-decoration-color: var(--accent-hot);
+}
+.msg-bubble.md code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.msg-bubble.md pre {
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: var(--r-sm);
+  background: rgba(2, 5, 9, 0.55);
+  border: 1px solid var(--line);
+}
+.msg-bubble.md pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.msg-bubble.md ul {
+  list-style: disc;
+}
+.msg-bubble.md ol {
+  list-style: decimal;
+}
+.msg-bubble.md :where(ul, ol) {
+  padding-left: 1.15em;
+}
+.msg-bubble.md li + li {
+  margin-top: 0.2em;
+}
+.msg-bubble.md blockquote {
+  padding-left: 8px;
+  border-left: 1px solid var(--line-strong);
+  color: var(--text-muted);
+}
 .msg[data-role="user"] .msg-bubble {
   padding: 6px 10px;
   border: 1px solid rgba(111, 224, 255, 0.24);
@@ -553,7 +619,7 @@ textarea.field {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0 10px;
+  gap: 2px;
   padding: 0 2px;
   font-size: 11px;
   color: var(--text-faint);
@@ -561,9 +627,19 @@ textarea.field {
   transition: opacity 0.15s;
 }
 .msg-actions time {
+  margin-right: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.02em;
+}
+.msg-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  color: var(--text-faint);
+}
+.msg-actions .icon-btn[data-danger]:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .msg:hover .msg-actions,
 .msg:focus-within .msg-actions,

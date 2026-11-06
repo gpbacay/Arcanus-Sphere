@@ -1,10 +1,12 @@
 "use client";
 
+import { Pencil, Reply, RotateCcw, Trash2, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/shared/store";
 import { ChainOfThoughtTrace, type ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { booting, discard, live, resend, retry, speak, useBusy } from "./conversation";
+import { Markdown } from "./Markdown";
 import { MAX, chatStore, selectCurrent, setEditing, setReplyTo, type Msg } from "./store";
 
 const clock = (at: number) =>
@@ -151,36 +153,47 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
           />
         </div>
       ) : null}
-      {message.text ? <div className="msg-bubble">{message.text}</div> : null}
+      {message.text ? (
+        message.role === "assistant" && message.kind !== "command" ? (
+          <div className="msg-bubble md">
+            <Markdown text={message.text} />
+          </div>
+        ) : (
+          <div className="msg-bubble">{message.text}</div>
+        )
+      ) : null}
       <div className="msg-actions">
         <time dateTime={new Date(message.at).toISOString()}>{clock(message.at)}</time>
         {message.kind === "command" ? null : (
-          <button type="button" disabled={busy} onClick={() => setReplyTo(message)}>
-            Reply
+          <button type="button" className="icon-btn" aria-label="Reply" title="Reply" disabled={busy} onClick={() => setReplyTo(message)}>
+            <Reply size={14} strokeWidth={1.75} />
           </button>
         )}
         {message.kind === "command" ? null : message.role === "user" ? (
           <button
             type="button"
+            className="icon-btn"
+            aria-label="Edit"
+            title="Edit"
             disabled={busy}
             onClick={() => {
               setText(message.text);
               setEditing(message.id);
             }}
           >
-            Edit
+            <Pencil size={14} strokeWidth={1.75} />
           </button>
         ) : message.text ? (
-          <button type="button" onClick={() => speak(message.text)}>
-            Speak
+          <button type="button" className="icon-btn" aria-label="Speak" title="Speak" onClick={() => speak(message.text)}>
+            <Volume2 size={14} strokeWidth={1.75} />
           </button>
         ) : null}
-        <button type="button" disabled={busy} onClick={() => discard({ kind: "message", id: message.id })}>
-          Delete
+        <button type="button" className="icon-btn" data-danger aria-label="Delete" title="Delete" disabled={busy} onClick={() => discard({ kind: "message", id: message.id })}>
+          <Trash2 size={14} strokeWidth={1.75} />
         </button>
         {canRetry ? (
-          <button type="button" disabled={busy} onClick={retry}>
-            Retry
+          <button type="button" className="icon-btn" aria-label="Retry" title="Retry" disabled={busy} onClick={retry}>
+            <RotateCcw size={14} strokeWidth={1.75} />
           </button>
         ) : null}
       </div>
@@ -223,9 +236,8 @@ function LiveReply({ chatId }: { chatId: string }) {
         <ChainOfThoughtTrace label="Arcanus is thinking" steps={reply.trace} thinking open />
       </div>
       {reply.text ? (
-        <div className="msg-bubble">
-          {reply.text}
-          <span className="caret" aria-hidden />
+        <div className="msg-bubble md">
+          <Markdown text={reply.text} caret />
         </div>
       ) : null}
     </article>

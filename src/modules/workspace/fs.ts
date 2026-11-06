@@ -169,9 +169,17 @@ export async function remove(path: string) {
 
 // ------------------------------------------------------------------ .arcanus: instructions, skills, memory, artifacts
 
-const ARCANUS_MD = `<!-- ARCANUS.md: standing instructions. Arcanus reads this file before every reply, the way Claude Code reads
-     CLAUDE.md. Write plain lines below this comment, such as "Answer in British English." or "My name is Sam."
-     Keep it short: the model is small and every line slows the reply a little. Comments like this one are never sent. -->
+const ARCANUS_MD = `<!-- ARCANUS.md: your standing instructions. Arcanus reads this file before every reply, so what you write
+     here shapes all of them. Add plain lines below this comment, one idea per line. For example:
+
+       My name is Sam.
+       Answer in British English.
+       Keep replies to two short sentences.
+       I am learning Spanish, so give me the Spanish word too.
+       If you are not sure, say so instead of guessing.
+
+     Good lines say who you are, how you want answers to sound, and what to avoid. Keep the file short: the model
+     is small, and every line you add slows each reply a little. Comments like this one are never sent. -->
 `;
 const EXAMPLE_SKILL = `---
 name: eli5

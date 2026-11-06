@@ -7,7 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/shared/lru.check.ts && node src/shared/html.check.ts && node src/modules/listen/segment.check.ts && node src/modules/brain/routing.check.ts && node src/modules/brain/shelf.check.ts",
+    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/shared/lru.check.ts && node src/shared/html.check.ts && node src/modules/listen/segment.check.ts && node src/modules/brain/routing.check.ts && node src/modules/brain/shelf.check.ts && node src/modules/chat/markdown.check.ts",
     "orb": "node scripts/export-orb.mjs",
     "postinstall": "node scripts/copy-8thwall-engine.mjs",
     "copy:8thwall": "node scripts/copy-8thwall-engine.mjs",
