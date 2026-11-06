@@ -62,7 +62,9 @@ export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string } {
   // Measured on SmolLM2: an instruction that says what to write (hello, name, offer help) beats a list of what not to
   // write, which put jobs and places in its head; "introduce yourself" invited a made-up biography. Without the facts
   // at all, it invents names and whole scenes.
-  const greetMe = `Hi! Reply with one short greeting: say good ${m.when.split(" ").at(-1)}, say your name, and ask how you can help. Nothing else.`;
+  // "Good night" is a goodbye (isIntroduction throws it away), so at night it says hello instead.
+  const part = m.when.split(" ").at(-1);
+  const greetMe = `Hi! Reply with one short greeting: say ${part === "night" ? "hello" : `good ${part}`}, say your name, and ask how you can help. Nothing else.`;
   return { turns: [{ role: "system", content: `You are Arcanus, a helpful assistant. Facts:\n${facts}` }, { role: "user", content: greetMe }], facts };
 }
 

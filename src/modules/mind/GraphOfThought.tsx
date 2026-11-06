@@ -4,8 +4,9 @@ import { Network, Trash2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { closePane, pane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
-import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtResult, ChainOfThoughtResults, ChainOfThoughtStep } from "@/shared/ui/chain-of-thought";
-import { clearMind, mind, type Thought } from "./mind";
+import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtResult, ChainOfThoughtResults, ChainOfThoughtStep, ChainOfThoughtSubsteps } from "@/shared/ui/chain-of-thought";
+import { clearMind, mind } from "./mind";
+import { threads, type Row } from "./threads";
 
 /** The live Graph of Thought pane, beside the rail. Rendered only while open, so a closed pane costs nothing. */
 export function GraphOfThought() {
@@ -16,23 +17,11 @@ export function GraphOfThought() {
 const LONG = 320;
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-/** Thoughts in trains: each root (a wake, a message) with everything that grew from it, in order. */
-function trains(thoughts: Thought[]) {
-  const rootOf = new Map<string, string>();
-  const out = new Map<string, Thought[]>();
-  for (const t of thoughts) {
-    const root = (t.parents[0] && rootOf.get(t.parents[0])) || t.id;
-    rootOf.set(t.id, root);
-    out.set(root, [...(out.get(root) ?? []), t]);
-  }
-  return [...out.values()];
-}
-
 function GraphPane() {
   const thoughts = useStore(mind, (s) => s.thoughts);
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true); // follow the newest thought unless you scrolled up to read
-  const live = thoughts.some((t) => t.status === "active");
+  const running = thoughts.filter((t) => t.status === "active").length; // threads running at once
 
   useEffect(() => {
     const el = body.current;
@@ -45,7 +34,7 @@ function GraphPane() {
         <Network size={16} aria-hidden />
         <h2>Graph of Thought</h2>
         <span className="pane-sub" aria-live="polite">
-          {live ? "thinking" : "idle"} · {thoughts.length} thoughts
+          {running ? `${running} running` : "idle"} · {thoughts.length} thoughts
         </span>
         <button type="button" className="icon-btn" aria-label="Clear the graph" title="Clear" onClick={clearMind} style={{ marginLeft: "auto" }}>
           <Trash2 size={15} />
@@ -63,13 +52,13 @@ function GraphPane() {
         }}
       >
         {thoughts.length ? (
-          trains(thoughts).map((train) => (
-            <div key={train[0].id} className="got-train">
-              <p className="got-when">{time(train[0].at)}</p>
+          threads(thoughts).map((thread) => (
+            <div key={thread[0].t.id} className="got-train">
+              <p className="got-when">{time(thread[0].t.at)}</p>
               <ChainOfThought bare>
                 <ChainOfThoughtContent>
-                  {train.map((t, i) => (
-                    <ThoughtNode key={t.id} t={t} previous={train[i - 1]?.id} />
+                  {thread.map((row) => (
+                    <ThoughtNode key={row.t.id} rows={[row]} />
                   ))}
                 </ChainOfThoughtContent>
               </ChainOfThought>
@@ -86,9 +75,11 @@ function GraphPane() {
   );
 }
 
-function ThoughtNode({ t, previous }: { t: Thought; previous?: string }) {
-  // Edges worth spelling out: a merge of several thoughts, or a branch back to an earlier one.
-  const from = t.parents.length > 1 || (t.parents[0] && t.parents[0] !== previous) ? `from ${t.parents.join(" + ")}` : "";
+/** A thought, then what it set running in parallel as branches. A branch that goes on (`then`) nests one level in. */
+function ThoughtNode({ rows: [{ t, branches }, ...then] }: { rows: Row[] }) {
+  const sub = then.length ? [...branches, then] : branches;
+  // The layout shows where a thought came from; only a join of several is spelled out.
+  const from = t.parents.length > 1 ? `joins ${t.parents.join(" + ")}` : "";
   const took = t.ms !== undefined ? (t.ms < 1000 ? `${t.ms} ms` : `${(t.ms / 1000).toFixed(1)} s`) : "";
   const description = [t.detail, from, took, t.status === "failed" ? "failed" : ""].filter(Boolean).join(" · ");
   // A long reply: its newest words while it is being written, its opening once done.
@@ -113,6 +104,13 @@ function ThoughtNode({ t, previous }: { t: Thought; previous?: string }) {
             <ChainOfThoughtResult key={i}>{r}</ChainOfThoughtResult>
           ))}
         </ChainOfThoughtResults>
+      ) : null}
+      {sub.length ? (
+        <ChainOfThoughtSubsteps>
+          {sub.map((branch) => (
+            <ThoughtNode key={branch[0].t.id} rows={branch} />
+          ))}
+        </ChainOfThoughtSubsteps>
       ) : null}
     </ChainOfThoughtStep>
   );

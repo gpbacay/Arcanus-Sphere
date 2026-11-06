@@ -325,48 +325,58 @@ function lastTopic() {
   return last && asked(last) && last.title !== "Untitled" ? last.title : undefined;
 }
 
-const TRIES = 6; // about 6 in 16 lines pass on either SmolLM2 size, so 6 tries greet on ~94% of boots
 const MAX_WORDS = 25;
 const MAX_UNSUPPORTED = 2;
 
 /**
  * Have SmolLM2 write this boot's greeting from the harness's facts: who Arcanus is, what it can do, when it is, and
- * the user's own ARCANUS.md, last topic and notes about them. A line that isn't a greeting, runs long, or brings in
- * more than a couple of words of its own (unsupported) is thrown away, up to TRIES times.
+ * the user's own ARCANUS.md, last topic and notes about them. Several candidates are written at once, in one batch
+ * (on the GPU about the time of one), each its own branch of the Graph of Thought. A line that isn't a greeting, runs
+ * long, or brings in more than a couple of words of its own (unsupported) is thrown away; keep_best keeps the
+ * cleanest of the rest. When none pass, a plain greeting is used: one round, never a loop of retries.
  */
 async function compose(chatId: string, id: string, mine: number) {
-  if (!(await llmReady())) return;
-  const [rules, notes] = await Promise.all([instructions().catch(() => ""), memories().catch(() => [])]);
+  // The user's files are read while SmolLM2 is still loading, not after.
+  const [ready, rules, notes] = await Promise.all([llmReady(), instructions().catch(() => ""), memories().catch(() => [])]);
+  if (!ready || mine !== greetGen || !power.state.on) return;
+  const when = moment();
   const { turns, facts } = greetingPrompt({
-    when: moment(),
+    when,
     rules,
     lastTopic: lastTopic(),
     notes: recallNotes("my name call me greet greeting hello prefer", notes).map((n) => n.text),
   });
-  for (let attempt = 0; attempt < TRIES; attempt++) {
-    if (mine !== greetGen || !power.state.on) return;
-    composing = true;
-    const writing = thought("generate", "Writing a greeting", { parents: [wakeId], active: true, detail: `try ${attempt + 1} of ${TRIES}` });
-    const written = await llm
-      .generate(turns, () => undefined, { maxNewTokens: 40, sample: true })
-      .catch((err: unknown) => (settle(writing, { failed: true, detail: errorText(err) }), Promise.reject(err)))
-      .finally(() => (composing = false));
-    const line = openingLine(written.text);
-    if (mine !== greetGen || !power.state.on) return settle(writing, { detail: "stopped" });
-    // The greeting checked against the facts it was given: a line that brings in its own words is thrown away.
+  // ponytail: 4 on WebGPU, where a batch costs about one reply; 2 on the CPU, where each row costs more.
+  const n = llm.state.state.device === "webgpu" ? 4 : 2;
+  const branches = Array.from({ length: n }, (_, i) =>
+    thought("generate", "Writing a greeting", { parents: [wakeId], active: true, detail: `candidate ${i + 1} of ${n}, in parallel` })
+  );
+  composing = true;
+  const written = await llm
+    .generate(turns, () => undefined, { maxNewTokens: 40, sample: true, n })
+    // A failed batch still greets: with no candidates, the plain greeting below.
+    .catch((err: unknown) => (branches.forEach((b) => settle(b, { failed: true, detail: errorText(err) })), { text: "", texts: [] as string[] }))
+    .finally(() => (composing = false));
+  if (mine !== greetGen || !power.state.on) return branches.forEach((b) => settle(b, { detail: "stopped" }));
+  // Each candidate checked against the facts it was given: a line that brings in its own words is thrown away.
+  const judged = (written.texts ?? [written.text]).map((text, i) => {
+    const line = openingLine(text);
     const invented = unsupported(line, facts);
     const why = !isIntroduction(line) ? "not a greeting" : line.split(/\s+/).length > MAX_WORDS ? "too long" : invented.length > MAX_UNSUPPORTED ? "made things up" : "";
-    settle(writing, { content: line || "(nothing)", failed: !!why, detail: why ? `thrown away: ${why}` : "kept", results: invented.length ? invented : undefined });
-    if (why) continue;
-    bootLine = line;
-    write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, text: line } : m)) }));
-    if (voice.state.state.off) return;
-    if (voice.state.state.analyser) {
-      sayAll(line);
-      voiced(writing, line)();
-    } else watchGesture();
-    return;
-  }
+    settle(branches[i], { content: line || "(nothing)", failed: !!why, detail: why ? `thrown away: ${why}` : "passed", results: invented.length ? invented : undefined });
+    return { line, why, invented: invented.length };
+  });
+  const best = judged.filter((j) => !j.why).sort((a, b) => a.invented - b.invented)[0];
+  const part = when.split(" ").at(-1);
+  const line = best?.line ?? `${part === "night" ? "Hello" : `Good ${part}`}, I'm Arcanus. How can I help?`;
+  const kept = thought("keep_best", line, { parents: branches, detail: best ? `kept candidate ${judged.indexOf(best) + 1} of ${n}` : "none passed: the plain greeting" });
+  bootLine = line;
+  write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, text: line } : m)) }));
+  if (voice.state.state.off) return;
+  if (voice.state.state.analyser) {
+    sayAll(line);
+    voiced(kept, line)();
+  } else watchGesture();
 }
 
 async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
