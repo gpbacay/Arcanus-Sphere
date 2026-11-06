@@ -5,10 +5,19 @@ import { Hippocampus } from "./arcane/web.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, introduction, matchTool, personalityReply } from "@/modules/harness";
+import { browse, search } from "@/modules/web";
+import { plainText } from "@/shared/html";
+import { errorText } from "@/shared/store";
 import { calculate, findExpression, tellTime } from "./tools";
 
-/** A skill's answer: a reply written without the language model, or facts for the language model to use. */
-export type Outcome = { step: ThoughtStep; reply?: string; facts?: string[] };
+/**
+ * A skill's answer: a reply written without the language model, or facts for the language model to use. `source` names
+ * where the facts came from (a web page, a search); without it they are facts about Arcanus.
+ */
+export type Outcome = { step: ThoughtStep; reply?: string; facts?: string[]; source?: string };
+
+const LINK = /\bhttps?:\/\/[^\s<>"')\]]+/i;
+const ASK_WEB = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look\s+up|browse(?:\s+to)?|find\s+online)\s+/i;
 
 export interface Skill {
   route: string;
@@ -111,6 +120,47 @@ export const SKILLS: Skill[] = [
         step: { label: "Calculated", description: "Answered without the language model", results: [`${expression} = ${result}`] },
         reply: result.startsWith("Error") ? result : `${expression} = ${result}`,
       };
+    },
+  },
+  {
+    route: "web",
+    description: "Asks to search the internet, look something up online, or open or read a web page or link",
+    seeds: [
+      "search the web for electric cars",
+      "look up the latest news online",
+      "google the weather in manila",
+      "open https://example.com",
+      "find this on the internet",
+      "browse to wikipedia.org",
+      "summarize this article https://example.com/post",
+    ],
+    claim(text) {
+      if (/^connect mcp\s/i.test(text)) return undefined; // an MCP server's address belongs to the tool skill
+      return LINK.test(text) ? "a link" : ASK_WEB.test(text) ? "asked to search the web" : undefined;
+    },
+    async run(text) {
+      const link = text.match(LINK)?.[0];
+      try {
+        if (link) {
+          const page = await browse(link);
+          return {
+            step: { label: "Read a web page", description: page.url, results: [page.title] },
+            facts: [plainText(page.text)],
+            source: `The web page "${page.title}" (${page.url})`,
+          };
+        }
+        const query = text.replace(ASK_WEB, "").replace(/\s+(?:online|on the (?:web|internet))\s*[?.!]*$/i, "").trim() || text;
+        const { results, engine } = await search(query);
+        if (!results.length) return { step: { label: "Searched the web", description: query }, reply: `I searched the web for "${query}" and found nothing.` };
+        const top = results.slice(0, 4);
+        return {
+          step: { label: `Searched ${engine}`, description: query, results: top.map((r) => r.title) },
+          facts: top.map((r) => `${r.title}: ${r.snippet} (${r.url})`),
+          source: `Web search results for "${query}"`,
+        };
+      } catch (err) {
+        return { step: { label: "Web", description: errorText(err) }, reply: `I couldn't reach that: ${errorText(err)}` };
+      }
     },
   },
   {

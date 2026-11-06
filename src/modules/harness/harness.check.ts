@@ -1,6 +1,29 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, callTool, identityBrief, introduction, matchTool, parseMcpBody, personalityReply, registerPlugin } from "./index.ts";
+import { argsFor, assemble, callTool, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, personalityReply, registerPlugin, slug } from "./index.ts";
+
+assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
+assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
+  name: "eli5",
+  description: "Explain simply",
+  body: "Use small words.",
+});
+assert.deepEqual(parseSkill("Answer as a pirate.\nAlways.", "Pirate Talk"), { name: "pirate-talk", description: "Answer as a pirate.", body: "Answer as a pirate.\nAlways." });
+
+const fit = assemble(
+  [
+    { label: "rules", text: "be brief", priority: 1 },
+    { label: "page", text: `${"a".repeat(60)}\n${"b".repeat(200)}`, priority: 2 },
+    { label: "empty", text: "  ", priority: 0 },
+    { label: "skill", text: "s".repeat(40), priority: 0 },
+    { label: "memory", text: "m".repeat(50), priority: 3 },
+  ],
+  150
+);
+assert.deepEqual(fit.sections.map((s) => s.label), ["rules", "page", "skill"]); // order kept, memory dropped
+assert.equal(fit.sections[1].text, `${"a".repeat(60)}…`); // cut at the line break
+assert.deepEqual(fit.report.find((r) => r.label === "memory"), { label: "memory", chars: 0, of: 50 });
+assert.ok(fit.used <= 150);
 
 assert.match(personalityReply(), /Arcanus/);
 assert.match(identityBrief, /Gianne Bacay/);

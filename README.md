@@ -1,6 +1,6 @@
 # Arcanus Sphere
 
-A fully local AI assistant embodied as an audio-reactive 3D sphere. Every model runs in your browser on ONNX Runtime Web. There is no server, no API key, and nothing you type leaves the device.
+A fully local AI assistant embodied as an audio-reactive 3D sphere. Every model runs in your browser on ONNX Runtime Web. There is no API key, and nothing you type leaves the device. The one server part is a small relay for Arcanus's own browser, used only when you browse or ask it to look something up.
 
 ## How it thinks
 
@@ -21,6 +21,32 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 320 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
+
+## Files: `.arcanus/`
+
+Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.arcanus/` folder (the folder icon on the rail, or `/files`):
+
+```
+.arcanus/
+  ARCANUS.md            standing instructions, read before every reply (like CLAUDE.md); <!-- comments --> are never sent
+  skills/<name>/SKILL.md  a skill: frontmatter `name` and `description`, then instructions. Run it with /<name> <message>
+  memory/*.md           notes; the ones a message is about are recalled into the reply's context
+  artifacts/            what Arcanus saved: replies (/save) and web pages
+```
+
+By default the folder lives privately in the browser (the Origin Private File System). **Open a folder** in the Files pane (Chrome and Edge) and Arcanus works in that folder on your device instead, creating `<folder>/.arcanus/`; it asks for access again after a reload. You can open and edit any file there, and **Ask Arcanus** hands a file to the model to read with your messages.
+
+From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read.
+
+## Browser
+
+The globe on the rail opens Arcanus's browser: type an address or a search. Paste a link in the chat or say "search for …" and Arcanus browses the same way, then answers from the page or the results. **Ask Arcanus** on a page keeps it in the model's context until you remove it.
+
+Pages arrive as text through `src/app/api/web/route.ts` (a browser page can't read other sites itself) and show in reader view: most sites refuse to be framed, and the app's cross-origin isolation blocks frames anyway. Search uses DuckDuckGo, and Wikipedia when DuckDuckGo answers with a bot check. The relay refuses private and local network addresses and other sites' pages; add a rate limit before deploying it publicly. Offline, everything else still works.
+
+## Context
+
+Before each reply, the harness (`assemble` in `src/modules/harness`) fits what the model reads into a 3,200-character budget, most important first: the skill being run and the facts a skill found, then `ARCANUS.md`, then the page or file you handed Arcanus, then recalled notes. What doesn't fit is cut at a line break or left out, and the reply's chain of thought shows which. Older turns are cut to 600 characters. The budget sits far below SmolVLM's 8k tokens because on WebAssembly every token read delays the first word.
 
 ## Speech to text
 
@@ -57,14 +83,17 @@ Arcanus is a modular monolith: one Next.js app, split into feature modules that 
 src/
   app/            composition root: page.tsx wires the modules together and boots the engines
   modules/
-    brain/        ARC 1 routing and skills (time, math, about): skills.ts, knowledge.ts, ARCANE in arcane/
+    brain/        ARC 1 routing and skills (time, math, about, web): skills.ts, knowledge.ts, ARCANE in arcane/
+    harness/      personality, tools, MCP, and context engineering (skill files, the context budget)
+    workspace/    Arcanus's own files: .arcanus/ in the browser's private storage or a folder you open, the Files pane
+    web/          Arcanus's browser: history, reader view, the Browser pane (pages come through src/app/api/web)
     llm/          SmolVLM: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
     listen/       speech to text, full duplex: microphone frames, loudness voice detection and utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
     offline/      service worker registration, online status
-  shared/         kernel every module may use: Store, Engine, Boundary, Lru, UI components
+  shared/         kernel every module may use: Store, Engine, Boundary, Lru, the HTML reader, the side-pane state, UI components
 ```
 
 - **Boundaries.** A module is imported only as `@/modules/<name>` (its `index.ts`). `npm run lint` fails on deep imports, on relative imports between modules, and on `shared/` depending on a module.

@@ -1,21 +1,29 @@
 "use client";
 
-import { Info, Settings, X } from "lucide-react";
+import { FolderOpen, Globe, Info, Settings, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { pane, togglePane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
 import { voice } from "@/modules/voice";
 
 type DialogName = "about" | "settings";
 
-/** Left rail: the mark, About, and Settings. Both pages are dialogs, so the sphere stays on screen. */
+/** Left rail: the mark, Arcanus's files and browser (side panes), then About and Settings (dialogs). */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
+  const side = useStore(pane, (s) => s.open);
   return (
     <nav className="app-nav" aria-label="Arcanus">
       <div className="app-nav-brand" title="Arcanus">
         <Logo size={26} />
       </div>
+      <button type="button" className="app-nav-btn" aria-label="Files" title="Files" aria-expanded={side === "files"} onClick={() => togglePane("files")}>
+        <FolderOpen size={17} aria-hidden />
+      </button>
+      <button type="button" className="app-nav-btn" aria-label="Browser" title="Browser" aria-expanded={side === "browser"} onClick={() => togglePane("browser")}>
+        <Globe size={17} aria-hidden />
+      </button>
       <div className="app-nav-gap" />
       <button type="button" className="app-nav-btn" aria-label="About" title="About" aria-expanded={open === "about"} aria-haspopup="dialog" onClick={() => setOpen("about")}>
         <Info size={17} aria-hidden />
@@ -64,6 +72,8 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
         <li>SmolVLM writes the reply on this device.</li>
         <li>Paradee speaks it. The sphere reacts to that audio.</li>
         <li>Messages stay here. Models download once and are cached.</li>
+        <li>Its own files live in .arcanus/: instructions, skills, memory and artifacts.</li>
+        <li>Its browser reads the web only when you browse or ask it to look something up.</li>
       </ul>
     </AppDialog>
   );

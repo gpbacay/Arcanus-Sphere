@@ -11,6 +11,8 @@ import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
 import { Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
+import { Browser } from "@/modules/web";
+import { Files, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
 import { power, restorePower } from "@/shared/power";
 import { useStore } from "@/shared/store";
@@ -23,6 +25,7 @@ export default function Home() {
 
   useEffect(() => {
     hydrateChats();
+    workspaceReady().catch(() => undefined); // .arcanus/: its error shows in the Files pane
     voice.restore();
     restorePower();
     // A click anywhere, including the power switch, lets the boot greeting be spoken once it's written.
@@ -60,6 +63,10 @@ export default function Home() {
       <main className="app-shell">
         <Stage />
         <AppNav />
+        <Boundary fallback={null}>
+          <Files />
+          <Browser />
+        </Boundary>
         <Boundary fallback={<ChatFallback />}>
           <ChatPanel />
         </Boundary>

@@ -11,7 +11,19 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "harness",
     title: "Agent harness",
     content:
-      "Arcanus is an agent with its own harness. Skills decide what a message needs. Tools run when a message names them. A plugin adds tools through the harness. An MCP server connects over HTTP and its tools register the same way. Time and math stay local skills.",
+      "Arcanus is an agent with its own harness. Skills decide what a message needs. Tools run when a message names them. A plugin adds tools through the harness. An MCP server connects over HTTP and its tools register the same way. Time and math stay local skills. Before each reply the harness fits what the model should read into a small budget: the skill being run, facts it found, ARCANUS.md, a page or file you handed it, and recalled notes. /context shows what the last reply read.",
+  },
+  {
+    id: "files",
+    title: "Files: the .arcanus folder",
+    content:
+      "Like .claude or .cursor in a project, Arcanus keeps its own files in a .arcanus folder: ARCANUS.md holds standing instructions it reads before every reply, skills/ holds skills run with /name, memory/ holds notes it recalls, and artifacts/ holds what it saved. The folder lives privately in the browser, or in a folder on your device you open from the Files pane. /skill makes a skill, /remember keeps a note, /save saves the last reply.",
+  },
+  {
+    id: "browser",
+    title: "Browser: the internet",
+    content:
+      "Arcanus has its own browser. It can search the web and read pages as text, through the app's relay, only when you browse or ask it to look something up; your chats are never sent. Paste a link or say search for something, or use /browse. Ask Arcanus about a page to have it read along with your messages.",
   },
   {
     id: "identity",
@@ -34,7 +46,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "local",
     title: "Fully local and private",
     content:
-      "Arcanus runs entirely in your web browser. Every model runs on your device with ONNX Runtime Web. No server sees your messages. The models download once and are cached, so later visits load from your device.",
+      "Arcanus runs entirely in your web browser. Every model runs on your device with ONNX Runtime Web. No server sees your messages. The models download once and are cached, so later visits load from your device. The one exception is the browser: a web page or search you ask for is fetched through the app's relay.",
   },
   {
     id: "smolvlm",

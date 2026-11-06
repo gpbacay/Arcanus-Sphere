@@ -11,9 +11,10 @@ const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.
 const CDN = "https://cdn.jsdelivr.net";
 const UNVERSIONED = new Set(["/orb.glb"]); // add a public file here when it is redrawn without changing its name
 
+// /api/ is live (the browser relay): never cached.
 const cacheable = (href) => {
   const url = new URL(href);
-  return url.origin === CDN || (url.origin === self.location.origin && !url.pathname.startsWith("/sw.js"));
+  return url.origin === CDN || (url.origin === self.location.origin && !url.pathname.startsWith("/sw.js") && !url.pathname.startsWith("/api/"));
 };
 
 async function put(request, response) {

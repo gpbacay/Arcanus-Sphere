@@ -134,3 +134,62 @@ export async function callTool(name: string, input: string): Promise<string> {
 }
 
 export const harness = { personality, use: registerPlugin, call: callTool, connect: connectMcp, match: matchTool, tools: listTools, plugins: listPlugins };
+
+// ------------------------------------------------------------------ context engineering
+// Arcanus's own files (.arcanus/, see the workspace module) and the web feed the model through these pure helpers.
+
+/** A file-safe, command-safe name: "Explain Like I'm 5" -> "explain-like-i-m-5". */
+export const slug = (text: string) =>
+  text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+/** Notes to the human (<!-- … -->) never reach the model. */
+export const stripComments = (text: string) => text.replace(/<!--[\s\S]*?-->/g, "").trim();
+
+export interface SkillFile {
+  /** Invoked as /name. */
+  name: string;
+  description: string;
+  /** Instructions the model follows while the skill runs. */
+  body: string;
+}
+
+/** A SKILL.md: optional `---` frontmatter with name and description, then the instructions. */
+export function parseSkill(text: string, fallbackName: string): SkillFile {
+  const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---[^\n]*\n?([\s\S]*)$/);
+  const meta: Record<string, string> = {};
+  for (const line of (front?.[1] ?? "").split(/\r?\n/)) {
+    const pair = line.match(/^\s*([\w-]+)\s*:\s*(.*)$/);
+    if (pair) meta[pair[1].toLowerCase()] = pair[2].trim().replace(/^["']|["']$/g, "");
+  }
+  const body = stripComments(front ? front[2] : text);
+  return { name: slug(meta.name || fallbackName) || "skill", description: meta.description || body.split("\n")[0].slice(0, 90), body };
+}
+
+export type Section = { label: string; text: string; /** Lower goes in first when space is short. */ priority: number };
+export type Assembled = { sections: { label: string; text: string }[]; report: { label: string; chars: number; of: number }[]; used: number };
+
+/**
+ * Fit context sections into `budget` characters, most important first. One that only partly fits is cut at a line
+ * break; what doesn't fit at all is dropped and reported, so the trace shows what the model did and didn't see.
+ * Sections come out in the order they went in, whatever their priority.
+ */
+export function assemble(sections: Section[], budget: number): Assembled {
+  const given = sections.filter((s) => s.text.trim());
+  const kept = new Map<Section, string>();
+  let left = budget;
+  for (const section of [...given].sort((a, b) => a.priority - b.priority)) {
+    const text = section.text.trim();
+    if (text.length <= left) kept.set(section, text);
+    else if (left >= 80) {
+      const head = text.slice(0, left - 1);
+      const end = head.lastIndexOf("\n");
+      kept.set(section, `${(end > left / 2 ? head.slice(0, end) : head).trimEnd()}…`);
+    }
+    left -= kept.get(section)?.length ?? 0;
+  }
+  return {
+    sections: given.filter((s) => kept.has(s)).map((s) => ({ label: s.label, text: kept.get(s)! })),
+    report: given.map((s) => ({ label: s.label, chars: kept.get(s)?.length ?? 0, of: s.text.trim().length })),
+    used: budget - left,
+  };
+}

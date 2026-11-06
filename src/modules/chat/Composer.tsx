@@ -3,6 +3,8 @@
 import { useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { canListen, listen } from "@/modules/listen";
 import { voice } from "@/modules/voice";
+import { workspace } from "@/modules/workspace";
+import { pane, pin } from "@/shared/pane";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
 import { COMMANDS, send, stop, talk, useBusy } from "./conversation";
@@ -36,13 +38,17 @@ export function Composer() {
   const micOk = useSyncExternalStore(never, canListen, yes);
   const busy = useBusy();
   const on = useStore(power, (s) => s.on);
+  const skills = useStore(workspace, (s) => s.skills);
+  const pinned = useStore(pane, (s) => s.pinned);
   const [draft, setDraft] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Typing "/" opens the command list, narrowed as you type; arrows pick, Tab completes, Enter runs.
-  const matches = /^\/\w*$/.test(draft) ? COMMANDS.filter((c) => c.name.startsWith(draft.toLowerCase())) : [];
+  // Skills from .arcanus/skills are commands too.
+  const commands = [...COMMANDS, ...skills.filter((s) => !COMMANDS.some((c) => c.name === `/${s.name}`)).map((s) => ({ name: `/${s.name}`, hint: s.description }))];
+  const matches = /^\/[\w-]*$/.test(draft) ? commands.filter((c) => c.name.startsWith(draft.toLowerCase())) : [];
   const pick = Math.min(active, matches.length - 1);
 
   function submit(text = draft) {
@@ -77,6 +83,17 @@ export function Composer() {
           <span className="attachment-label">Replying to</span>
           <p className="truncate">{replyTo.text}</p>
           <button type="button" className="icon-btn" aria-label="Cancel reply" onClick={() => setReplyTo(null)}>
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      ) : null}
+      {pinned ? (
+        <div className="attachment">
+          <span className="attachment-label">Reading</span>
+          <p className="truncate" title={pinned.href ?? pinned.label}>
+            {pinned.label}
+          </p>
+          <button type="button" className="icon-btn" aria-label={`Stop reading ${pinned.label}`} onClick={() => pin(null)}>
             <Icon name="close" size={14} />
           </button>
         </div>

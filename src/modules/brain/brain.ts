@@ -21,6 +21,8 @@ export interface Plan {
   reply?: string;
   /** Recalled knowledge for the language model. */
   facts?: string[];
+  /** Where `facts` came from, when not Arcanus's own notes. */
+  source?: string;
 }
 
 let router: Promise<Hippocampus> | null = null;
@@ -97,5 +99,18 @@ export async function think(text: string, hasImage: boolean): Promise<Plan> {
   }
   if (!outcome) return { route: "chat", trace };
   trace.push(outcome.step);
-  return { route: skill.route, trace, reply: outcome.reply, facts: outcome.facts };
+  return { route: skill.route, trace, reply: outcome.reply, facts: outcome.facts, source: outcome.source };
+}
+
+let notes: { key: string; memory: Hippocampus } | null = null;
+
+/** The `k` notes most like `text`, by words and letters (Hippocampus + Occipital). Nothing when none share a word. */
+export function recallNotes<T extends { id: string; text: string }>(text: string, all: T[], k = 2): T[] {
+  const key = JSON.stringify(all);
+  if (notes?.key !== key) {
+    const memory = new Hippocampus(null, { k, occipital: new Occipital() });
+    for (const note of all) memory.remember(note.text, note.id);
+    notes = { key, memory };
+  }
+  return notes.memory.neighbors(text).flatMap((n) => all.filter((note) => note.id === n.label));
 }

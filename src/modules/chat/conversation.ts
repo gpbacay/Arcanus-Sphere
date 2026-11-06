@@ -1,11 +1,14 @@
 // Answering a message: brain decides, the language model writes, the voice speaks, each sentence as it is written.
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
-import { think } from "@/modules/brain";
-import { identityBrief, introduction, personality } from "@/modules/harness";
+import { recallNotes, think, type Plan } from "@/modules/brain";
+import { assemble, identityBrief, introduction, personality } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
+import { go } from "@/modules/web";
 import { isEcho, takeSentences, voice } from "@/modules/voice";
+import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
+import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { Store, errorText, useStore, type Engine } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
@@ -25,15 +28,76 @@ const NO_MODEL =
 
 let gen = 0;
 
-function buildTurns(prior: Msg[], user: Msg, facts?: string[]): Turn[] {
+// ------------------------------------------------------------------ context
+// What the model reads besides the message, most important first, fitted into a character budget (harness assemble):
+// the skill being run and the facts a skill found, then ARCANUS.md, then the page or file you handed Arcanus, then
+// recalled memory notes. SmolVLM-256M has 8k tokens of context, but on WebAssembly every token it reads costs time
+// before the first word, so the budget stays far below that. Older turns are cut short for the same reason.
+// ponytail: characters, not tokens (about 4 to 1 in English). Count tokens if the budget ever needs to be exact.
+const BUDGET = 3200;
+const HISTORY = 6;
+const HISTORY_CHARS = 600;
+
+type Report = ReturnType<typeof assemble>["report"];
+/** The last reply's context, for /context. */
+let lastContext: { report: Report; used: number } | null = null;
+
+/** The message as the model should read it: a skill's command name taken off. */
+const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/, "") || skill.description : user.text);
+
+const STANDING = "Your user's standing instructions (ARCANUS.md)";
+
+async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): Promise<{ turns: Turn[]; step: ThoughtStep | null }> {
+  const [rules, notes] = await Promise.all([instructions().catch(() => ""), memories().catch(() => [])]);
+  const text = ask(user, skill);
+  const pinned = pane.state.pinned;
+  const listed = plan.facts?.map((f) => `- ${f}`).join("\n") ?? "";
+  const facts = !listed
+    ? ""
+    : plan.source
+      ? `${listed}\n\nAnswer from this, and say which site it came from.`
+      : `${listed}\n\nAnswer from these facts. Do not add a job, a team, or a personal history.`;
+  const { sections, report, used } = assemble(
+    [
+      { label: STANDING, text: rules, priority: 1 },
+      { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
+      { label: plan.source ?? "Facts about Arcanus, and only these", text: facts, priority: 0 },
+      { label: `What the user is showing you: ${pinned?.label}`, text: pinned?.text ?? "", priority: 2 },
+      { label: "Notes you remembered", text: recallNotes(text, notes).map((n) => `- ${n.text}`).join("\n"), priority: 3 },
+    ],
+    BUDGET
+  );
+  lastContext = { report, used };
+  const standing = sections.find((s) => s.label === STANDING);
   const quote = user.replyToId ? prior.find((m) => m.id === user.replyToId) : undefined;
-  let content = user.text;
-  if (quote) content = `About this earlier message: "${quote.text.slice(0, 300)}"\n\n${content}`;
-  if (facts?.length) {
-    content = `Facts about Arcanus, and only these:\n${facts.map((f) => `- ${f}`).join("\n")}\n\nAnswer from these facts. Do not add a job, a team, or a personal history.\n\n${content}`;
-  }
-  const history = prior.filter((m) => m.kind !== "command").slice(-6).map((m): Turn => ({ role: m.role, content: m.text }));
-  return [{ role: "system", content: SYSTEM }, ...history, { role: "user", content }];
+  const content = [
+    ...sections.filter((s) => s !== standing).map((s) => `${s.label}:\n${s.text}`),
+    quote ? `About this earlier message: "${quote.text.slice(0, 300)}"` : "",
+    text,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const history = prior
+    .filter((m) => m.kind !== "command")
+    .slice(-HISTORY)
+    .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
+  const system = standing ? `${SYSTEM}\n\n${standing.label}:\n${standing.text}` : SYSTEM;
+  const step: ThoughtStep | null = report.length
+    ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
+    : null;
+  return { turns: [{ role: "system", content: system }, ...history, { role: "user", content }], step };
+}
+
+function reportLine(r: Report[number]) {
+  const name =
+    r.label === STANDING
+      ? "ARCANUS.md"
+      : r.label.startsWith("Notes")
+        ? "memory"
+        : r.label.startsWith("What the user")
+          ? r.label.replace(/^.*?: /, "")
+          : r.label.replace(/^Instructions for the /, "");
+  return `${name.slice(0, 48)} · ${r.chars === r.of ? r.chars : r.chars ? `${r.chars} of ${r.of}, cut` : "left out"}`;
 }
 
 const sayAll = (text: string) => takeSentences(`${text}\n`).sentences.forEach((s) => voice.say(s));
@@ -126,7 +190,7 @@ export function greet(list = engines) {
   watchGesture();
 }
 
-async function answer(chatId: string, prior: Msg[], user: Msg) {
+async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   silence();
   const mine = ++gen;
   const stale = () => mine !== gen;
@@ -149,7 +213,9 @@ async function answer(chatId: string, prior: Msg[], user: Msg) {
 
   let trace: ThoughtStep[] = [];
   try {
-    const plan = await think(user.text, Boolean(user.image));
+    const plan: Plan = skill
+      ? { route: "skill", trace: [{ label: "Read the message", description: user.text }, { label: `Skill · /${skill.name}`, description: skill.path }] }
+      : await think(user.text, Boolean(user.image));
     trace = plan.trace;
     if (stale()) return;
     if (plan.reply) {
@@ -158,13 +224,16 @@ async function answer(chatId: string, prior: Msg[], user: Msg) {
       return;
     }
 
+    const built = await buildTurns(prior, user, plan, skill);
+    if (stale()) return;
+    if (built.step) trace = [...trace, built.step];
     const writing = (description: string): ThoughtStep => ({ label: "SmolVLM-256M", description, status: "active" });
     show([...trace, writing(llm.state.state.status === "ready" ? "Writing on this device" : "Waiting for the model to load on this device")]);
     let shown = "";
     let unspoken = "";
     let result;
     try {
-      result = await llm.generate(buildTurns(prior, user, plan.facts), user.image, (piece) => {
+      result = await llm.generate(built.turns, user.image, (piece) => {
         if (stale()) return;
         shown += piece;
         const { sentences, rest } = takeSentences(unspoken + piece);
@@ -174,7 +243,8 @@ async function answer(chatId: string, prior: Msg[], user: Msg) {
       });
     } catch (err) {
       // Without SmolVLM, recalled notes are still an answer; anything else gets an honest "not now".
-      const notes = plan.facts?.join(" ");
+      // Arcanus's own notes are short enough to read out; a web page or search results are not.
+      const notes = plan.source ? undefined : plan.facts?.join(" ");
       sayAll(notes ?? NO_MODEL);
       finish(notes ?? NO_MODEL, [
         ...trace,
@@ -225,20 +295,77 @@ export const COMMANDS = [
   { name: "/run", hint: "Switch Arcanus on, or retry a model that failed" },
   { name: "/shutdown", hint: "Switch Arcanus off" },
   { name: "/clear", hint: "Start a new conversation" },
+  { name: "/browse", hint: "Open a page or search the web: /browse <address or words>" },
+  { name: "/files", hint: "Open Arcanus's files (.arcanus)" },
+  { name: "/remember", hint: "Keep a note in .arcanus/memory: /remember <note>" },
+  { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
+  { name: "/save", hint: "Save the last reply to .arcanus/artifacts" },
+  { name: "/context", hint: "Show what the last reply read" },
   { name: "/help", hint: "List these commands" },
 ];
 
 /** Run a terminal command. It interrupts a reply being written, and works while Arcanus is off. */
 function command(chatId: string, input: string) {
   const name = input.split(/\s+/)[0].toLowerCase();
+  const arg = input.slice(name.length).trim();
   if (live.state.reply) stop();
   chatStore.set({ replyTo: null, editingId: null });
   if (name === "/clear") return newChat();
+  // A skill from .arcanus/skills runs as a message: Arcanus answers it with the skill's instructions in context.
+  const skill = COMMANDS.some((c) => c.name === name) ? undefined : workspace.state.skills.find((s) => `/${s.name}` === name);
+  if (skill && power.state.on) {
+    voice.unlock();
+    const chat = currentChat();
+    if (chat) void answer(chatId, chat.messages, { id: crypto.randomUUID(), role: "user", text: input, at: Date.now() }, skill);
+    return;
+  }
   const out = (text: string, trace?: ThoughtStep[]) =>
     push(chatId, { id: crypto.randomUUID(), role: "assistant", text, at: Date.now(), kind: "command", trace });
+  const later = (run: () => Promise<string>) => void run().then(out, (err: unknown) => out(`That didn't work: ${errorText(err)}`));
   push(chatId, { id: crypto.randomUUID(), role: "user", text: input, at: Date.now(), kind: "command" });
 
-  if (name === "/help") return out(COMMANDS.map((c) => `${c.name.padEnd(10)} ${c.hint}`).join("\n"));
+  if (skill) return out("Arcanus is off. /run starts it.");
+  if (name === "/help") {
+    const skills = workspace.state.skills.map((s) => ({ name: `/${s.name}`, hint: `Skill · ${s.description}` }));
+    return out([...COMMANDS, ...skills].map((c) => `${c.name.padEnd(10)} ${c.hint}`).join("\n"));
+  }
+  if (name === "/files") {
+    openPane("files");
+    return out(`Files are open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
+  }
+  if (name === "/browse") {
+    if (!arg) {
+      openPane("browser");
+      return out("The browser is open. /browse <address or words> goes straight there.");
+    }
+    return later(async () => {
+      const view = await go(arg);
+      return view.kind === "page" ? `Opened ${view.page.title}.` : `${view.results.length} results from ${view.engine}.`;
+    });
+  }
+  if (name === "/remember") {
+    if (!arg) return out("/remember <note> keeps a note. Arcanus recalls it when a message is about it.");
+    return later(async () => `Remembered. Saved to ${await remember(arg)}.`);
+  }
+  if (name === "/skill") {
+    const [skillName, ...words] = arg.split(/\s+/);
+    if (!skillName || !words.length) return out("/skill <name> <instructions> makes a skill. Run it with /<name> <message>.");
+    return later(async () => {
+      const made = await createSkill(skillName, words.join(" "));
+      return `Made /${made.name}. Its instructions are in ${made.path}: edit them in Files.`;
+    });
+  }
+  if (name === "/save") {
+    const chat = currentChat();
+    const last = chat?.messages.findLast((m) => m.role === "assistant" && !m.kind);
+    if (!chat || !last) return out("There's no reply to save yet.");
+    return later(async () => `Saved to ${await saveArtifact(arg || chat.title, `${last.text}\n`)}.`);
+  }
+  if (name === "/context") {
+    const where = `Workspace: ${workspace.state.name || "not ready"} · ${workspace.state.skills.length} skills in ${HOME}/skills`;
+    if (!lastContext) return out(`${where}\nNo reply has read any context yet.`);
+    return out(`${where}\nThe last reply read ${lastContext.used} of ${BUDGET} characters of context:\n${lastContext.report.map(reportLine).join("\n")}`);
+  }
   if (name === "/shutdown") {
     if (!power.state.on) return out("Already off. /run starts Arcanus.");
     setPower(false);

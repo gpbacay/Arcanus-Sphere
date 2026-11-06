@@ -1,0 +1,246 @@
+"use client";
+
+// Arcanus's own file system. Like .claude/ or .cursor/ in a project, Arcanus keeps its files in a .arcanus/ folder:
+//   .arcanus/ARCANUS.md          standing instructions, read before every reply
+//   .arcanus/skills/<name>/SKILL.md  skills you or Arcanus wrote, run with /<name>
+//   .arcanus/memory/*.md         notes Arcanus remembers, recalled when a message is about them
+//   .arcanus/artifacts/          what Arcanus saves: replies, web pages
+// The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
+// folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
+// ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Files pane.
+import { parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
+import { Store, errorText } from "@/shared/store";
+
+type Dir = FileSystemDirectoryHandle;
+type Permissioned = Dir & {
+  queryPermission(opts: { mode: "readwrite" }): Promise<PermissionState>;
+  requestPermission(opts: { mode: "readwrite" }): Promise<PermissionState>;
+  values(): AsyncIterable<FileSystemHandle>;
+};
+
+export type Entry = { name: string; kind: "file" | "directory" };
+export type Skill = SkillFile & { path: string };
+
+export const HOME = ".arcanus";
+const MAX_READ = 2_000_000;
+
+export const workspace = new Store({
+  ready: false,
+  /** "home": Arcanus's private folder in this browser. "folder": a folder on this device you opened. */
+  kind: "home" as "home" | "folder",
+  name: "",
+  /** A folder opened on an earlier visit, waiting for a click to grant access again. */
+  reconnect: "",
+  error: "",
+  /** Bumped on every change, so views of the files read them again. */
+  version: 0,
+  skills: [] as Skill[],
+});
+
+export const canOpenFolder = () => typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+// ------------------------------------------------------------------ the root, and remembering an opened folder
+
+/** A folder handle survives reloads only in IndexedDB. */
+function saved<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    const open = indexedDB.open("arcanus-workspace", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("handles");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const request = run(open.result.transaction("handles", mode).objectStore("handles"));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    };
+  });
+}
+
+let root: Promise<Dir> | null = null;
+
+async function mount(dir: Dir, kind: "home" | "folder") {
+  root = Promise.resolve(dir);
+  await setUp();
+  workspace.set({ ready: true, kind, name: kind === "home" ? "Arcanus home" : dir.name, reconnect: kind === "folder" ? "" : workspace.state.reconnect, error: "" });
+  changed();
+  return dir;
+}
+
+const home = async () => mount(await navigator.storage.getDirectory(), "home");
+
+/** The root, set up on first use: the folder opened last time if access is still granted, otherwise Arcanus home. */
+export function ready(): Promise<Dir> {
+  root ??= (async () => {
+    const folder = await saved<Permissioned | undefined>("readonly", (s) => s.get("folder")).catch(() => undefined);
+    if (folder && (await folder.queryPermission({ mode: "readwrite" }).catch(() => "denied")) === "granted") return mount(folder, "folder");
+    if (folder) workspace.set({ reconnect: folder.name });
+    return home();
+  })();
+  root.catch((err: unknown) => {
+    root = null;
+    workspace.set({ error: errorText(err) });
+  });
+  return root;
+}
+
+/** Pick a folder on this device; Arcanus keeps its files in <folder>/.arcanus. Call from a click. */
+export async function openFolder() {
+  const picker = (window as unknown as { showDirectoryPicker(o: object): Promise<Dir> }).showDirectoryPicker;
+  const dir = await picker({ id: "arcanus", mode: "readwrite" });
+  await saved("readwrite", (s) => s.put(dir, "folder"));
+  await mount(dir, "folder");
+}
+
+/** Grant access again to the folder opened on an earlier visit. Call from a click. */
+export async function reconnect() {
+  const folder = await saved<Permissioned | undefined>("readonly", (s) => s.get("folder"));
+  if (folder && (await folder.requestPermission({ mode: "readwrite" })) === "granted") await mount(folder, "folder");
+}
+
+/** Back to Arcanus's private home in this browser. The folder is forgotten, not touched. */
+export async function backToHome() {
+  await saved("readwrite", (s) => s.delete("folder")).catch(() => undefined);
+  workspace.set({ reconnect: "" });
+  await home();
+}
+
+// ------------------------------------------------------------------ files
+
+/** "a/b/c.md" -> ["a", "b", "c.md"]. Never climbs out of the root. */
+function parts(path: string) {
+  const list = path.split("/").filter(Boolean);
+  if (list.some((p) => p === "." || p === ".." || p.includes("\\"))) throw new Error(`Not a path inside the workspace: ${path}`);
+  return list;
+}
+
+async function dirAt(names: string[], create: boolean) {
+  let dir = await ready();
+  for (const name of names) dir = await dir.getDirectoryHandle(name, { create });
+  return dir;
+}
+
+const missing = (err: unknown) => err instanceof DOMException && (err.name === "NotFoundError" || err.name === "TypeMismatchError");
+
+export async function list(path = ""): Promise<Entry[]> {
+  const dir = (await dirAt(parts(path), false)) as Permissioned;
+  const entries: Entry[] = [];
+  for await (const handle of dir.values()) entries.push({ name: handle.name, kind: handle.kind });
+  return entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
+}
+
+/** A file's text, or null when it isn't there. */
+export async function read(path: string): Promise<string | null> {
+  const names = parts(path);
+  const name = names.pop();
+  if (!name) return null;
+  try {
+    const file = await (await (await dirAt(names, false)).getFileHandle(name)).getFile();
+    if (file.size > MAX_READ) throw new Error(`${name} is too large to open as text (${Math.round(file.size / 1e6)} MB).`);
+    return await file.text();
+  } catch (err) {
+    if (missing(err)) return null;
+    throw err;
+  }
+}
+
+export async function write(path: string, text: string) {
+  const names = parts(path);
+  const name = names.pop();
+  if (!name) throw new Error("A file needs a name.");
+  const handle = await (await dirAt(names, true)).getFileHandle(name, { create: true });
+  const out = await handle.createWritable();
+  await out.write(text);
+  await out.close();
+  changed();
+}
+
+export async function makeFolder(path: string) {
+  await dirAt(parts(path), true);
+  changed();
+}
+
+export async function remove(path: string) {
+  const names = parts(path);
+  const name = names.pop();
+  if (!name) throw new Error("The workspace root can't be deleted.");
+  await (await dirAt(names, false)).removeEntry(name, { recursive: true });
+  changed();
+}
+
+// ------------------------------------------------------------------ .arcanus: instructions, skills, memory, artifacts
+
+const ARCANUS_MD = `<!-- ARCANUS.md: standing instructions. Arcanus reads this file before every reply, the way Claude Code reads
+     CLAUDE.md. Write plain lines below this comment, such as "Answer in British English." or "My name is Sam."
+     Keep it short: the model is small and every line slows the reply a little. Comments like this one are never sent. -->
+`;
+const EXAMPLE_SKILL = `---
+name: eli5
+description: Explain a topic simply, as if to a five-year-old
+---
+<!-- A skill. Run it with /eli5 <topic>. The lines below are the model's instructions while it runs. -->
+Explain the topic in three short sentences a five-year-old would understand. Use one everyday comparison. No jargon.
+`;
+
+/** Make .arcanus/ and its starter files when they are missing. Never overwrites. */
+async function setUp() {
+  if ((await read(`${HOME}/ARCANUS.md`)) === null) await write(`${HOME}/ARCANUS.md`, ARCANUS_MD);
+  for (const dir of ["memory", "artifacts"]) await makeFolder(`${HOME}/${dir}`);
+  const skills = await list(`${HOME}/skills`).catch(() => null);
+  if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);
+}
+
+let reading = 0;
+async function readSkills() {
+  const mine = ++reading;
+  const skills: Skill[] = [];
+  for (const entry of await list(`${HOME}/skills`).catch(() => [])) {
+    const path = entry.kind === "directory" ? `${HOME}/skills/${entry.name}/SKILL.md` : /\.md$/i.test(entry.name) ? `${HOME}/skills/${entry.name}` : "";
+    const text = path ? await read(path).catch(() => null) : null;
+    if (text?.trim()) skills.push({ ...parseSkill(text, entry.name.replace(/\.md$/i, "")), path });
+  }
+  if (mine === reading) workspace.set({ skills });
+}
+
+function changed() {
+  workspace.set({ version: workspace.state.version + 1 });
+  void readSkills();
+}
+
+/** ARCANUS.md without its comments: empty when there are no instructions. */
+export const instructions = async () => stripComments((await read(`${HOME}/ARCANUS.md`).catch(() => null)) ?? "");
+
+/** Every note in .arcanus/memory. */
+export async function memories(): Promise<{ id: string; text: string }[]> {
+  const notes = [];
+  for (const entry of await list(`${HOME}/memory`).catch(() => [])) {
+    if (entry.kind !== "file" || !/\.(md|txt)$/i.test(entry.name)) continue;
+    const text = stripComments((await read(`${HOME}/memory/${entry.name}`).catch(() => null)) ?? "");
+    if (text) notes.push({ id: entry.name, text });
+  }
+  return notes;
+}
+
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+
+/** Keep a note in .arcanus/memory. Returns its path. */
+export async function remember(note: string) {
+  const path = `${HOME}/memory/${stamp()}-${slug(note.split(/\s+/).slice(0, 6).join(" ")) || "note"}.md`;
+  await write(path, `${note.trim()}\n`);
+  return path;
+}
+
+/** Save something Arcanus made or found in .arcanus/artifacts. Returns its path. */
+export async function saveArtifact(title: string, text: string) {
+  const path = `${HOME}/artifacts/${slug(title) || "artifact"}-${stamp()}.md`;
+  await write(path, text);
+  return path;
+}
+
+/** Write .arcanus/skills/<name>/SKILL.md. Returns the skill's name and path. */
+export async function createSkill(name: string, instructions: string) {
+  const id = slug(name);
+  if (!id) throw new Error("A skill needs a name made of letters or numbers.");
+  const description = instructions.split(/(?<=[.!?])\s|\n/)[0].slice(0, 90);
+  const path = `${HOME}/skills/${id}/SKILL.md`;
+  await write(path, `---\nname: ${id}\ndescription: ${description}\n---\n${instructions.trim()}\n`);
+  return { name: id, path };
+}
