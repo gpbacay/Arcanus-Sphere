@@ -26,6 +26,12 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
       "Arcanus can search the web and read pages for context, through free-search when it is available and through the app's relay otherwise. Your chats are never sent. Say go to a site, for example go to youtube and search ASMR, and it opens that in your browser. Paste a link or say search for something, or use /browse, and it reads the page. Ask Arcanus about a page to have it read along with your messages.",
   },
   {
+    id: "device",
+    title: "This computer: apps and computer use",
+    content:
+      "Arcanus can work this computer like an operating system would. Say launch Spotify or open the calculator app and it opens the installed app. It drives apps through open computer use, a free, open source, offline tool that reads each window's accessibility tree: click Save in Notepad, type hello into Notepad, press ctrl+s, scroll down in Chrome, read the Notepad window, what apps are running. Ask what are my specs or how much RAM do I have and it reads the processor, memory, storage, graphics, battery and display. It does one action per request, only when Arcanus is opened at localhost on the computer itself, and nothing leaves the device.",
+  },
+  {
     id: "identity",
     title: "Who Arcanus is",
     content: identityBrief,

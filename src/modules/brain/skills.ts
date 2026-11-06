@@ -7,6 +7,7 @@ import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
 import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
+import { deviceCommand, openApp, operate } from "@/modules/device";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
 import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
@@ -99,6 +100,18 @@ export const SKILLS: Skill[] = [
     },
   },
   {
+    ...route("device"),
+    async run(text) {
+      const command = deviceCommand(text);
+      if (!command) return null;
+      try {
+        return await operate(command, text);
+      } catch (err) {
+        return { step: { label: "This device", description: errorText(err) }, reply: `I couldn't do that on this computer: ${errorText(err)}` };
+      }
+    },
+  },
+  {
     ...route("web"),
     async run(text) {
       // A plain command names the tool. Otherwise ARC 1 chooses among open, search, and read. SmolLM2 only writes
@@ -110,7 +123,11 @@ export const SKILLS: Skill[] = [
       const by = arc?.name === call.name ? "ARC 1" : "the command";
       try {
         if (call.name === "open_browser") {
-          const url = browserUrl(call.arguments.site ?? "", call.arguments.query ?? "");
+          // "open notepad": an installed app of exactly that name comes before a website.
+          const site = call.arguments.site ?? "";
+          const app = !call.arguments.query && site && !/[./:]/.test(site) ? await openApp(site, true).catch(() => null) : null;
+          if (app) return { step: { label: "Opened an app", description: `${by} · ${site}`, results: [app] }, reply: `Opened ${app}.` };
+          const url = browserUrl(site, call.arguments.query ?? "");
           await openUserBrowser(url);
           return {
             step: { label: "Opened in your browser", description: `${by} · open_browser`, results: [url] },

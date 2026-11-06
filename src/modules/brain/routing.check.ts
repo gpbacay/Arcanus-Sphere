@@ -80,4 +80,9 @@ assert.ok(chatGrounded / chatAll <= FALSE_GROUNDING_CEILING, "too many chat mess
 assert.equal((await decide(routerMemory(), "I have 12 apples")).route, "chat");
 assert.equal((await decide(routerMemory(), "go to youtube and search ASMR")).route, "web");
 assert.equal((await decide(routerMemory(), "go to youtube and search ASMR")).claimed, "asked to open a site");
+// Device commands are claimed; a plain "open X" stays with web, which opens an app of that exact name first.
+for (const text of ["launch spotify", "open the calculator app", "click Save in Notepad", "how much ram do I have", "what apps are running"]) {
+  assert.equal((await decide(routerMemory(), text)).route, "device", text);
+}
+assert.equal((await decide(routerMemory(), "open notepad")).route, "web");
 console.log("routing ok");

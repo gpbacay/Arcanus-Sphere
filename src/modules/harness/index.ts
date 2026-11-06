@@ -28,7 +28,7 @@ export const PERSONALITY_REPLIES = [
 export const personalityReply = () => PERSONALITY_REPLIES[Math.floor(Math.random() * PERSONALITY_REPLIES.length)];
 
 /** What Arcanus can really do. The only abilities the model is told about, so it has no reason to invent others. */
-export const abilities = ["tell the time", "do math", "search the web and read pages", "open a site in your browser", "remember notes", "answer from the books you add", "run your skills", "talk by voice"];
+export const abilities = ["tell the time", "do math", "search the web and read pages", "open a site in your browser", "open apps on this computer and click, type, scroll and read in them", "tell you this computer's specs","remember notes", "answer from the books you add", "run your skills", "talk by voice"];
 
 // ------------------------------------------------------------------ greeting
 // The boot greeting is written by a very small model, so its context is engineered tightly: a short list of true

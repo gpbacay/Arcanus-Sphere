@@ -2,3 +2,4 @@
 export { brainEngine, recallNotes, routeNames, teach, think, type Plan } from "./brain";
 export { recallPassages } from "./library";
 export { grounding } from "./ground";
+export type { Outcome } from "./skills";

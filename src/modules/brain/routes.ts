@@ -15,6 +15,8 @@
 import { Hippocampus, type Neighbor } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { findExpression, spoken } from "./tools.ts"; // with its extension, so Node runs routing.check.ts
+// eslint-disable-next-line no-restricted-imports -- Node runs routing.check.ts and can't resolve "@/"; command.ts is pure
+import { deviceCommand } from "../device/command.ts";
 
 export type Route = {
   route: string;
@@ -104,6 +106,21 @@ export const ROUTES: Route[] = [
     },
   },
   {
+    // Before web, so "launch spotify" and "open the calculator app" are apps. A plain "open X" stays with web, which
+    // opens an installed app of exactly that name and a website otherwise.
+    route: "device",
+    description: "Asks about this computer's hardware, or to open an app, or to click, type, press, scroll or read in an app on it",
+    // No seeds, and no vote: measured, seeds like "how much ram do i have" pulled "how much is 9 times 8" off math and
+    // "does anything leave my computer" off about. Every command it can carry out is one deviceCommand() reads, so
+    // the claim alone decides.
+    seeds: [],
+    claim(text) {
+      const command = deviceCommand(text);
+      if (!command || (command.kind === "open" && !command.explicit)) return undefined;
+      return command.kind === "specs" ? "asked about this device" : command.kind === "open" ? "asked to open an app" : `asked to ${command.kind === "apps" ? "list apps" : command.kind} on this device`;
+    },
+  },
+  {
     route: "web",
     description: "Asks to search the internet, look something up online, or open or read a web page or link",
     seeds: [
@@ -167,6 +184,7 @@ export async function decide(memory: Hippocampus, text: string, routes: Route[] 
   let route = claim?.route ?? (voted.label && voted.confidence >= SURE ? voted.label : "chat");
   // Seeds hold numbers ("what is 12 * 7"), so any "12" votes math. Math with nothing to compute is chat.
   if (route === "math" && !findExpression(text)) route = "chat";
+  if (route === "device" && !claim) route = "chat";
   const unmatched = !voted.neighbors.length;
   const aboutSelf = route === "chat" && TO_YOU.test(text) && (unmatched || (voted.distribution.about ?? 0) >= SELF_SHARE);
   return { route, claimed: claim?.why, label: voted.label, confidence: voted.confidence, aboutSelf, neighbors: voted.neighbors };
