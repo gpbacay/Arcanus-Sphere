@@ -24,10 +24,11 @@ export function isIntroduction(line: string): boolean {
   return text.split(/\s+/).length >= 3 && OPENING.test(text) && /\barcanus\b/i.test(text) && !SIGN_OFF.test(text) && !INVENTED.test(text);
 }
 
-/** The greeting sentence in a model reply: quotes and a leading name stripped, one-word stubs skipped. */
+/** The greeting sentence in a model reply: stage directions, quotes and a leading name stripped, one-word stubs skipped. */
 export function openingLine(text: string): string {
   const cleaned = text
-    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .replace(/\*[^*]*\*|\([^)]*\)/g, " ") // *glows softly*, (smiles)
+    .replace(/^["'\s,;:]+|["'\s]+$/g, "")
     .replace(/^arcanus\s*:\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();

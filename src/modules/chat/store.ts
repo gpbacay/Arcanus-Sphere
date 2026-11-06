@@ -9,8 +9,6 @@ export interface Msg {
   text: string;
   at: number;
   replyToId?: string;
-  /** A downscaled JPEG data URL. */
-  image?: string;
   trace?: ThoughtStep[];
   /** "boot": Arcanus's introduction, its trace the boot log. "command": a terminal command or its output, kept out of the model's context. */
   kind?: "boot" | "command";
@@ -24,8 +22,8 @@ export interface Chat {
 
 export type Removal = { kind: "message"; id: string } | { kind: "chat"; id: string } | { kind: "all" };
 type Undo = { label: string; chats: Chat[]; currentId: string };
-/** What the last save kept: everything, the words without images (storage full), or nothing (storage blocked). */
-type Saved = "all" | "text" | "none";
+/** What the last save kept: everything, or nothing (storage full or blocked). */
+type Saved = "all" | "none";
 
 export const MAX = 2000;
 const CHATS_KEY = "arcanus_chats_v1";
@@ -85,7 +83,6 @@ function readSaved(): { chats: Chat[]; currentId: string } {
                   text: m.text.slice(0, MAX * 4),
                   at: typeof m.at === "number" ? m.at : Date.now(),
                   replyToId: typeof m.replyToId === "string" ? m.replyToId : undefined,
-                  image: typeof m.image === "string" && m.image.startsWith("data:image/") ? m.image : undefined,
                   trace: asTrace(m.trace),
                   kind: m.kind === "boot" || m.kind === "command" ? m.kind : undefined,
                 },
@@ -111,17 +108,10 @@ function persist() {
   let saved: Saved = "none";
   try {
     localStorage.setItem(CURRENT_KEY, currentId);
-    try {
-      localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
-      saved = "all";
-    } catch {
-      // Storage is full, and images are what fill it: keep the words.
-      const words = chats.map((c) => ({ ...c, messages: c.messages.map((m) => ({ ...m, image: undefined })) }));
-      localStorage.setItem(CHATS_KEY, JSON.stringify(words));
-      saved = "text";
-    }
+    localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+    saved = "all";
   } catch {
-    /* storage blocked: this session still works */
+    /* storage full or blocked: this session still works */
   }
   if (saved !== chatStore.state.saved) chatStore.set({ saved });
 }

@@ -4,7 +4,7 @@
 
 export const RATE = 16000; // what Whisper expects
 export const FRAME = 512; // 32 ms
-const FPS = RATE / FRAME;
+export const FPS = RATE / FRAME;
 
 const ON = 0.5; // a frame at or above this is speech
 const OFF = 0.35; // and speech has to drop below this to count as a pause
@@ -23,8 +23,12 @@ export class Segmenter {
   private talking = false;
   private quiet = 0; // frames under OFF in a row, after a start
 
-  /** Add one frame and its speech probability. `strict` while Arcanus is speaking. */
-  push(frame: Float32Array, p: number, strict = false): "start" | Float32Array | null {
+  /**
+   * Add one frame and its speech probability. `strict` while Arcanus is speaking. Besides "start" and the finished
+   * clip: "pause" once the quiet is long enough that, if it lasts, clip() now is exactly the clip that will come out
+   * (so it can be written down while the pause runs out), and "resume" if speech comes back before it does.
+   */
+  push(frame: Float32Array, p: number, strict = false): "start" | "pause" | "resume" | Float32Array | null {
     this.frames.push(frame);
     if (!this.talking) {
       this.run = p >= (strict ? STRICT_ON : ON) ? this.run + 1 : 0;
@@ -38,13 +42,20 @@ export class Segmenter {
       return null;
     }
     // Only clear speech resets the pause: a murmur of room noise between OFF and ON neither ends nor extends the turn.
+    const was = this.quiet;
     this.quiet = p < OFF ? this.quiet + 1 : p >= ON ? 0 : this.quiet;
-    if (this.quiet < PAUSE && this.frames.length < MAX) return null;
-    const frames = this.frames.slice(0, this.frames.length - Math.max(0, this.quiet - PAD));
+    if (this.quiet < PAUSE && this.frames.length < MAX) {
+      if (this.quiet === PAD && was < PAD) return "pause";
+      return was >= PAD && !this.quiet ? "resume" : null;
+    }
+    const clip = join(this.frames.slice(0, this.frames.length - Math.max(0, this.quiet - PAD)));
     this.reset();
-    const clip = new Float32Array(frames.length * FRAME);
-    frames.forEach((f, i) => clip.set(f, i * FRAME));
     return clip;
+  }
+
+  /** The utterance so far, while someone is talking. */
+  clip() {
+    return join(this.frames);
   }
 
   reset() {
@@ -53,6 +64,12 @@ export class Segmenter {
     this.talking = false;
     this.quiet = 0;
   }
+}
+
+function join(frames: Float32Array[]) {
+  const clip = new Float32Array(frames.length * FRAME);
+  frames.forEach((f, i) => clip.set(f, i * FRAME));
+  return clip;
 }
 
 const SILENT = -90; // dBFS: a muted or just-opened mic sends zeros, which say nothing about the room

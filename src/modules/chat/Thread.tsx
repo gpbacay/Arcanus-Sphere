@@ -112,11 +112,7 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
           />
         </div>
       ) : null}
-      {message.image ? (
-        // eslint-disable-next-line @next/next/no-img-element -- a local data URL; next/image adds nothing here
-        <img className="msg-image" src={message.image} alt="Image you attached" />
-      ) : null}
-      <div className="msg-bubble">{message.text}</div>
+      {message.text ? <div className="msg-bubble">{message.text}</div> : null}
       <div className="msg-actions">
         <time dateTime={new Date(message.at).toISOString()}>{clock(message.at)}</time>
         {message.kind === "command" ? null : (
@@ -135,11 +131,11 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
           >
             Edit
           </button>
-        ) : (
+        ) : message.text ? (
           <button type="button" onClick={() => speak(message.text)}>
             Speak
           </button>
-        )}
+        ) : null}
         <button type="button" disabled={busy} onClick={() => discard({ kind: "message", id: message.id })}>
           Delete
         </button>

@@ -5,12 +5,17 @@
 // (segment.ts) cuts out each thing you say when you pause, and Whisper (listen.worker.ts) writes it down while the mic
 // keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can turn it down, and
 // stop it once the words show it was you, not noise or its own echo: barge-in.
+// Two things keep it quick. Whisper starts on what you said as soon as you start to pause, so by the time the pause
+// counts as the end of your turn the words are mostly written (a pause you talk on from is thrown away). And talking
+// over Arcanus is written down after about a second (onWords), so it can stop then, not only once you've finished.
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
-import { FRAME, Loudness, RATE, Segmenter } from "./segment";
+import { FPS, FRAME, Loudness, RATE, Segmenter } from "./segment";
 
 export type Talk = {
   /** Someone may have started speaking (or it's Arcanus's own echo): turn down, the words will tell. */
   onSpeech: () => void;
+  /** The first second or so of what was said over Arcanus, while they keep talking: enough to tell if it's them. */
+  onWords: (text: string) => void;
   /** What they said, once they paused. Empty when it was noise or couldn't be written down. */
   onText: (text: string) => void;
   /** True while Arcanus is speaking, so its own voice leaking into the mic needs more to count as speech. */
@@ -40,7 +45,21 @@ class Frames extends AudioWorkletProcessor {
 registerProcessor("arcanus-frames", Frames);
 `;
 
-type Session = { sid: number; stream: MediaStream; ctx: AudioContext; seg: Segmenter; loud: Loudness; talk: Talk };
+// Talking over Arcanus is written down this long after it counts as speech (which already took ~0.4 s).
+const PEEK = Math.round(0.8 * FPS);
+
+type Session = {
+  sid: number;
+  stream: MediaStream;
+  ctx: AudioContext;
+  seg: Segmenter;
+  loud: Loudness;
+  talk: Talk;
+  /** Words for the pause going on now, written while it runs out. */
+  guess: Promise<string> | null;
+  /** Frames left until the words said over Arcanus are written down; 0 when not waiting to. */
+  peek: number;
+};
 
 class Listen {
   state = new Store<LoadState & { on: boolean; hearing: boolean; writing: boolean; problem: string }>({
@@ -103,7 +122,7 @@ class Listen {
       const mute = ctx.createGain(); // a worklet only runs while it is connected to the output; silence it
       mute.gain.value = 0;
       ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
-      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk };
+      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk, guess: null, peek: 0 };
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop());
       void ctx?.close();
@@ -122,21 +141,42 @@ class Listen {
   private scored(sid: number, samples: Float32Array) {
     const s = this.session;
     if (!s || s.sid !== sid) return;
-    const out = s.seg.push(samples, s.loud.score(samples), s.talk.strict());
+    const strict = s.talk.strict();
+    const out = s.seg.push(samples, s.loud.score(samples), strict);
     if (out === "start") {
       this.state.set({ hearing: true });
+      s.peek = strict ? PEEK : 0;
       s.talk.onSpeech();
+    } else if (out === "pause") {
+      // ponytail: only on WebGPU, where a guess thrown away costs ~0.3 s. On the CPU it could hold up the next one.
+      if (this.state.state.device === "webgpu") s.guess = this.later(s.seg.clip());
+    } else if (out === "resume") {
+      s.guess = null;
     } else if (out) {
       this.state.set({ hearing: false });
-      this.write(s, out);
+      s.peek = 0;
+      this.write(s, s.guess ?? this.later(out));
+      s.guess = null;
+    }
+    if (s.peek && !--s.peek) {
+      void this.later(s.seg.clip()).then(
+        (text) => this.session === s && s.talk.onWords(text),
+        () => undefined,
+      );
     }
   }
 
-  /** Transcribe in the background, in order, while the mic keeps listening. */
-  private write(s: Session, clip: Float32Array) {
+  /** Transcribe after whatever is already being written, so words come back in the order they were said. */
+  private later(clip: Float32Array) {
+    const text = this.queue.then(() => this.transcribe(clip));
+    this.queue = text.catch(() => undefined);
+    return text;
+  }
+
+  /** Hand an utterance's words to the caller once written, while the mic keeps listening. */
+  private write(s: Session, text: Promise<string>) {
     this.state.set({ writing: ++this.jobs > 0 });
-    this.queue = this.queue
-      .then(() => this.transcribe(clip))
+    void text
       .then(
         (text) => {
           if (this.session === s) s.talk.onText(text);

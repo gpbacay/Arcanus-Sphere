@@ -1,6 +1,6 @@
 // Whisper base.en (OpenAI, MIT; ONNX build by onnx-community) on ONNX Runtime Web, off the main thread. Speech in as
 // 16 kHz mono samples, text out. English only. The encoder stays full precision: an 8-bit Whisper encoder mishears
-// badly and often returns nothing. On the GPU when there is one (SmolVLM keeps to the CPU), else on the CPU.
+// badly and often returns nothing. On the GPU when there is one (shared with SmolLM2), else on the CPU.
 import { pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 
 const MODEL = "onnx-community/whisper-base.en";

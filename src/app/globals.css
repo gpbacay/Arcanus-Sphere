@@ -549,14 +549,6 @@ textarea.field {
   overflow: hidden;
 }
 
-.msg-image {
-  max-width: 200px;
-  max-height: 200px;
-  border-radius: var(--r);
-  border: 1px solid var(--line-strong);
-  object-fit: cover;
-}
-
 .msg-actions {
   display: flex;
   flex-wrap: wrap;
@@ -744,14 +736,6 @@ textarea.field {
   color: var(--accent);
   white-space: nowrap;
 }
-.attachment-thumb {
-  width: 32px;
-  height: 32px;
-  margin-left: -7px;
-  border-radius: 3px;
-  object-fit: cover;
-}
-
 .commands {
   display: flex;
   flex-direction: column;

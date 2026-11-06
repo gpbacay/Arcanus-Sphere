@@ -6,12 +6,12 @@ A fully local AI assistant embodied as an audio-reactive 3D sphere. Every model 
 
 | Part | Model | Runs on | Job |
 |---|---|---|---|
-| Decide | [ARC 1](https://gpbacay-arcane.vercel.app/docs/arc-1) (1.3M params, 5.5 MB) | main thread, ~10 ms | Routes each message: chat, about Arcanus, time, or math |
-| Remember | [Hippocampus](https://gpbacay-arcane.vercel.app/docs/hippocampus) + [Occipital](https://gpbacay-arcane.vercel.app/docs/occipital) | main thread | Remembered examples vote with ARC 1; also recalls Arcanus's knowledge notes, typo-tolerant |
-| Write | [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct), Q4 (~170 MB) | Web Worker, WebGPU or WASM | Writes replies; can look at an attached image |
+| Decide | [Hippocampus](https://gpbacay-arcane.vercel.app/docs/hippocampus) + [Occipital](https://gpbacay-arcane.vercel.app/docs/occipital) | main thread, <1 ms | Routes each message (chat, about Arcanus, personality, time, math, web, tool) by remembered phrasings, typo-tolerant; learns from `/teach` and keeps it in `.arcanus/routing.json`. Also recalls Arcanus's knowledge notes |
+| Read arguments | [ARC 1](https://gpbacay-arcane.vercel.app/docs/arc-1) (1.3M params, 5.5 MB) | main thread, ~10 ms | Reads a skill's arguments from the message's own words: the city in "what time is it in New York" |
+| Write | [SmolLM2-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct): 360M q4f16 (~270 MB) on WebGPU, 135M q4 (~180 MB) on WASM | Web Worker | Writes replies (text only) |
 | Speak | [Paradee-8M](https://github.com/sahilmahendrakar/paradee) v1.2, int8 (8.5 MB), British male voice `bm_fable` | Web Worker, WASM, one thread | Speaks each sentence (or long clause) as soon as it is written |
 
-Time and math are answered by ARC 1's route alone, without the language model. Every reply carries a [Chain of Thought](https://gpbacay-arcane.vercel.app/docs/chain-of-thought) trace of what Arcanus did.
+Time and math are answered without the language model. A question about Arcanus that routing misses is still answered from its knowledge notes, so the model doesn't invent a self. `npm run check` measures routing on held-out messages (`src/modules/brain/routing.check.ts`): ARC 1 was taken out of the routing vote because it routed 43% right alone and made Hippocampus worse when mixed in. Every reply carries a [Chain of Thought](https://gpbacay-arcane.vercel.app/docs/chain-of-thought) trace of what Arcanus did.
 
 ## Run
 
@@ -20,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 320 MB of models from Hugging Face, which the browser caches for later visits. SmolVLM runs on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
+Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 490 MB of models from Hugging Face with WebGPU, or about 330 MB without, which the browser caches for later visits. Without WebGPU, the models run on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
 
 ## Files: `.arcanus/`
 
@@ -36,7 +36,7 @@ Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.a
 
 By default the folder lives privately in the browser (the Origin Private File System). **Open a folder** in the Files pane (Chrome and Edge) and Arcanus works in that folder on your device instead, creating `<folder>/.arcanus/`; it asks for access again after a reload. You can open and edit any file there, and **Ask Arcanus** hands a file to the model to read with your messages.
 
-From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read.
+From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read, `/teach <route>` corrects where your last message was routed (kept in `.arcanus/routing.json`).
 
 ## Browser
 
@@ -46,7 +46,7 @@ Pages arrive as text through `src/app/api/web/route.ts` (a browser page can't re
 
 ## Context
 
-Before each reply, the harness (`assemble` in `src/modules/harness`) fits what the model reads into a 3,200-character budget, most important first: the skill being run and the facts a skill found, then `ARCANUS.md`, then the page or file you handed Arcanus, then recalled notes. What doesn't fit is cut at a line break or left out, and the reply's chain of thought shows which. Older turns are cut to 600 characters. The budget sits far below SmolVLM's 8k tokens because on WebAssembly every token read delays the first word.
+Before each reply, the harness (`assemble` in `src/modules/harness`) fits what the model reads into a 3,200-character budget, most important first: the skill being run and the facts a skill found, then `ARCANUS.md`, then the page or file you handed Arcanus, then recalled notes. What doesn't fit is cut at a line break or left out, and the reply's chain of thought shows which. Older turns are cut to 600 characters. The budget sits far below SmolLM2's 8k tokens because on WebAssembly every token read delays the first word.
 
 ## Speech to text
 
@@ -54,7 +54,7 @@ Tap the mic once and just talk: it's a hands-free, full-duplex conversation. The
 
 Everything runs on the device. Every 32 ms of microphone audio is scored for speech by its loudness over the room's noise (no model to load); `src/modules/listen/segment.ts` cuts each utterance out of the stream; Whisper base.en (English) writes it down in a worker while the mic keeps listening, on WebGPU when there is one (about 206 MB) or WebAssembly (about 136 MB). Its encoder stays full precision, because an 8-bit Whisper encoder mishears and often returns nothing.
 
-While Arcanus speaks, only clear, sustained speech interrupts it, and anything heard that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers. Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
+While Arcanus speaks, only clear, sustained speech interrupts it, and anything heard that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers. Talking over it, your first second is written down at once, so it stops as soon as those words show it's you, not when you finish. On WebGPU, Whisper starts writing as soon as you begin to pause, so your words are mostly ready when the pause ends. Replies start speaking at their first comma rather than their first full stop. Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
 
 ## 3D studio and AR
 
@@ -69,7 +69,7 @@ The phone's camera needs HTTPS. To try it on a phone, run `npm run dev:https` an
 Arcanus is an offline-first PWA, so you can install it from the browser's address bar. After one online visit it works with no network at all.
 
 - `public/sw.js` serves the page from cache, and refreshes it in the background when online. It also caches the app's code, the ARC 1 weights and the ONNX Runtime files.
-- Transformers.js and the voice worker keep SmolVLM and Paradee in their own Cache Storage, which they read before the network. The service worker leaves them alone, so nothing is stored twice.
+- Transformers.js and the voice worker keep SmolLM2 and Paradee in their own Cache Storage, which they read before the network. The service worker leaves them alone, so nothing is stored twice.
 - The engines start only after the service worker controls the page, so everything they download is kept. Paradee speaks one silent sentence at load to warm up.
 - The app asks the browser for persistent storage, so the models aren't evicted.
 
@@ -83,11 +83,11 @@ Arcanus is a modular monolith: one Next.js app, split into feature modules that 
 src/
   app/            composition root: page.tsx wires the modules together and boots the engines
   modules/
-    brain/        ARC 1 routing and skills (time, math, about, web): skills.ts, knowledge.ts, ARCANE in arcane/
+    brain/        routing (routes.ts, measured by routing.check.ts), skills (skills.ts), ARC 1 arguments (arc1.ts), knowledge.ts, ARCANE in arcane/
     harness/      personality, tools, MCP, and context engineering (skill files, the context budget)
     workspace/    Arcanus's own files: .arcanus/ in the browser's private storage or a folder you open, the Files pane
     web/          Arcanus's browser: history, reader view, the Browser pane (pages come through src/app/api/web)
-    llm/          SmolVLM: worker + client, with a cache of finished replies
+    llm/          SmolLM2: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
     listen/       speech to text, full duplex: microphone frames, loudness voice detection and utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
@@ -97,9 +97,9 @@ src/
 ```
 
 - **Boundaries.** A module is imported only as `@/modules/<name>` (its `index.ts`). `npm run lint` fails on deep imports, on relative imports between modules, and on `shared/` depending on a module.
-- **Adding a skill.** Add one entry to `SKILLS` in `src/modules/brain/skills.ts`: a route, a description for ARC 1, seed phrasings, and a `run` that answers. Routing, memory and the chat pick it up.
+- **Adding a skill.** Add a route with seed phrasings to `ROUTES` in `src/modules/brain/routes.ts`, and its `run` to `SKILLS` in `skills.ts`. Routing, memory and the chat pick it up; run `npm run check` to see routing hold up.
 - **Adding an engine.** Export an `Engine` from its module and append it to `ENGINES` in `src/app/page.tsx`: it boots on its own and gets a status pill.
-- **Graceful degradation.** Engines load independently. Without ARC 1, messages go straight to SmolVLM; without SmolVLM, Arcanus still answers time, math and questions about itself (from recalled notes); without Paradee or Web Audio, replies are text only; without WebGL, or if the scene crashes, a CSS orb stands in for the sphere; if the chat crashes, an error boundary keeps the sphere alive. When storage is full, chats are saved without their images.
+- **Graceful degradation.** Engines load independently. Routing needs no model; without ARC 1, a time question answers with this device's time; without SmolLM2, Arcanus still answers time, math and questions about itself (from recalled notes); without Paradee or Web Audio, replies are text only; without WebGL, or if the scene crashes, a CSS orb stands in for the sphere; if the chat crashes, an error boundary keeps the sphere alive.
 - **Loading.** The page is prerendered with skeletons: the conversation skeleton until saved chats are read, the orb until the three.js chunk arrives. Each part of the chat reads only its own slice of state, so a streamed token re-renders the reply being written and nothing else.
 - **Caching.** The service worker caches the app, ARC 1 and the ONNX runtime; Transformers.js and the voice worker cache the model weights. In memory, a text prompt seen before is answered from the reply cache (decoding is greedy, so the model would write the same words), and a sentence spoken before replays without running Paradee. Chats are saved to `localStorage` in the background, batched, and flushed when the tab closes.
 - **Optimistic updates.** Your message and a "thinking" reply appear the moment you send, even while models still load. Deletes apply at once and can be undone for six seconds instead of asking first.

@@ -19,7 +19,7 @@ const post = (message: unknown, transfer: Transferable[] = []) => self.postMessa
 
 // The same runtime build package.json pins, from the CDN the service worker caches for offline use.
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
-// Two threads: about 5x faster than real time here, while leaving most cores to SmolVLM, which writes at the same time.
+// Two threads: about 5x faster than real time here, while leaving most cores to SmolLM2 (when it runs on the CPU), which writes at the same time.
 ort.env.wasm.numThreads = 2;
 
 type Engine = { session: ort.InferenceSession; vocab: Record<string, number> };

@@ -7,7 +7,6 @@ const PATHS = {
   close: "M6 6l12 12M18 6L6 18",
   send: "M5 12h14M13 6l6 6-6 6",
   stop: "M7 7h10v10H7z",
-  image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01",
   voice: "M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11",
   mute: "M4 9v6h4l5 4V5L8 9zM17 9l4 6M21 9l-4 6",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4",

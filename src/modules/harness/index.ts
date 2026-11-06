@@ -8,18 +8,74 @@ export const personality = {
 
 /** The only biography the model may use. Shared by the system prompt, the boot greeting, and the knowledge notes. */
 export const identityBrief =
-  "Arcanus is a local AI assistant created by Gianne Bacay. It lives in the user's browser as a glowing 3D sphere. It is not a person, not an employee, and not a member of any team or company. SmolVLM writes replies on the device, ARC 1 decides what a message needs, and Paradee speaks them. No server sees the conversation.";
+  "Arcanus is a local AI assistant created by Gianne Bacay. It lives in the user's browser as a glowing 3D sphere. It is not a person, not an employee, and not a member of any team or company. SmolLM2 writes replies on the device, Hippocampus decides what a message needs, and Paradee speaks them. No server sees the conversation.";
 
-/** The boot line. Fixed, so a small model cannot invent a job or a team. */
+/** The answer to "who are you". Fixed, so a small model cannot invent a job or a team. (The boot greeting is written fresh.) */
 export const introduction = "I am Arcanus, created by Gianne Bacay. How can I help?";
 
 export const personalityReply = () => personality.line;
 
+/** What Arcanus can really do. The only abilities the model is told about, so it has no reason to invent others. */
+export const abilities = ["tell the time", "do math", "search the web and read pages", "remember notes", "run your skills", "talk by voice"];
+
+// ------------------------------------------------------------------ greeting
+// The boot greeting is written by a very small model, so its context is engineered tightly: a short list of true
+// facts about Arcanus and this moment, and nothing else to draw on. What it writes is then checked against those
+// facts (unsupported), and a line that brings in more than a word or two of its own is thrown away.
+
+type Turn = { role: "system" | "user"; content: string };
+
+/** This boot: when it is, plus what the user's own files say, when there is any. */
+export type Moment = { when: string; rules?: string; notes?: string[]; lastTopic?: string };
+
+const GREETING_BUDGET = 600; // characters of the user's context; a tiny model loses the instruction under more
+
+/** The greeting prompt, and the facts the greeting may use (for unsupported()). */
+export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string } {
+  const { sections } = assemble(
+    [
+      { label: "Your user's standing instructions", text: m.rules ?? "", priority: 1 },
+      { label: "Last time you talked about", text: m.lastTopic ? `"${m.lastTopic}"` : "", priority: 2 },
+      { label: "Notes you remember", text: (m.notes ?? []).map((n) => `- ${n}`).join("\n"), priority: 3 },
+    ],
+    GREETING_BUDGET,
+  );
+  const facts = [
+    "- Your name is Arcanus. Gianne Bacay created you.",
+    "- You are an AI assistant that lives in the user's web browser as a glowing sphere.",
+    `- You can ${abilities.join(", ")}.`,
+    `- It is ${m.when}.`,
+    ...sections.map((s) => `- ${s.label}: ${s.text}`),
+  ].join("\n");
+  // Measured on SmolLM2: an instruction that says what to write (hello, name, offer help) beats a list of what not to
+  // write, which put jobs and places in its head; "introduce yourself" invited a made-up biography. Without the facts
+  // at all, it invents names and whole scenes.
+  const greetMe = `Hi! Reply with one short greeting: say good ${m.when.split(" ").at(-1)}, say your name, and ask how you can help. Nothing else.`;
+  return { turns: [{ role: "system", content: `You are Arcanus, a helpful assistant. Facts:\n${facts}` }, { role: "user", content: greetMe }], facts };
+}
+
+// Words any greeting may use without a fact behind them.
+const COMMON = new Set(
+  "a an the and or but to of for with in on at by from as it its is are am be been was this that these there here i i'm im me my you you're your yours we us our let let's what how who can could may might will would shall should do does need like want ready glad nice happy today now again back just all any anything something some more help helping assist assistance hello hi hey greetings good morning afternoon evening night day welcome so very well sure today's name call nice meet pleased pleasure when ready yes great happy".split(" "),
+);
+
+/**
+ * The words in `line` that neither `facts` nor ordinary greeting words account for: what the model brought in itself.
+ * A greeting with more than a couple of these is likely inventing ("your personal AI supervisor at the university").
+ * ponytail: plain word overlap with a crude plural strip. Swap in embeddings if it rejects good lines it shouldn't.
+ */
+export function unsupported(line: string, facts: string): string[] {
+  const norm = (w: string) => w.replace(/'s$/, "").replace(/(?<=\w{3})s$/, "");
+  const known = new Set((facts.toLowerCase().match(/[a-z']+/g) ?? []).map(norm));
+  return (line.toLowerCase().match(/[a-z']+/g) ?? []).filter((w) => !COMMON.has(w) && !known.has(norm(w)));
+}
+
 export interface Tool {
   name: string;
   description: string;
-  /** JSON Schema properties, when the tool came from MCP. The first property receives the message. */
-  schema?: { properties?: Record<string, unknown> };
+  /** JSON Schema properties, when the tool came from MCP. Fields read from the message are sent; the first property
+   *  receives the whole message when nothing was read for it. */
+  schema?: { properties?: Record<string, unknown>; required?: unknown };
   run?: (input: string) => string | Promise<string>;
   mcp?: string;
 }
@@ -112,10 +168,10 @@ export async function connectMcp(url: string): Promise<string[]> {
   return names;
 }
 
-async function mcpCall(url: string, name: string, input: string, schema: Tool["schema"]) {
+async function mcpCall(url: string, name: string, input: string, schema: Tool["schema"], read: Record<string, unknown> = {}) {
   const { json } = await rpc(
     url,
-    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: argsFor(schema, input) } },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: { ...argsFor(schema, input), ...read } } },
     sessions.get(url),
   );
   const content = json?.result?.content;
@@ -124,12 +180,13 @@ async function mcpCall(url: string, name: string, input: string, schema: Tool["s
   return "";
 }
 
-/** Run a tool by name. MCP tools are called on their server; local tools run here. */
-export async function callTool(name: string, input: string): Promise<string> {
+/** Run a tool by name. MCP tools are called on their server with the fields `read` from the message (by ARC 1, in
+ *  the brain); local tools run here. */
+export async function callTool(name: string, input: string, read?: Record<string, unknown>): Promise<string> {
   const tool = tools.get(name);
   if (!tool) return `No tool named ${name}.`;
   if (tool.run) return tool.run(input);
-  if (tool.mcp) return mcpCall(tool.mcp, name, input, tool.schema);
+  if (tool.mcp) return mcpCall(tool.mcp, name, input, tool.schema, read);
   return `Tool ${name} has no runner.`;
 }
 

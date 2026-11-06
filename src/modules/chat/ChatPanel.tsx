@@ -82,7 +82,7 @@ function useStatusText(mood: Mood) {
   const online = useOnline();
   const model = useStore(llm.state, (s) => s.status);
   const saved = useStore(chatStore, (s) => s.saved);
-  const note = saved === "text" ? " · storage full: images not saved" : saved === "none" ? " · can't save on this device" : "";
+  const note = saved === "none" ? " · can't save on this device" : "";
   const text =
     mood === "off"
       ? "Off · type /run to switch Arcanus on"
@@ -93,7 +93,7 @@ function useStatusText(mood: Mood) {
         : model === "ready"
           ? online ? "Ready · runs on this device" : "Offline · still runs on this device"
           : model === "error"
-            ? online ? "SmolVLM didn't load · time, math and facts still work" : "Offline · connect once so the models can download"
+            ? online ? "SmolLM2 didn't load · time, math and facts still work" : "Offline · connect once so the models can download"
             : online ? "Loading models · you can send now" : "Offline · loading models from this device";
   return text + note;
 }

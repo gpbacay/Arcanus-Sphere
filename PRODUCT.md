@@ -12,7 +12,7 @@ Primary user: the owner (or a small set of power users) using Arcanus as a perso
 
 ## Product Purpose
 
-Arcanus is a fully local AI assistant embodied as an audio-reactive 3D sphere. The user asks questions in chat (optionally with an image); ARC 1 decides what the message needs, Arcanus answers time and math itself, recalls its own knowledge, writes replies with SmolVLM, and speaks them with Kokoro while the sphere reacts to the voice.
+Arcanus is a fully local AI assistant embodied as an audio-reactive 3D sphere. The user asks questions in chat or by voice; Hippocampus decides what the message needs, Arcanus answers time and math itself, recalls its own knowledge, writes replies with SmolLM2, and speaks them with Paradee while the sphere reacts to the voice.
 
 Success: clear, trustworthy answers with reliable tool/RAG behavior, plus a living sphere+voice presence that makes the assistant feel present — not a plain chat box.
 
@@ -23,8 +23,8 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 ## Operating Context
 
 - Single-page web app (Next.js): chat panel + Three.js sphere scene; no server-side inference
-- Decide: ARC 1 + Hippocampus + Occipital (ARCANE), main thread, ~10 ms per message
-- Write: SmolVLM-256M-Instruct (Q4) via Transformers.js / ONNX Runtime Web, in a Web Worker
+- Decide: Hippocampus + Occipital (ARCANE), main thread, under 1 ms per message; ARC 1 reads skill arguments
+- Write: SmolLM2-Instruct (360M on WebGPU, 135M on WASM) via Transformers.js / ONNX Runtime Web, in a Web Worker
 - Speak: Kokoro-82M via kokoro-js, in a Web Worker; audio drives the sphere through the Web Audio analyser
 - Knowledge notes live in `src/modules/brain/knowledge.ts`; skills and their routing examples in `src/modules/brain/skills.ts`
 - Models download from Hugging Face on first visit and are cached by the browser
@@ -32,9 +32,8 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 ## Capabilities and Constraints
 
 Confirmed capabilities:
-- Routing with ARC 1 + Hippocampus memory; time and calculate answered without the language model
+- Routing with a Hippocampus memory that learns from /teach; time and calculate answered without the language model
 - Knowledge recall from a Hippocampus memory (word + Occipital letter matching)
-- Image questions (SmolVLM is a vision-language model)
 - Streaming replies spoken sentence by sentence, with an on-screen caption
 - Chain of Thought trace on every reply; conversations persisted in the browser
 
@@ -42,7 +41,7 @@ Constraints:
 - Platform is web (browser); not a native app
 - Small-model / local-first path is identity — do not redefine the product as a generic hosted-chat wrapper
 - No web search or URL fetch: Arcanus is fully local
-- SmolVLM-256M is tiny: replies are short and can be wrong; keep facts in the knowledge notes
+- SmolLM2 is tiny: replies are short and can be wrong; keep facts in the knowledge notes
 - Multi-user accounts, billing, and public SaaS claims: undecided / out of current scope
 
 ## Brand Commitments

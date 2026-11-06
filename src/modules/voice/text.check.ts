@@ -6,6 +6,7 @@ assert.equal(forSpeech("**Hi** see [docs](http://x)."), "Hi see docs.");
 assert.equal(openingLine('"Yes. Good day, how can I help you?"'), "Good day, how can I help you?");
 assert.equal(openingLine("Arcanus: Hello, how can I help you?"), "Hello, how can I help you?");
 assert.equal(openingLine("  hello there"), "hello there");
+assert.equal(openingLine('*glows from within the sphere*, "Hello, I am Arcanus, here to help.'), "Hello, I am Arcanus, here to help.");
 assert.equal(isIntroduction("Good day, how can I help you?"), false);
 assert.equal(isIntroduction("Hello, I am Arcanus. How can I help?"), true);
 assert.equal(isIntroduction("I am Arcanus, created by Gianne Bacay. How can I help?"), true);

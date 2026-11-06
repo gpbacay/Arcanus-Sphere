@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { canListen, listen } from "@/modules/listen";
 import { voice } from "@/modules/voice";
 import { workspace } from "@/modules/workspace";
@@ -12,18 +12,6 @@ import { Icon } from "./parts";
 import { MAX, chatStore, setReplyTo } from "./store";
 
 export const COMPOSER_ID = "arcanus-composer";
-
-/** Shrink an image to at most 512 px a side as JPEG: enough for SmolVLM, small enough to keep in localStorage. */
-async function shrink(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.85);
-}
 
 const yes = () => true;
 const never = () => () => undefined;
@@ -41,10 +29,8 @@ export function Composer() {
   const skills = useStore(workspace, (s) => s.skills);
   const pinned = useStore(pane, (s) => s.pinned);
   const [draft, setDraft] = useState("");
-  const [image, setImage] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   // Typing "/" opens the command list, narrowed as you type; arrows pick, Tab completes, Enter runs.
   // Skills from .arcanus/skills are commands too.
   const commands = [...COMMANDS, ...skills.filter((s) => !COMMANDS.some((c) => c.name === `/${s.name}`)).map((s) => ({ name: `/${s.name}`, hint: s.description }))];
@@ -52,22 +38,9 @@ export function Composer() {
   const pick = Math.min(active, matches.length - 1);
 
   function submit(text = draft) {
-    if (!send(text, image)) return;
+    if (!send(text)) return;
     setDraft("");
-    setImage(null);
     if (inputRef.current) inputRef.current.style.height = "auto";
-  }
-
-  async function attach(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      setImage(await shrink(file));
-      inputRef.current?.focus();
-    } catch {
-      setImage(null);
-    }
   }
 
   return (
@@ -94,16 +67,6 @@ export function Composer() {
             {pinned.label}
           </p>
           <button type="button" className="icon-btn" aria-label={`Stop reading ${pinned.label}`} onClick={() => pin(null)}>
-            <Icon name="close" size={14} />
-          </button>
-        </div>
-      ) : null}
-      {image ? (
-        <div className="attachment">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a local data URL preview */}
-          <img src={image} alt="Image to send" className="attachment-thumb" />
-          <p className="truncate">SmolVLM will look at this image</p>
-          <button type="button" className="icon-btn" aria-label="Remove image" onClick={() => setImage(null)}>
             <Icon name="close" size={14} />
           </button>
         </div>
@@ -166,10 +129,6 @@ export function Composer() {
           }}
         />
         <div className="composer-bar">
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={attach} />
-          <button type="button" className="icon-btn" aria-label="Attach an image" title="Attach an image" disabled={busy || !on} onClick={() => fileRef.current?.click()}>
-            <Icon name="image" />
-          </button>
           {micOk ? (
             <button
               type="button"
@@ -202,7 +161,7 @@ export function Composer() {
               <Icon name="stop" />
             </button>
           ) : (
-            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!draft.trim() && !image}>
+            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!draft.trim()}>
               <Icon name="send" />
             </button>
           )}

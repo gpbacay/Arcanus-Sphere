@@ -68,8 +68,8 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
     <AppDialog title="About Arcanus" onClose={onClose}>
       <p>Arcanus is a local assistant created by Gianne Bacay. It answers in this browser, speaks the reply, and the sphere moves with the voice.</p>
       <ul>
-        <li>ARC 1 decides what a message needs.</li>
-        <li>SmolVLM writes the reply on this device.</li>
+        <li>Hippocampus decides what a message needs.</li>
+        <li>SmolLM2 writes the reply on this device.</li>
         <li>Paradee speaks it. The sphere reacts to that audio.</li>
         <li>Messages stay here. Models download once and are cached.</li>
         <li>Its own files live in .arcanus/: instructions, skills, memory and artifacts.</li>

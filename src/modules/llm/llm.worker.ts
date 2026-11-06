@@ -1,26 +1,34 @@
-// SmolVLM-256M-Instruct (Q4) on ONNX Runtime Web, off the main thread so the sphere keeps its frame rate.
+// SmolLM2-Instruct (Hugging Face, Apache-2.0) on ONNX Runtime Web, off the main thread so the sphere keeps its frame
+// rate. Text only. 360M on WebGPU (q4f16, ~270 MB); on the CPU the 135M (q4, ~180 MB), since every parameter there
+// costs time. q4, not int8: int8 wrote at about half the speed on the CPU.
 import {
-  AutoModelForVision2Seq,
-  AutoProcessor,
+  AutoModelForCausalLM,
+  AutoTokenizer,
   InterruptableStoppingCriteria,
-  RawImage,
   TextStreamer,
   type PreTrainedModel,
-  type Processor,
+  type PreTrainedTokenizer,
   type Tensor,
 } from "@huggingface/transformers";
 
-const MODEL = "HuggingFaceTB/SmolVLM-256M-Instruct";
 const post = (message: unknown) => self.postMessage(message);
 const stopping = new InterruptableStoppingCriteria();
 
-let loading: Promise<{ processor: Processor; model: PreTrainedModel }> | null = null;
+let loading: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> | null = null;
+
+async function hasGpu() {
+  try {
+    return Boolean(await (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu?.requestAdapter());
+  } catch {
+    return false;
+  }
+}
 
 function load() {
   loading ??= (async () => {
-    // ponytail: CPU (WASM) only. SmolVLM's Q4 decoder produced garbage tokens on WebGPU in Chrome with this
-    // onnxruntime-web build, while the same weights are correct on CPU. Retest WebGPU when transformers.js/ORT update.
-    const device = "wasm";
+    // ponytail: SmolVLM's Q4 decoder once wrote garbage on WebGPU. If SmolLM2 ever does, force "wasm" here.
+    const device = (await hasGpu()) ? "webgpu" : "wasm";
+    const name = `HuggingFaceTB/SmolLM2-${device === "webgpu" ? "360M" : "135M"}-Instruct`;
     const files = new Map<string, { loaded: number; total: number }>();
     const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status !== "progress" || !p.file) return;
@@ -32,16 +40,15 @@ function load() {
       }
       post({ type: "progress", loaded, total });
     };
-    const processor = await AutoProcessor.from_pretrained(MODEL, { progress_callback });
-    const model = await AutoModelForVision2Seq.from_pretrained(MODEL, {
+    const tokenizer = await AutoTokenizer.from_pretrained(name, { progress_callback });
+    const model = await AutoModelForCausalLM.from_pretrained(name, {
       device,
-      // Q4 weights for the language model and vision encoder. The token-embedding table is a lookup, not a
-      // matmul, so its "q4" file is full fp32 (108 MB); q8 is the same table at a quarter of the size.
-      dtype: { decoder_model_merged: "q4", vision_encoder: "q4", embed_tokens: "q8" },
+      dtype: device === "webgpu" ? "q4f16" : "q4",
       progress_callback,
     });
+    await model.generate({ ...tokenizer("Hi"), max_new_tokens: 1 }); // compiles the GPU shaders now, not on the first reply
     post({ type: "ready", device });
-    return { processor, model };
+    return { tokenizer, model };
   })();
   loading.catch((err: unknown) => {
     loading = null;
@@ -52,20 +59,13 @@ function load() {
 
 type Turn = { role: "system" | "user" | "assistant"; content: string };
 
-async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?: number, sample?: boolean) {
-  const { processor, model } = await load();
-  const last = turns.length - 1;
-  const chat = turns.map((turn, i) => ({
-    role: turn.role,
-    content: [...(image && i === last ? [{ type: "image" }] : []), { type: "text", text: turn.content }],
-  }));
-  const prompt = processor.apply_chat_template(chat as never, { add_generation_prompt: true }) as string;
-  // Idefics3Processor needs an image; a text-only turn goes straight to its tokenizer.
-  const inputs = image ? await processor(prompt, [await RawImage.fromURL(image)]) : processor.tokenizer!(prompt);
+async function generate(id: number, turns: Turn[], maxNewTokens?: number, sample?: boolean) {
+  const { tokenizer, model } = await load();
+  const inputs = tokenizer.apply_chat_template(turns, { add_generation_prompt: true, return_dict: true }) as Record<string, Tensor>;
   let tokens = 0;
   let firstAt = 0;
   const started = performance.now();
-  const streamer = new TextStreamer(processor.tokenizer!, {
+  const streamer = new TextStreamer(tokenizer, {
     skip_prompt: true,
     skip_special_tokens: true,
     callback_function: (text: string) => post({ type: "token", id, text }),
@@ -79,13 +79,14 @@ async function generate(id: number, turns: Turn[], image?: string, maxNewTokens?
     max_new_tokens: maxNewTokens || 384,
     do_sample: Boolean(sample),
     // ponytail: sampling is only for the boot greeting. Chat stays greedy, so retries stay cacheable.
-    ...(sample ? { temperature: 0.6, top_k: 20 } : {}),
+    ...(sample ? { temperature: 0.5, top_k: 20 } : {}),
     repetition_penalty: 1.15,
     streamer,
     stopping_criteria: stopping,
-  })) as Tensor;
-  const prompted = (inputs.input_ids as Tensor).dims.at(-1)!;
-  const [text] = processor.batch_decode(output.slice(null, [prompted, output.dims.at(-1)!]), { skip_special_tokens: true });
+    // The generation options (repetition_penalty, one stopping criterion) are real but missing from the types.
+  } as never)) as Tensor;
+  const prompted = inputs.input_ids.dims.at(-1)!;
+  const [text] = tokenizer.batch_decode(output.slice(null, [prompted, output.dims.at(-1)!]), { skip_special_tokens: true });
   // Speed after the first token; the wait before it (reading the prompt) is reported on its own.
   const after = (performance.now() - firstAt) / 1000;
   post({
@@ -102,7 +103,7 @@ self.onmessage = ({ data }: MessageEvent) => {
   if (data.type === "load") void load();
   else if (data.type === "stop") stopping.interrupt();
   else if (data.type === "generate")
-    generate(data.id, data.turns, data.image, data.maxNewTokens, data.sample).catch((err: unknown) =>
+    generate(data.id, data.turns, data.maxNewTokens, data.sample).catch((err: unknown) =>
       post({ type: "error", id: data.id, message: err instanceof Error ? err.message : String(err) })
     );
 };

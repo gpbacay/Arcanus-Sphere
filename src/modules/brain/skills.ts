@@ -1,14 +1,17 @@
-// What Arcanus can do without the language model, one entry per route ARC 1 chooses between. To teach Arcanus a new
-// capability, add a skill here: ARC 1, Hippocampus and the chat pick it up with no other change.
+// What each route does: Arcanus answers what it can without the language model. The routes themselves, their seed
+// phrasings and claims, are in routes.ts. To teach Arcanus a new capability, add a route there and its runner here:
+// Hippocampus and the chat pick it up with no other change.
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
-import { Hippocampus } from "./arcane/web.mjs";
+import { Hippocampus } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, introduction, matchTool, personalityReply } from "@/modules/harness";
 import { browse, search } from "@/modules/web";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
-import { calculate, findExpression, tellTime } from "./tools";
+import { cityIn, toolArguments } from "./arc1";
+import { ASK_WEB, LINK, ROUTES, type Route } from "./routes";
+import { calculate, findExpression, tellTime, zoneFor } from "./tools";
 
 /**
  * A skill's answer: a reply written without the language model, or facts for the language model to use. `source` names
@@ -16,20 +19,10 @@ import { calculate, findExpression, tellTime } from "./tools";
  */
 export type Outcome = { step: ThoughtStep; reply?: string; facts?: string[]; source?: string };
 
-const LINK = /\bhttps?:\/\/[^\s<>"')\]]+/i;
-const ASK_WEB = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look\s+up|browse(?:\s+to)?|find\s+online)\s+/i;
-
-export interface Skill {
-  route: string;
-  /** Read by ARC 1: what kind of message belongs here. */
-  description: string;
-  /** Remembered examples; Hippocampus votes with them at every request. Add a line to teach a phrasing, no retraining. */
-  seeds: string[];
-  /** Take a message before ARC 1 votes, for what words can't show (a bare "12*7"). Returns the reason, or nothing. */
-  claim?(text: string): string | undefined;
+export type Skill = Route & {
   /** Handle the message, or return null to hand it to the language model as plain chat. */
   run?(text: string): Outcome | null | Promise<Outcome | null>;
-}
+};
 
 // Knowledge notes, recalled by letters and words. Built on first use: it needs no model.
 let memory: Hippocampus | null = null;
@@ -41,48 +34,26 @@ function recall(text: string) {
   return memory.neighbors(text).flatMap((n) => KNOWLEDGE.filter((k) => k.id === n.label));
 }
 
-export const CHAT: Skill = {
-  route: "chat",
-  description: "Conversation, writing, advice, or a general question answered from general knowledge",
-  seeds: [
-    "hi there",
-    "good morning, how are you",
-    "tell me a joke",
-    "write a short poem about the sea",
-    "what is the capital of france",
-    "explain photosynthesis simply",
-    "give me ideas for dinner",
-    "how do I center a div in css",
-  ],
-};
+/** Notes for a chat message that is about Arcanus: who it is always, plus the notes most like the message. */
+export function selfNotes(text: string) {
+  const identity = KNOWLEDGE.filter((k) => k.id === "identity");
+  return [...identity, ...recall(text).filter((k) => k.id !== "identity")];
+}
+
+const route = (name: string) => ROUTES.find((r) => r.route === name)!;
+
+export const CHAT: Skill = route("chat");
 
 export const SKILLS: Skill[] = [
   CHAT,
   {
-    route: "personality",
-    description: "Asks what Arcanus is like: its personality, character, tone, or how it behaves",
-    seeds: ["what's your personality", "describe your personality", "what are you like", "how do you behave", "what's your character"],
+    ...route("personality"),
     run() {
       return { step: { label: "Personality", description: "From the harness, not the language model" }, reply: personalityReply() };
     },
   },
   {
-    route: "about",
-    description: "A question about Arcanus itself: who it is, who created it, what it can do, its models, voice, sphere, memory or privacy",
-    seeds: [
-      "who are you",
-      "who made you",
-      "who created you",
-      "who is your creator",
-      "who is gianne bacay",
-      "what can you do",
-      "what model do you run on",
-      "how does your voice work",
-      "are my messages sent to a server",
-      "what is the sphere",
-      "how do you remember things",
-      "what is arc 1",
-    ],
+    ...route("about"),
     run(text) {
       const notes = recall(text);
       if (!notes.length) return null;
@@ -94,24 +65,23 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    route: "time",
-    description: "Asks for the current time, date, or day of the week",
-    seeds: ["what time is it", "what's today's date", "what day is it today", "current time in Asia/Tokyo"],
-    run(text) {
-      const now = tellTime(text);
-      return { step: { label: "Read the clock", description: "Answered without the language model", results: [now.zone] }, reply: `It's ${now.text} (${now.zone}).` };
+    ...route("time"),
+    async run(text) {
+      // ARC 1 reads the city ("time in New York"); a zone named for it is the answer's zone. A named IANA zone
+      // ("Asia/Tokyo") needs no model.
+      const named = /\b[A-Za-z]+\/[A-Za-z_]+/.test(text);
+      const city = !named && /\b(?:in|at|for)\s+\p{L}/iu.test(text) ? await cityIn(text) : null;
+      const zone = city ? zoneFor(city) : null;
+      const now = tellTime(text, new Date(), zone);
+      const unknown = city && !zone ? ` I couldn't find a time zone for "${city}", so that's the time here.` : "";
+      return {
+        step: { label: "Read the clock", description: city ? `ARC 1 read the city: ${city}` : "Answered without the language model", results: [now.zone] },
+        reply: `It's ${now.text} (${now.zone}).${unknown}`,
+      };
     },
   },
   {
-    route: "math",
-    description: "Arithmetic to compute",
-    seeds: ["what is 12 * 7", "calculate (3 + 4) * 2", "what's 144 / 12", "compute 2^10"],
-    // Digits and operators share no words with remembered examples, so a bare expression is caught here.
-    claim(text) {
-      const expression = findExpression(text);
-      const bare = expression !== null && text.replace(expression, "").split(/\s+/).filter(Boolean).length <= 2;
-      return bare ? "arithmetic spotted" : undefined;
-    },
+    ...route("math"),
     run(text) {
       const expression = findExpression(text);
       if (!expression) return null;
@@ -123,21 +93,7 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    route: "web",
-    description: "Asks to search the internet, look something up online, or open or read a web page or link",
-    seeds: [
-      "search the web for electric cars",
-      "look up the latest news online",
-      "google the weather in manila",
-      "open https://example.com",
-      "find this on the internet",
-      "browse to wikipedia.org",
-      "summarize this article https://example.com/post",
-    ],
-    claim(text) {
-      if (/^connect mcp\s/i.test(text)) return undefined; // an MCP server's address belongs to the tool skill
-      return LINK.test(text) ? "a link" : ASK_WEB.test(text) ? "asked to search the web" : undefined;
-    },
+    ...route("web"),
     async run(text) {
       const link = text.match(LINK)?.[0];
       try {
@@ -149,6 +105,8 @@ export const SKILLS: Skill[] = [
             source: `The web page "${page.title}" (${page.url})`,
           };
         }
+        // ponytail: the whole request, less the "search for" and "online": ARC 1 was measured here and dropped words
+        // that matter ("the population of japan" became "japan"). Search engines read full sentences well.
         const query = text.replace(ASK_WEB, "").replace(/\s+(?:online|on the (?:web|internet))\s*[?.!]*$/i, "").trim() || text;
         const { results, engine } = await search(query);
         if (!results.length) return { step: { label: "Searched the web", description: query }, reply: `I searched the web for "${query}" and found nothing.` };
@@ -164,9 +122,7 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    route: "tool",
-    description: "A request that names a harness tool from a plugin or an MCP server",
-    seeds: ["run the echo tool", "call the weather tool", "use the plugin tool"],
+    ...route("tool"),
     claim(text) {
       if (/^connect mcp\s+https?:\/\//i.test(text)) return "mcp url";
       return matchTool(text) ? "a harness tool is named" : undefined;
@@ -186,9 +142,12 @@ export const SKILLS: Skill[] = [
       }
       const tool = matchTool(text);
       if (!tool) return null;
+      // ARC 1 reads an MCP tool's fields from the message; the harness fills in what it missed.
+      const args = tool.mcp ? await toolArguments(text, tool) : {};
+      const read = Object.entries(args).map(([k, v]) => `${k} = ${String(v)}`);
       return {
-        step: { label: `Tool · ${tool.name}`, description: tool.mcp ? `MCP ${tool.mcp}` : "Harness" },
-        reply: await callTool(tool.name, text),
+        step: { label: `Tool · ${tool.name}`, description: tool.mcp ? `MCP ${tool.mcp}` : "Harness", results: read.length ? [`ARC 1 read: ${read.join(", ")}`] : undefined },
+        reply: await callTool(tool.name, text, args),
       };
     },
   },

@@ -1,6 +1,6 @@
 "use client";
 
-// SmolVLM-256M runs in its own Web Worker (llm.worker.ts). This is the main-thread side: load state, streaming, stop,
+// SmolLM2 runs in its own Web Worker (llm.worker.ts). This is the main-thread side: load state, streaming, stop,
 // and a cache of finished replies.
 import { Lru } from "@/shared/lru";
 import { Store, IDLE, startWorker, type Engine, type LoadState } from "@/shared/store";
@@ -18,6 +18,8 @@ class Llm {
   // Decoding is greedy (do_sample: false), so the same prompt always writes the same reply. A text prompt seen before
   // (a retry, an edit resent unchanged) is answered from here at once instead of running the model again.
   private replies = new Lru<string, Written>(32);
+  // The worker writes one thing at a time: a reply asked for while the boot greeting is written waits for it.
+  private turn: Promise<unknown> = Promise.resolve();
 
   start() {
     this.worker ??= startWorker(this.state, () => new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" }), (data) => {
@@ -35,27 +37,33 @@ class Llm {
   /** Write a reply, streaming each piece to `onToken`. Rejects when the model can't load: callers degrade from there. */
   async generate(
     turns: Turn[],
-    image: string | undefined,
     onToken: (text: string) => void,
     opts?: { maxNewTokens?: number; fresh?: boolean; sample?: boolean },
   ): Promise<Written> {
-    const key = image || opts?.fresh || opts?.sample ? null : JSON.stringify(turns);
+    const key = opts?.fresh || opts?.sample ? null : JSON.stringify(turns);
     const hit = key ? this.replies.get(key) : undefined;
     if (hit) {
       onToken(hit.text);
       return { ...hit, cached: true };
     }
     const worker = await this.start();
-    const id = ++this.seq;
-    const written = await new Promise<Written>((resolve, reject) => {
-      this.pending.set(id, { onToken, resolve, reject });
-      worker.postMessage({ type: "generate", id, turns, image, maxNewTokens: opts?.maxNewTokens, sample: opts?.sample });
-    });
+    let id = 0;
+    const job = this.turn.then(
+      () =>
+        new Promise<Written>((resolve, reject) => {
+          id = ++this.seq;
+          this.pending.set(id, { onToken, resolve, reject });
+          worker.postMessage({ type: "generate", id, turns, maxNewTokens: opts?.maxNewTokens, sample: opts?.sample });
+        }),
+    );
+    this.turn = job.catch(() => undefined);
+    const written = await job;
     // A stopped reply is cut short: keep only replies that ran to the end.
     if (key && this.stopped < id && written.text) this.replies.set(key, written);
     return written;
   }
 
+  /** Stop what is being written now. */
   stop() {
     this.stopped = this.seq;
     void this.worker?.then((w) => w.postMessage({ type: "stop" }), () => undefined);
@@ -65,8 +73,8 @@ class Llm {
 export const llm = new Llm();
 
 export const llmEngine: Engine = {
-  name: "SmolVLM",
-  detail: "256M Q4 · ~170 MB",
+  name: "SmolLM2",
+  detail: "360M on WebGPU (~270 MB) · 135M on CPU (~180 MB)",
   state: llm.state,
   start: () => void llm.start().catch(() => undefined),
 };

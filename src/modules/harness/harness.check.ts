@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, assemble, callTool, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, personalityReply, registerPlugin, slug } from "./index.ts";
+import { argsFor, assemble, callTool, greetingPrompt, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -29,6 +29,16 @@ assert.match(personalityReply(), /Arcanus/);
 assert.match(identityBrief, /Gianne Bacay/);
 assert.match(identityBrief, /not a member of any team/);
 assert.equal(introduction, "I am Arcanus, created by Gianne Bacay. How can I help?");
+// Greeting context: only true facts, the user's own files fitted in, and a check of what the model adds.
+const greeting = greetingPrompt({ when: "Friday evening", rules: "Call me Sam.", lastTopic: "Cooking pasta", notes: ["Sam likes short answers."] });
+assert.match(greeting.facts, /Gianne Bacay/);
+assert.match(greeting.facts, /Call me Sam/);
+assert.match(greeting.turns[0].content, /Cooking pasta/);
+assert.doesNotMatch(greetingPrompt({ when: "Friday evening" }).facts, /standing instructions|Last time|Notes/);
+assert.deepEqual(unsupported("Good evening Sam, I'm Arcanus. Shall we get back to the pasta?", greeting.facts), ["get"]);
+assert.deepEqual(unsupported("Hello, I'm Arcanus, your personal AI supervisor at the university.", greeting.facts), ["personal", "supervisor", "university"]);
+assert.deepEqual(unsupported("Hello, I am Arcanus. I can search the web or do math for you.", greeting.facts), []);
+
 assert.deepEqual(argsFor({ properties: { city: {}, units: {} } }, "Manila"), { city: "Manila" });
 assert.deepEqual(argsFor(undefined, "2+2"), { input: "2+2" });
 

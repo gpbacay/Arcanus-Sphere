@@ -1,12 +1,12 @@
 // Answering a message: brain decides, the language model writes, the voice speaks, each sentence as it is written.
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
-import { recallNotes, think, type Plan } from "@/modules/brain";
-import { assemble, identityBrief, introduction, personality } from "@/modules/harness";
+import { recallNotes, routeNames, teach, think, type Plan } from "@/modules/brain";
+import { abilities, assemble, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { go } from "@/modules/web";
-import { isEcho, takeSentences, voice } from "@/modules/voice";
+import { isEcho, isIntroduction, openingLine, takeSentences, voice } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
@@ -22,16 +22,18 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 // While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
 const busy = () => live.state.reply !== null || !power.state.on;
 
-const SYSTEM = `You are Arcanus. ${identityBrief} ${personality.line} Answer clearly and briefly, using only these facts about yourself. If you do not know something about yourself, say so. Do not invent a job, a team, a company, or a personal history.`;
+// The date is in, so the model never guesses it; the abilities are in, so it never offers ones it doesn't have.
+const system = () =>
+  `You are Arcanus. ${identityBrief} ${personality.line} You can ${abilities.join(", ")}. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}. Answer clearly and briefly. About yourself, use only these facts. If you do not know something, say so instead of guessing. Do not invent a job, a team, a company, or a personal history.`;
 const NO_MODEL =
-  "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolVLM shows ready.";
+  "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolLM2 shows ready.";
 
 let gen = 0;
 
 // ------------------------------------------------------------------ context
 // What the model reads besides the message, most important first, fitted into a character budget (harness assemble):
 // the skill being run and the facts a skill found, then ARCANUS.md, then the page or file you handed Arcanus, then
-// recalled memory notes. SmolVLM-256M has 8k tokens of context, but on WebAssembly every token it reads costs time
+// recalled memory notes. SmolLM2 has 8k tokens of context, but on WebAssembly every token it reads costs time
 // before the first word, so the budget stays far below that. Older turns are cut short for the same reason.
 // ponytail: characters, not tokens (about 4 to 1 in English). Count tokens if the budget ever needs to be exact.
 const BUDGET = 3200;
@@ -77,15 +79,18 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): P
   ]
     .filter(Boolean)
     .join("\n\n");
+  // Only the conversation itself: not commands, and not the boot greeting, which a tiny model wrote about itself and
+  // which would otherwise be read back as fact.
   const history = prior
-    .filter((m) => m.kind !== "command")
+    .filter((m) => !m.kind && m.text)
     .slice(-HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
-  const system = standing ? `${SYSTEM}\n\n${standing.label}:\n${standing.text}` : SYSTEM;
+  const base = system();
+  const prompt = standing ? `${base}\n\n${standing.label}:\n${standing.text}` : base;
   const step: ThoughtStep | null = report.length
     ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
     : null;
-  return { turns: [{ role: "system", content: system }, ...history, { role: "user", content }], step };
+  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content }], step };
 }
 
 function reportLine(r: Report[number]) {
@@ -140,14 +145,17 @@ function watchBoot(chatId: string, id: string) {
 }
 
 let listening = false;
+/** This boot's greeting, once SmolLM2 has written it. */
+let bootLine = "";
+let greetGen = 0;
+let composing = false;
 
 function onPointer() {
   voice.unlock();
   if (!listening || !power.state.on || voice.state.state.off) return;
   listening = false;
   window.removeEventListener("pointerdown", onPointer);
-  voice.cancel();
-  sayAll(introduction);
+  sayAll(bootLine);
 }
 
 function watchGesture() {
@@ -162,36 +170,102 @@ function silence() {
   window.removeEventListener("pointerdown", onPointer);
 }
 
-/** Stop a boot in progress: its log is written as it stands, and the introduction is no longer waiting to be spoken. */
-export function cancelGreet() {
+/** Stop the greeting: not written, or not waiting to be spoken. */
+function stopGreeting() {
   silence();
+  greetGen++;
+  if (composing) llm.stop();
+}
+
+/** Stop a boot in progress: its log is written as it stands, and the greeting is no longer written or spoken. */
+export function cancelGreet() {
+  stopGreeting();
   unwatch?.();
 }
 
 /**
- * Boot: post Arcanus's introduction as a message, its trace the models loading, live until they settle. A boot right
- * after another replaces it, so reloads don't stack introductions. Speak it when the voice is ready, or on the next tap.
+ * Boot: post Arcanus's boot message, its trace the models loading, live until they settle. A boot right after another
+ * replaces it, so reloads don't stack them. Once SmolLM2 is ready it writes the greeting in its own words, and the
+ * greeting is spoken when the voice is ready, or on the next tap. Without the model, the boot log is the whole message.
  */
 export function greet(list = engines) {
   engines = list;
   const chat = currentChat();
   if (!power.state.on || !chat) return;
   unwatch?.();
-  const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: introduction, at: Date.now(), kind: "boot" };
+  stopGreeting();
+  bootLine = "";
+  const mine = ++greetGen;
+  const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: "", at: Date.now(), kind: "boot" };
   write(chat.id, (c) => ({ ...c, messages: [...(c.messages.at(-1)?.kind === "boot" ? c.messages.slice(0, -1) : c.messages), intro] }));
   watchBoot(chat.id, intro.id);
-  if (voice.state.state.off) return;
-  if (voice.state.state.analyser) {
-    silence();
-    voice.cancel();
-    sayAll(introduction);
+  void compose(chat.id, intro.id, mine).catch(() => undefined);
+}
+
+/** Resolves true once SmolLM2 is ready, false if it failed or is switched off. */
+function llmReady() {
+  return new Promise<boolean>((resolve) => {
+    const check = () => {
+      const s = llm.state.state;
+      if (s.status !== "ready" && s.status !== "error" && !s.off) return;
+      off();
+      resolve(s.status === "ready");
+    };
+    const off = llm.state.subscribe(check);
+    check();
+  });
+}
+
+/** "Friday evening": when this boot is, in words the greeting can use. */
+function moment() {
+  const now = new Date();
+  const hour = now.getHours();
+  return `${now.toLocaleDateString([], { weekday: "long" })} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
+}
+
+/** The title of the last conversation the user had, if it has one. */
+function lastTopic() {
+  const asked = (c: { messages: Msg[] }) => c.messages.findLast((m) => m.role === "user" && !m.kind)?.at ?? 0;
+  const last = [...chatStore.state.chats].sort((a, b) => asked(b) - asked(a))[0];
+  return last && asked(last) && last.title !== "Untitled" ? last.title : undefined;
+}
+
+const TRIES = 6; // about 6 in 16 lines pass on either SmolLM2 size, so 6 tries greet on ~94% of boots
+const MAX_WORDS = 25;
+const MAX_UNSUPPORTED = 2;
+
+/**
+ * Have SmolLM2 write this boot's greeting from the harness's facts: who Arcanus is, what it can do, when it is, and
+ * the user's own ARCANUS.md, last topic and notes about them. A line that isn't a greeting, runs long, or brings in
+ * more than a couple of words of its own (unsupported) is thrown away, up to TRIES times.
+ */
+async function compose(chatId: string, id: string, mine: number) {
+  if (!(await llmReady())) return;
+  const [rules, notes] = await Promise.all([instructions().catch(() => ""), memories().catch(() => [])]);
+  const { turns, facts } = greetingPrompt({
+    when: moment(),
+    rules,
+    lastTopic: lastTopic(),
+    notes: recallNotes("my name call me greet greeting hello prefer", notes).map((n) => n.text),
+  });
+  for (let attempt = 0; attempt < TRIES; attempt++) {
+    if (mine !== greetGen || !power.state.on) return;
+    composing = true;
+    const written = await llm.generate(turns, () => undefined, { maxNewTokens: 40, sample: true }).finally(() => (composing = false));
+    const line = openingLine(written.text);
+    if (mine !== greetGen || !power.state.on) return;
+    if (!isIntroduction(line) || line.split(/\s+/).length > MAX_WORDS || unsupported(line, facts).length > MAX_UNSUPPORTED) continue;
+    bootLine = line;
+    write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, text: line } : m)) }));
+    if (voice.state.state.off) return;
+    if (voice.state.state.analyser) sayAll(line);
+    else watchGesture();
     return;
   }
-  watchGesture();
 }
 
 async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
-  silence();
+  stopGreeting();
   const mine = ++gen;
   const stale = () => mine !== gen;
   const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });
@@ -203,19 +277,19 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   voice.cancel();
   write(chatId, (chat) => ({
     ...chat,
-    title: chat.title === "Untitled" && !prior.some((m) => m.role === "user") ? user.text.replace(/\s+/g, " ").trim().slice(0, 40) || "Image" : chat.title,
+    title: chat.title === "Untitled" && !prior.some((m) => m.role === "user") ? user.text.replace(/\s+/g, " ").trim().slice(0, 40) : chat.title,
     messages: [...prior, user],
   }));
   show([
     { label: "Read the message", description: user.text },
-    { label: "ARC 1", description: "Deciding what this needs", status: "active" },
+    { label: "Hippocampus", description: "Deciding what this needs", status: "active" },
   ]);
 
   let trace: ThoughtStep[] = [];
   try {
     const plan: Plan = skill
       ? { route: "skill", trace: [{ label: "Read the message", description: user.text }, { label: `Skill · /${skill.name}`, description: skill.path }] }
-      : await think(user.text, Boolean(user.image));
+      : await think(user.text);
     trace = plan.trace;
     if (stale()) return;
     if (plan.reply) {
@@ -227,28 +301,31 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     const built = await buildTurns(prior, user, plan, skill);
     if (stale()) return;
     if (built.step) trace = [...trace, built.step];
-    const writing = (description: string): ThoughtStep => ({ label: "SmolVLM-256M", description, status: "active" });
+    const writing = (description: string): ThoughtStep => ({ label: "SmolLM2", description, status: "active" });
     show([...trace, writing(llm.state.state.status === "ready" ? "Writing on this device" : "Waiting for the model to load on this device")]);
     let shown = "";
     let unspoken = "";
+    let spoke = false;
     let result;
     try {
-      result = await llm.generate(built.turns, user.image, (piece) => {
+      result = await llm.generate(built.turns, (piece) => {
         if (stale()) return;
+        // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
         shown += piece;
-        const { sentences, rest } = takeSentences(unspoken + piece);
+        const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
         unspoken = rest;
+        spoke ||= sentences.length > 0;
         sentences.forEach((s) => voice.say(s));
         show([...trace, writing("Writing on this device")], shown);
       });
     } catch (err) {
-      // Without SmolVLM, recalled notes are still an answer; anything else gets an honest "not now".
+      // Without SmolLM2, recalled notes are still an answer; anything else gets an honest "not now".
       // Arcanus's own notes are short enough to read out; a web page or search results are not.
       const notes = plan.source ? undefined : plan.facts?.join(" ");
       sayAll(notes ?? NO_MODEL);
       finish(notes ?? NO_MODEL, [
         ...trace,
-        { label: "SmolVLM unavailable", description: errorText(err) },
+        { label: "SmolLM2 unavailable", description: errorText(err) },
         ...(notes ? [{ label: "Answered from memory", description: "The recalled notes, read as they are" }] : []),
       ]);
       return;
@@ -259,9 +336,9 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     finish(result.text || shown.trim() || "…", [
       ...trace,
       result.cached
-        ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolVLM writes the same words for it, so it didn't run again" }
+        ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
         : {
-            label: "SmolVLM-256M wrote this",
+            label: `SmolLM2-${device === "WebGPU" ? "360M" : "135M"} wrote this`,
             description: `First word in ${(result.firstMs / 1000).toFixed(1)} s · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
           },
       ...(voice.state.state.off ? [] : [{ label: "Paradee-8M spoke it", description: "Sentence by sentence, as it was written" }]),
@@ -298,6 +375,7 @@ export const COMMANDS = [
   { name: "/browse", hint: "Open a page or search the web: /browse <address or words>" },
   { name: "/files", hint: "Open Arcanus's files (.arcanus)" },
   { name: "/remember", hint: "Keep a note in .arcanus/memory: /remember <note>" },
+  { name: "/teach", hint: "Teach Arcanus what your last message needed: /teach <route>" },
   { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
   { name: "/save", hint: "Save the last reply to .arcanus/artifacts" },
   { name: "/context", hint: "Show what the last reply read" },
@@ -347,6 +425,19 @@ function command(chatId: string, input: string) {
     if (!arg) return out("/remember <note> keeps a note. Arcanus recalls it when a message is about it.");
     return later(async () => `Remembered. Saved to ${await remember(arg)}.`);
   }
+  if (name === "/teach") {
+    // A correction for Hippocampus: the last thing you asked should have gone to <route>. Kept in .arcanus/routing.json.
+    const routes = routeNames().join(", ");
+    if (!arg) return out(`/teach <route> teaches Arcanus what your last message needed. Routes: ${routes}.`);
+    const last = currentChat()?.messages.findLast((m) => m.role === "user" && !m.kind);
+    if (!last) return out("There's no message of yours to teach from yet.");
+    const route = arg.toLowerCase();
+    return later(async () =>
+      (await teach(last.text, route))
+        ? `Learned: "${last.text.slice(0, 80)}" needs ${route}. Kept in ${HOME}/routing.json.`
+        : `There's no route called ${route}. Routes: ${routes}.`
+    );
+  }
   if (name === "/skill") {
     const [skillName, ...words] = arg.split(/\s+/);
     if (!skillName || !words.length) return out("/skill <name> <instructions> makes a skill. Run it with /<name> <message>.");
@@ -381,16 +472,16 @@ function command(chatId: string, input: string) {
 }
 
 /** Send a message from the composer. Returns false when there is nothing to send or a reply is still being written. */
-export function send(text: string, image?: string | null) {
+export function send(text: string) {
   const current = currentChat();
   const trimmed = text.trim().slice(0, MAX);
-  if (!current || (!trimmed && !image)) return false;
-  if (/^\/\w/.test(trimmed) && !image) {
+  if (!current || !trimmed) return false;
+  if (/^\/\w/.test(trimmed)) {
     command(current.id, trimmed);
     return true;
   }
   if (!power.state.on) {
-    push(current.id, { id: crypto.randomUUID(), role: "user", text: trimmed || "(image)", at: Date.now(), kind: "command" });
+    push(current.id, { id: crypto.randomUUID(), role: "user", text: trimmed, at: Date.now(), kind: "command" });
     push(current.id, { id: crypto.randomUUID(), role: "assistant", text: "Arcanus is off. /run starts it.", at: Date.now(), kind: "command" });
     return true;
   }
@@ -401,10 +492,9 @@ export function send(text: string, image?: string | null) {
   void answer(current.id, current.messages, {
     id: crypto.randomUUID(),
     role: "user",
-    text: trimmed || "What is in this image?",
+    text: trimmed,
     at: Date.now(),
     replyToId: replyTo?.id,
-    image: image ?? undefined,
   });
   return true;
 }
@@ -448,19 +538,29 @@ export function talk() {
   // Arcanus keeps talking (and thinking) while the mic listens. A sound only turns it down; it stops for real words,
   // never for noise or its own voice leaking back into the mic.
   let over = false; // Arcanus was talking while this was said, so it may be its own echo
+  const said = () => live.state.reply?.text || lastAssistant();
+  const interrupt = () => {
+    cancelGreet();
+    voice.cancel();
+    if (live.state.reply) stop(); // what you said now wins over the reply being written
+  };
   void listen.converse({
     strict: () => voice.state.state.speaking,
     onSpeech: () => {
       over = voice.state.state.speaking;
       if (over) voice.duck(true);
     },
+    // Two words that aren't Arcanus's own: it's you, so stop now rather than when you finish.
+    onWords: (text) => {
+      if (!over || (text.match(/[a-z0-9']+/gi)?.length ?? 0) < 2 || isEcho(text, said())) return;
+      over = false;
+      interrupt();
+    },
     onText: (text) => {
-      const echo = (over || voice.state.state.speaking) && isEcho(text, live.state.reply?.text || lastAssistant());
+      const echo = (over || voice.state.state.speaking) && isEcho(text, said());
       over = false;
       if (!text || echo) return voice.duck(false);
-      cancelGreet();
-      voice.cancel();
-      if (live.state.reply) stop(); // what you said now wins over the reply being written
+      interrupt();
       send(text);
     },
   });

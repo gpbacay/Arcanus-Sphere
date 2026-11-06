@@ -1,4 +1,4 @@
-import { identityBrief, introduction, personality } from "@/modules/harness";
+import { identityBrief, personality } from "@/modules/harness";
 
 /** What Arcanus knows about itself. Recalled by a Hippocampus memory (word + Occipital letter search). */
 export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
@@ -34,7 +34,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "introduction",
     title: "How Arcanus introduces itself",
     content:
-      `When Arcanus wakes it says: "${introduction}" It does not claim to be a person, an employee, a teammate, or a new member of a team or company.`,
+      "When Arcanus wakes, it greets you in its own words: one sentence, written fresh by its language model at every boot, that names Arcanus and offers help. It does not claim to be a person, an employee, a teammate, or a new member of a team or company.",
   },
   {
     id: "creator",
@@ -49,22 +49,22 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
       "Arcanus runs entirely in your web browser. Every model runs on your device with ONNX Runtime Web. No server sees your messages. The models download once and are cached, so later visits load from your device. The one exception is the browser: a web page or search you ask for is fetched through the app's relay.",
   },
   {
-    id: "smolvlm",
-    title: "Language model: SmolVLM",
+    id: "smollm2",
+    title: "Language model: SmolLM2",
     content:
-      "Arcanus writes its replies with SmolVLM-256M-Instruct, a 256 million parameter vision-language model quantized to 4 bits (Q4). It runs on WebGPU when your browser has it, otherwise on WebAssembly. Because it is a vision model, you can attach an image and ask about it.",
+      "Arcanus writes its replies with SmolLM2-Instruct from Hugging Face, a small text-only language model. On WebGPU it runs the 360 million parameter model at 4 bits; without WebGPU it runs the 135 million parameter model at 4 bits on WebAssembly, so replies still start quickly. It reads and writes text only: it cannot look at images.",
   },
   {
     id: "arc1",
-    title: "Decision model: ARC 1",
+    title: "Argument reader: ARC 1",
     content:
-      "ARC 1 from ARCANE is a 1.3 million parameter System 1 decision model. It does not write text. In about 10 milliseconds it decides what each message needs: a chat reply, a fact about Arcanus, the time, or a calculation. Time and math are answered instantly without the language model, which makes Arcanus faster.",
+      "ARC 1 from ARCANE is a 1.3 million parameter System 1 model. It does not write text. In about 10 milliseconds it reads a skill's arguments from the words of a message, such as the city in a question about the time somewhere or the fields a connected MCP tool needs, so Arcanus can answer it without the language model.",
   },
   {
     id: "memory",
     title: "Memory: Hippocampus and Occipital",
     content:
-      "Hippocampus is ARCANE's memory of decided examples. Similar remembered examples vote alongside ARC 1, so routing improves without retraining. Occipital reads memories by their letters, so typos and other word forms still find the right memory. Arcanus also recalls these knowledge notes through a Hippocampus memory.",
+      "Hippocampus is ARCANE's memory of decided examples. It decides what each message needs: a chat reply, a fact about Arcanus, the time, a calculation, or the web. The remembered phrasings most like a message vote, so routing improves without retraining: /teach corrects it, and what it learns is kept in .arcanus/routing.json. Occipital reads memories by their letters, so typos and other word forms still find the right memory. Arcanus also recalls these knowledge notes through a Hippocampus memory.",
   },
   {
     id: "voice",
@@ -82,7 +82,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "thoughts",
     title: "Chain of thought",
     content:
-      "Every reply shows how Arcanus decided: the route ARC 1 chose and how sure it was, the memories that voted, what was recalled, and which model wrote and spoke the answer.",
+      "Every reply shows how Arcanus decided: the route Hippocampus chose and how sure it was, the remembered phrasings that voted, what was recalled, and which model wrote and spoke the answer.",
   },
   {
     id: "stack",
