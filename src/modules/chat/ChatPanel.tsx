@@ -6,7 +6,7 @@ import { useOnline } from "@/modules/offline";
 import { voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
-import { Logo } from "@/shared/ui/logo";
+import { MessageSquare } from "lucide-react";
 import { Sidebar, useSidebar } from "@/shared/ui/sidebar";
 import { COMPOSER_ID, Composer } from "./Composer";
 import { discard, send, useBusy } from "./conversation";
@@ -139,7 +139,9 @@ function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?:
 
   return (
     <header className="panel-head">
-      <Logo state={mood} size={22} />
+      <span className="brand-logo" data-state={mood} style={{ width: 22, height: 22 }} aria-hidden>
+        <MessageSquare size={22} />
+      </span>
       <div className="panel-title" ref={menuRef}>
         {renaming ? (
           <form

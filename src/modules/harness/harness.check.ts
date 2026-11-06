@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, assemble, callTool, greetingPrompt, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
+import { argsFor, assemble, callTool, greetingPrompt, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -25,10 +25,11 @@ assert.equal(fit.sections[1].text, `${"a".repeat(60)}…`); // cut at the line b
 assert.deepEqual(fit.report.find((r) => r.label === "memory"), { label: "memory", chars: 0, of: 50 });
 assert.ok(fit.used <= 150);
 
-assert.match(personalityReply(), /Arcanus/);
+for (const line of PERSONALITY_REPLIES) assert.match(line, /curious/i);
+assert.ok(PERSONALITY_REPLIES.includes(personalityReply()));
 assert.match(identityBrief, /Gianne Bacay/);
 assert.match(identityBrief, /not a member of any team/);
-assert.equal(introduction, "I am Arcanus, created by Gianne Bacay. How can I help?");
+assert.match(introduction, /^I'm Arcanus, .*Gianne Bacay/);
 // Greeting context: only true facts, the user's own files fitted in, and a check of what the model adds.
 const greeting = greetingPrompt({ when: "Friday evening", rules: "Call me Sam.", lastTopic: "Cooking pasta", notes: ["Sam likes short answers."] });
 assert.match(greeting.facts, /Gianne Bacay/);

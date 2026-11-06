@@ -1,7 +1,7 @@
 // Answering a message: brain decides, the language model writes, the voice speaks, each sentence as it is written.
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
-import { recallNotes, routeNames, teach, think, type Plan } from "@/modules/brain";
+import { recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { abilities, assemble, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
@@ -50,8 +50,13 @@ const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
 async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): Promise<{ turns: Turn[]; step: ThoughtStep | null }> {
-  const [rules, notes] = await Promise.all([instructions().catch(() => ""), memories().catch(() => [])]);
   const text = ask(user, skill);
+  // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
+  const [rules, notes, passages] = await Promise.all([
+    instructions().catch(() => ""),
+    memories().catch(() => []),
+    !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
+  ]);
   const pinned = pane.state.pinned;
   const listed = plan.facts?.map((f) => `- ${f}`).join("\n") ?? "";
   const facts = !listed
@@ -65,6 +70,11 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill?: Skill): P
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
       { label: plan.source ?? "Facts about Arcanus, and only these", text: facts, priority: 0 },
       { label: `What the user is showing you: ${pinned?.label}`, text: pinned?.text ?? "", priority: 2 },
+      {
+        label: `From your user's books (${[...new Set(passages.map((p) => p.book))].join(", ")})`,
+        text: passages.length ? `${passages.map((p) => `[${p.book}] ${p.text}`).join("\n\n")}\n\nIf these answer the question, answer from them and name the book.` : "",
+        priority: 2,
+      },
       { label: "Notes you remembered", text: recallNotes(text, notes).map((n) => `- ${n.text}`).join("\n"), priority: 3 },
     ],
     BUDGET

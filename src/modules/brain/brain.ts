@@ -10,6 +10,7 @@ import { Store, IDLE, errorText, type Engine, type LoadState } from "@/shared/st
 import { HOME, readFile, writeFile } from "@/modules/workspace";
 import { Hippocampus, type Example } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
+import { syncShelf } from "./library";
 import { decide, routerMemory } from "./routes";
 import { CHAT, SKILLS, selfNotes } from "./skills";
 
@@ -77,6 +78,7 @@ export const brainEngine: Engine = {
   start() {
     if (state.state.status !== "idle" && state.state.status !== "error") return;
     state.set({ status: "loading", error: undefined });
+    void syncShelf().catch(() => undefined); // index the books now, in their worker, so the first question finds them
     loadRouter().then(
       () => state.set({ status: "ready" }),
       (err) => state.set({ status: "error", error: errorText(err) })

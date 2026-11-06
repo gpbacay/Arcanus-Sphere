@@ -4,6 +4,7 @@
 //   .arcanus/ARCANUS.md          standing instructions, read before every reply
 //   .arcanus/skills/<name>/SKILL.md  skills you or Arcanus wrote, run with /<name>
 //   .arcanus/memory/*.md         notes Arcanus remembers, recalled when a message is about them
+//   .arcanus/knowledge/*.md|txt  books and documents you add; Arcanus answers from their passages (brain/shelf.ts)
 //   .arcanus/artifacts/          what Arcanus saves: replies, web pages
 // The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
@@ -183,7 +184,7 @@ Explain the topic in three short sentences a five-year-old would understand. Use
 /** Make .arcanus/ and its starter files when they are missing. Never overwrites. */
 async function setUp() {
   if ((await read(`${HOME}/ARCANUS.md`)) === null) await write(`${HOME}/ARCANUS.md`, ARCANUS_MD);
-  for (const dir of ["memory", "artifacts"]) await makeFolder(`${HOME}/${dir}`);
+  for (const dir of ["memory", "artifacts", "knowledge"]) await makeFolder(`${HOME}/${dir}`);
   const skills = await list(`${HOME}/skills`).catch(() => null);
   if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);
 }
@@ -217,6 +218,36 @@ export async function memories(): Promise<{ id: string; text: string }[]> {
     if (text) notes.push({ id: entry.name, text });
   }
   return notes;
+}
+
+const KNOWLEDGE = `${HOME}/knowledge`;
+const TEXT = /\.(md|txt)$/i;
+
+/** The books in .arcanus/knowledge, each with a stamp that changes when its file does. Text is read only on demand. */
+export async function books(): Promise<{ id: string; stamp: string; text: () => Promise<string> }[]> {
+  const dir = (await dirAt(parts(KNOWLEDGE), false).catch(() => null)) as Permissioned | null;
+  const found = [];
+  for await (const handle of dir?.values() ?? []) {
+    if (handle.kind !== "file" || !TEXT.test(handle.name)) continue;
+    const file = await (handle as FileSystemFileHandle).getFile();
+    if (file.size <= MAX_READ) found.push({ id: handle.name, stamp: `${file.size}:${file.lastModified}`, text: () => file.text() });
+  }
+  return found;
+}
+
+/** Copy books (.md or .txt, up to 2 MB each) into .arcanus/knowledge. Returns what was added and what was refused. */
+export async function addBooks(files: Iterable<File>) {
+  const added: string[] = [];
+  const refused: string[] = [];
+  for (const file of files) {
+    if (!TEXT.test(file.name)) refused.push(`${file.name} (only .txt and .md)`);
+    else if (file.size > MAX_READ) refused.push(`${file.name} (over 2 MB)`);
+    else {
+      await write(`${KNOWLEDGE}/${file.name}`, await file.text());
+      added.push(file.name);
+    }
+  }
+  return { added, refused };
 }
 
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");

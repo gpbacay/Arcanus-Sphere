@@ -1,10 +1,10 @@
 "use client";
 
-import { ChevronRight, File, Folder, FolderOpen, HardDrive, MessageSquareText, Plus, Save, Trash2, X } from "lucide-react";
+import { BookPlus, ChevronRight, File, Folder, FolderOpen, HardDrive, MessageSquareText, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { closePane, pane, pin } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
-import { canOpenFolder, list, openFolder, read, reconnect, remove, backToHome, workspace, write, type Entry } from "./fs";
+import { HOME, addBooks, canOpenFolder, list, openFolder, read, reconnect, remove, backToHome, workspace, write, type Entry } from "./fs";
 
 /** Arcanus's files: browse the workspace, open and edit a file, hand one to Arcanus to read. */
 export function Files() {
@@ -71,6 +71,24 @@ function FilesPane() {
       </header>
 
       <div className="pane-bar">
+        <label className="btn" title="Books and documents (.txt or .md) Arcanus answers from">
+          <BookPlus size={14} aria-hidden /> Add books
+          <input
+            type="file"
+            accept=".txt,.md,text/plain,text/markdown"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = [...(e.target.files ?? [])];
+              e.target.value = "";
+              void act(async () => {
+                const { added, refused } = await addBooks(files);
+                if (added.length) setDir(`${HOME}/knowledge`);
+                setError(refused.length ? `Not added: ${refused.join(", ")}` : "");
+              })();
+            }}
+          />
+        </label>
         {lost ? (
           <button type="button" className="btn" onClick={act(reconnect)}>
             Reconnect {lost}
@@ -188,7 +206,7 @@ function FilesPane() {
           {!dir ? (
             <p className="pane-note">
               Arcanus keeps its own files in <code>.arcanus/</code>: <code>ARCANUS.md</code> (instructions it reads before every reply), <code>skills/</code>{" "}
-              (run with /name), <code>memory/</code> and <code>artifacts/</code>.
+              (run with /name), <code>memory/</code>, <code>artifacts/</code> and <code>knowledge/</code> (books Arcanus answers from).
               {kind === "home" ? " They live privately in this browser until you open a folder on this device." : ""}
             </p>
           ) : null}

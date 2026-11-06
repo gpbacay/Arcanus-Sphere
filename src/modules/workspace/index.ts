@@ -2,6 +2,8 @@
 export { Files } from "./Files";
 export {
   HOME,
+  addBooks,
+  books,
   createSkill,
   instructions,
   memories,
