@@ -42,8 +42,9 @@ export type Moment = { when: string; rules?: string; notes?: string[]; lastTopic
 
 const GREETING_BUDGET = 600; // characters of the user's context; a tiny model loses the instruction under more
 
-/** The greeting prompt, and the facts the greeting may use (for unsupported()). */
-export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string } {
+/** The greeting prompt, the facts the greeting may use (for unsupported()), and its opening: the words the reply
+ *  starts with ("Good morning, I'm Arcanus"), so it always greets and names itself. SmolLM2 only finishes it. */
+export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string; opening: string } {
   const { sections } = assemble(
     [
       { label: "Your user's standing instructions", text: m.rules ?? "", priority: 1 },
@@ -62,10 +63,15 @@ export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string } {
   // Measured on SmolLM2: an instruction that says what to write (hello, name, offer help) beats a list of what not to
   // write, which put jobs and places in its head; "introduce yourself" invited a made-up biography. Without the facts
   // at all, it invents names and whole scenes.
-  // "Good night" is a goodbye (isIntroduction throws it away), so at night it says hello instead.
+  // "Good night" is a goodbye, so at night it says hello instead.
   const part = m.when.split(" ").at(-1);
-  const greetMe = `Hi! Reply with one short greeting: say ${part === "night" ? "hello" : `good ${part}`}, say your name, and ask how you can help. Nothing else.`;
-  return { turns: [{ role: "system", content: `You are Arcanus, a helpful assistant. Facts:\n${facts}` }, { role: "user", content: greetMe }], facts };
+  const hello = part === "night" ? "Hello" : `Good ${part}`;
+  const greetMe = `Hi! Reply with one short greeting: say ${hello.toLowerCase()}, say your name, and ask how you can help. Nothing else.`;
+  return {
+    turns: [{ role: "system", content: `You are Arcanus, a helpful assistant. Facts:\n${facts}` }, { role: "user", content: greetMe }],
+    facts,
+    opening: `${hello}, I'm Arcanus`,
+  };
 }
 
 // Words any greeting may use without a fact behind them.

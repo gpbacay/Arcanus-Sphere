@@ -6,8 +6,7 @@ import { Lru } from "@/shared/lru";
 import { Store, IDLE, startWorker, type Engine, type LoadState } from "@/shared/store";
 
 export type Turn = { role: "system" | "user" | "assistant"; content: string };
-/** `texts`: every reply of a batch (opts.n), `text` the first. */
-export type Written = { text: string; texts?: string[]; tokens: number; firstMs: number; perSecond: number; cached?: boolean };
+export type Written = { text: string; tokens: number; firstMs: number; perSecond: number; cached?: boolean };
 type Pending = { onToken: (text: string) => void; resolve: (r: Written) => void; reject: (e: Error) => void };
 
 class Llm {
@@ -39,7 +38,7 @@ class Llm {
   async generate(
     turns: Turn[],
     onToken: (text: string) => void,
-    opts?: { maxNewTokens?: number; fresh?: boolean; sample?: boolean; n?: number },
+    opts?: { maxNewTokens?: number; fresh?: boolean; sample?: boolean; prefix?: string },
   ): Promise<Written> {
     const key = opts?.fresh || opts?.sample ? null : JSON.stringify(turns);
     const hit = key ? this.replies.get(key) : undefined;
@@ -54,7 +53,7 @@ class Llm {
         new Promise<Written>((resolve, reject) => {
           id = ++this.seq;
           this.pending.set(id, { onToken, resolve, reject });
-          worker.postMessage({ type: "generate", id, turns, maxNewTokens: opts?.maxNewTokens, sample: opts?.sample, n: opts?.n });
+          worker.postMessage({ type: "generate", id, turns, maxNewTokens: opts?.maxNewTokens, sample: opts?.sample, prefix: opts?.prefix });
         }),
     );
     this.turn = job.catch(() => undefined);

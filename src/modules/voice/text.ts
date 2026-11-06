@@ -18,23 +18,23 @@ const INVENTED = /\b(team|employee|colleague|coworker|company|hired|joined|membe
 const SIGN_OFF =
   /\b(thank(?:s| you)|goodbye|bye|farewell|see you|take care|you(?:'re| are) welcome|hope to hear|hear from you|glad to\b[^.]{0,40}\bhelp|have a (?:good|nice|great)|until next|talk soon)\b/i;
 
-/** A boot line that opens the meeting: a greeting or a self-introduction, never a sign-off. */
+// Arcanus names itself: "I'm Arcanus", not "Arcanus good morning", which reads as if it were greeting someone else.
+const NAMES_ITSELF = /\b(?:i'm|i am|my name is|this is) arcanus\b|\barcanus here\b/i;
+
+/** A boot line that opens the meeting: a greeting or a self-introduction in which Arcanus names itself, never a sign-off. */
 export function isIntroduction(line: string): boolean {
   const text = line.trim();
-  return text.split(/\s+/).length >= 3 && OPENING.test(text) && /\barcanus\b/i.test(text) && !SIGN_OFF.test(text) && !INVENTED.test(text);
+  return text.split(/\s+/).length >= 3 && OPENING.test(text) && NAMES_ITSELF.test(text) && !SIGN_OFF.test(text) && !INVENTED.test(text);
 }
 
-/** The greeting sentence in a model reply: stage directions, quotes and a leading name stripped, one-word stubs skipped. */
-export function openingLine(text: string): string {
-  const cleaned = text
-    .replace(/\*[^*]*\*|\([^)]*\)/g, " ") // *glows softly*, (smiles)
-    .replace(/^["'\s,;:]+|["'\s]+$/g, "")
-    .replace(/^arcanus\s*:\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const parts = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
-  const line = parts.find((s) => s.split(/\s+/).length >= 3) ?? parts.at(-1) ?? "";
-  return line.slice(0, 180);
+/**
+ * The boot greeting: the opening Arcanus started its reply with, then the model's words up to the end of the
+ * greeting's second sentence. Stage directions and quotes are dropped, and so is a reply that wanders on.
+ */
+export function finishGreeting(opening: string, rest: string): string {
+  const text = `${opening}${rest.replace(/\*[^*]*\*|\([^)]*\)|["“”]/g, " ")}`.replace(/\s+/g, " ").replace(/\s+([,.!?])/g, "$1").trim();
+  const sentences = text.match(/[^.!?]+[.!?]+/g);
+  return sentences ? sentences.slice(0, 2).join("").trim() : `${text}.`;
 }
 
 /**
