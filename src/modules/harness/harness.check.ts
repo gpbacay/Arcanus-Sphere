@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, assemble, callTool, greetingPrompt, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
+import { argsFor, asSelf, assemble, callTool, featuresReply, greetingPrompt, identityBrief, introduction, matchTool, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -31,6 +31,16 @@ assert.match(identityBrief, /Gianne Bacay/);
 assert.match(identityBrief, /address him as he and him, never she or her/);
 assert.match(identityBrief, /not a member of any team/);
 assert.match(introduction, /^I'm Arcanus, .*Gianne Bacay/);
+// Arcanus knows itself in its own voice, and speaks as itself.
+assert.match(identityBrief, /^I am Arcanus/);
+assert.doesNotMatch(identityBrief, /\bArcanus is\b|\bIt (is|lives)\b/);
+assert.match(featuresReply, /^I can tell the time, .*, and talk by voice\./);
+assert.equal(
+  asSelf("Arcanus is a local AI assistant. Arcanus doesn't have a body, but Arcanus runs on your device. Arcanus's voice is British."),
+  "I am a local AI assistant. I don't have a body, but I run on your device. My voice is British.",
+);
+assert.equal(asSelf("I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens."), "I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens.");
+assert.equal(asSelf("Arcanus can search the web."), "I can search the web.");
 // Greeting context: only true facts, the user's own files fitted in, and a check of what the model adds.
 const greeting = greetingPrompt({ when: "Friday evening", rules: "Call me Sam.", lastTopic: "Cooking pasta", notes: ["Sam likes short answers."] });
 assert.match(greeting.facts, /Gianne Bacay/);

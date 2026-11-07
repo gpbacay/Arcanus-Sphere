@@ -7,7 +7,8 @@ import { afterGpu } from "@/shared/boot";
 import { Store, IDLE, startWorker, type Engine, type LoadState } from "@/shared/store";
 
 export type Turn = { role: "system" | "user" | "assistant"; content: string };
-export type Written = { text: string; tokens: number; firstMs: number; perSecond: number; cached?: boolean };
+/** `prompted`: the prompt's length in tokens; `reused`: how many of them came from the last reply's KV cache. */
+export type Written = { text: string; tokens: number; firstMs: number; perSecond: number; prompted?: number; reused?: number; cached?: boolean };
 type Pending = { onToken: (text: string) => void; resolve: (r: Written) => void; reject: (e: Error) => void };
 
 class Llm {

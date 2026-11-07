@@ -5,7 +5,7 @@ import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Hippocampus } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { KNOWLEDGE } from "./knowledge";
-import { callTool, connectMcp, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
+import { callTool, connectMcp, featuresReply, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
 import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
 import { deviceCommand, openApp, operate } from "@/modules/device";
 import { plainText } from "@/shared/html";
@@ -43,6 +43,9 @@ export function selfNotes(text: string) {
 
 const route = (name: string) => ROUTES.find((r) => r.route === name)!;
 
+// "What can you do", "what are your features", "what can Arcanus do": answered from the harness's own list.
+const FEATURES = /\bwhat (?:can|could) (?:you|arcanus) do\b|\b(?:your|arcanus'?s?) (?:features|abilities|capabilities|skills)\b|\b(?:features|abilities|capabilities) of (?:you|arcanus)\b/i;
+
 /** Arguments for a harness tool: ARC 1's, when it chose the tool; otherwise it reads an MCP tool's fields. */
 async function argumentsFor(text: string, tool: Tool, arc: { name: string; arguments: Record<string, unknown> } | null) {
   if (arc?.name === tool.name) return arc.arguments;
@@ -62,13 +65,13 @@ export const SKILLS: Skill[] = [
   {
     ...route("about"),
     run(text) {
+      if (FEATURES.test(text)) return { step: { label: "My abilities", description: "From the harness, not the language model" }, reply: featuresReply };
       const notes = recall(text);
       if (!notes.length) return null;
       const step = { label: "Recalled from memory", results: notes.map((k) => k.title) };
       // Who it is, and who made it, are facts. The language model does not get to rewrite them.
       if (/\b(who are you|what are you|introduce yourself)\b/i.test(text)) return { step, reply: introduction };
-      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };
-      return { step, facts: notes.map((k) => k.content) };
+      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };      return { step, facts: notes.map((k) => k.content) };
     },
   },
   {

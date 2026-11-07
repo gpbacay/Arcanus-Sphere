@@ -2,7 +2,7 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { grounding, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
-import { abilities, assemble, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
+import { abilities, asSelf, assemble, FIRST_PERSON, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
@@ -24,8 +24,9 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 const busy = () => live.state.reply !== null || !power.state.on;
 
 // The date is in, so the model never guesses it; the abilities are in, so it never offers ones it doesn't have.
+// Its self is given in its own words, so it answers in them: "I can…", never "Arcanus can…".
 const system = () =>
-  `You are Arcanus. ${identityBrief} ${personality.line} You can ${abilities.join(", ")}. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}. Answer clearly and briefly. About yourself, use only these facts. If you do not know something, say so instead of guessing. Do not invent a job, a team, a company, or a personal history.`;
+  `${FIRST_PERSON} What you know about yourself, in your own words: ${identityBrief} ${personality.line} I can ${abilities.join(", ")}. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}. Answer clearly and briefly. About yourself, use only these facts. If you do not know something, say so instead of guessing. Do not invent a job, a team, a company, or a personal history.`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
 const SPOKEN = " You are speaking out loud in a live conversation: reply in one or two short sentences, in plain words, with no lists.";
 const VOICE_TOKENS = 70; // about three short sentences
@@ -90,12 +91,12 @@ async function buildTurns(
     ? ""
     : plan.source
       ? `${listed}\n\nAnswer from this, and say which site it came from.`
-      : `${listed}\n\nAnswer from these facts. Do not add a job, a team, or a personal history.`;
+      : `${listed}\n\nAnswer from these facts only, as yourself: "I" and "my", never "Arcanus" or "it". Do not add a job, a team, a personal history, or anything these facts do not say.`;
   const { sections, report, used } = assemble(
     [
       { label: STANDING, text: rules, priority: 1 },
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
-      { label: plan.source ?? "Facts about Arcanus, and only these", text: facts, priority: 0 },
+      { label: plan.source ?? "What you know about yourself, in your own words", text: facts, priority: 0 },
       { label: `What the user is showing you: ${pinned?.label}`, text: pinned?.text ?? "", priority: 2 },
       {
         label: `From your user's books (${[...new Set(passages.map((p) => p.book))].join(", ")})`,
@@ -447,6 +448,8 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     const ready = llm.state.state.status === "ready";
     show([...trace, writing(ready ? "Writing on this device" : "Waiting for the model to load on this device")]);
     const generating = thought("generate", "", { parents: [built.context], active: true, detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load" });
+    // A reply grounded in its own notes is about itself, so it is said by itself (asSelf), whatever the model slipped into.
+    const own = plan.facts && !plan.source ? asSelf : (s: string) => s;
     let speaking: (() => void) | null = null;
     let shown = "";
     let unspoken = "";
@@ -463,10 +466,10 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           unspoken = rest;
           spoke ||= sentences.length > 0;
           if (spoke) clearTimeout(filler);
-          sentences.forEach((s) => voice.say(s));
+          sentences.forEach((s) => voice.say(own(s)));
           if (sentences.length) speaking ??= voiced(generating);
-          revise(generating, { content: shown, detail: "SmolLM2 is writing" });
-          show([...trace, writing("Writing on this device")], shown);
+          revise(generating, { content: own(shown), detail: "SmolLM2 is writing" });
+          show([...trace, writing("Writing on this device")], own(shown));
         },
         { maxNewTokens: spoken ? VOICE_TOKENS : undefined }
       );
@@ -489,18 +492,18 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     // A spoken reply that hit its token cap ends mid-sentence: don't say, or keep, the broken end.
     const cutOff = spoken && result.tokens >= VOICE_TOKENS;
     if (unspoken.trim() && !cutOff) {
-      voice.say(unspoken);
+      voice.say(own(unspoken));
       speaking ??= voiced(generating);
     }
     speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
-    const written = result.text || shown.trim() || "…";
+    const written = own(result.text || shown.trim() || "…");
     const text = cutOff ? wholeSentences(written) : written;
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
           label: `SmolLM2-${device === "WebGPU" ? "360M" : "135M"} wrote this`,
-          description: `First word in ${(result.firstMs / 1000).toFixed(1)} s · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
+          description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
     settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     // ARCANE's Graph of Thought check: each sentence of the reply against the evidence it was given (no model, <1 ms).

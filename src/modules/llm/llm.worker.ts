@@ -10,9 +10,15 @@ import {
   type PreTrainedTokenizer,
   type Tensor,
 } from "@huggingface/transformers";
+import { crop, earlier, onCpu, ReplyPenalty, shared, type Past } from "./kv";
 
 const post = (message: unknown) => self.postMessage(message);
 const stopping = new InterruptableStoppingCriteria();
+
+// The last prompt and reply, and the model's KV cache for them. The next prompt starts the same way (the system
+// prompt, then the conversation so far), so the model reads only from where it differs: the first word comes sooner.
+let memory: { ids: BigInt64Array; past: Past } | null = null;
+const MIN_REUSE = 16; // tokens; under this, cropping costs about what it saves
 
 let loading: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> | null = null;
 
@@ -80,19 +86,29 @@ async function generate(id: number, turns: Turn[], maxNewTokens?: number, sample
     },
   });
   stopping.reset();
+  const ids = inputs.input_ids.data as BigInt64Array;
+  const reuse = memory ? shared(memory.ids, ids) : 0;
+  const past = memory && reuse >= MIN_REUSE ? crop(memory.past, reuse) : undefined;
+  memory = null;
   const output = (await model.generate({
     ...inputs,
+    past_key_values: past,
+    return_dict_in_generate: true,
     max_new_tokens: maxNewTokens || 384,
     do_sample: Boolean(sample),
     // ponytail: sampling is only for the boot greeting. Chat stays greedy, so retries stay cacheable.
     ...(sample ? { temperature: 0.5, top_k: 20 } : {}),
-    repetition_penalty: 1.15,
+    logits_processor: [new ReplyPenalty(1.15, ids.length, earlier(turns, (text) => tokenizer.encode(text, { add_special_tokens: false })))],
     streamer,
     stopping_criteria: stopping,
-    // The generation options (repetition_penalty, one stopping criterion) are real but missing from the types.
-  } as never)) as Tensor;
+    // The generation options (one stopping criterion, the cache) are real but missing from the types.
+  } as never)) as { sequences: Tensor; past_key_values: Past };
+  const { sequences } = output;
+  const kept = await onCpu(output.past_key_values);
+  const cached = Object.values(kept)[0]?.dims.at(-2) ?? 0;
+  memory = { ids: (sequences.data as BigInt64Array).slice(0, cached), past: kept };
   const prompted = inputs.input_ids.dims.at(-1)!;
-  const [text] = tokenizer.batch_decode(output.slice(null, [prompted, output.dims.at(-1)!]), { skip_special_tokens: true });
+  const [text] = tokenizer.batch_decode(sequences.slice(null, [prompted, sequences.dims.at(-1)!]), { skip_special_tokens: true });
   // Speed after the first token; the wait before it (reading the prompt) is reported on its own.
   const after = (performance.now() - firstAt) / 1000;
   post({
@@ -101,6 +117,8 @@ async function generate(id: number, turns: Turn[], maxNewTokens?: number, sample
     text: text.trim(),
     tokens,
     firstMs: (firstAt || performance.now()) - started,
+    reused: past ? reuse : 0,
+    prompted,
     perSecond: tokens > 1 ? (tokens - 1) / Math.max(after, 0.001) : 0,
   });
 }
