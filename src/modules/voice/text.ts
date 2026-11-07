@@ -1,11 +1,24 @@
 // Turning written replies into speech: what to say, and where a streamed reply can start speaking. Pure functions,
 // so text.check.ts runs them in Node.
 
-/** Text as it should be spoken: markdown marks and links dropped. */
+const LINK = /\b(?:https?:\/\/|www\.)[^\s<>"')\]]*[^\s<>"')\].,!?;:]/gi;
+/** What a link is called aloud: its site ("wikipedia" for https://en.wikipedia.org/wiki/X), never its characters. */
+const siteName = (url: string) => {
+  const labels = url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split(/[/?#:]/)[0].split(".");
+  return labels.length > 1 ? labels[labels.length - 2] : labels[0];
+};
+
+/**
+ * Text as it should be spoken: markdown marks dropped, and links never read out character by character. A link that
+ * only shows where something is ("Opened it in your browser: https://…", or a link on its own) is left unsaid; one
+ * inside a sentence is called by its site's name.
+ */
 export function forSpeech(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(new RegExp(`(^|:)\\s*(?:${LINK.source})[.!?]*\\s*$`, "i"), (_, colon: string) => (colon ? "." : ""))
+    .replace(LINK, siteName)
     .replace(/[*_#`>~|]/g, "")
     .replace(/\s+/g, " ")
     .trim();

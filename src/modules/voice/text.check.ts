@@ -6,6 +6,11 @@ assert.equal(wholeSentences("One. Two is cut o"), "One.");
 assert.equal(wholeSentences("No full stop yet"), "No full stop yet");
 
 assert.equal(forSpeech("**Hi** see [docs](http://x)."), "Hi see docs.");
+// Links are never spelled out: one that only shows where something is goes unsaid, one in a sentence is named.
+assert.equal(forSpeech("Opened it in your browser: https://www.youtube.com/results?search_query=asmr"), "Opened it in your browser.");
+assert.equal(forSpeech("https://www.youtube.com/results?search_query=asmr"), "");
+assert.equal(forSpeech("Read more at https://en.wikipedia.org/wiki/Some_page."), "Read more at wikipedia.");
+assert.equal(forSpeech("Try www.github.com/gpbacay or ask me."), "Try github or ask me.");
 assert.equal(isIntroduction("Good day, how can I help you?"), false);
 assert.equal(isIntroduction("Hello, I am Arcanus. How can I help?"), true);
 assert.equal(isIntroduction("I am Arcanus, created by Gianne Bacay. How can I help?"), true);
