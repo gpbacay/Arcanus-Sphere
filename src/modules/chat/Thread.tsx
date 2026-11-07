@@ -170,19 +170,24 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
           </button>
         )}
         {message.kind === "command" ? null : message.role === "user" ? (
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Edit"
-            title="Edit"
-            disabled={busy}
-            onClick={() => {
-              setText(message.text);
-              setEditing(message.id);
-            }}
-          >
-            <Pencil size={14} strokeWidth={1.75} />
-          </button>
+          <>
+            <button type="button" className="icon-btn" aria-label="Retry message" title="Retry" disabled={busy} onClick={() => resend(message.id, message.text)}>
+              <RotateCcw size={14} strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Edit"
+              title="Edit"
+              disabled={busy}
+              onClick={() => {
+                setText(message.text);
+                setEditing(message.id);
+              }}
+            >
+              <Pencil size={14} strokeWidth={1.75} />
+            </button>
+          </>
         ) : message.text ? (
           <button type="button" className="icon-btn" aria-label="Speak" title="Speak" onClick={() => speak(message.text)}>
             <Volume2 size={14} strokeWidth={1.75} />

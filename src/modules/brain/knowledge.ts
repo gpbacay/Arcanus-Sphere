@@ -17,7 +17,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "files",
     title: "Files: the .arcanus folder",
     content:
-      "Like .claude or .cursor in a project, Arcanus keeps its own files in a .arcanus folder: ARCANUS.md holds standing instructions it reads before every reply, skills/ holds skills run with /name, memory/ holds notes it recalls, knowledge/ holds books and documents you add (Add books in the Files pane, .txt or .md), and artifacts/ holds what it saved. When you ask about something in your books, Arcanus finds the passages that answer it and names the book. The folder lives privately in the browser, or in a folder on your device you open from the Files pane. /skill makes a skill, /remember keeps a note, /save saves the last reply.",
+      "The Files pane is Arcanus's file manager and editor. Like .claude or .cursor in a project, Arcanus keeps its own files in a .arcanus folder: self.md says what Arcanus is and where its source lives, ARCANUS.md holds standing instructions it reads before every reply, skills/ holds skills run with /name, memory/ holds notes it recalls, knowledge/ holds books and documents you add (Add books in the Files pane, .txt or .md), and artifacts/ holds what it saved. Open a file there to edit it; Ctrl+S saves. When you ask about something in your books, Arcanus finds the passages that answer it and names the book. The folder lives privately in the browser, or in a folder on your device you open from the Files pane. /skill makes a skill, /remember keeps a note, /save saves the last reply.",
   },
   {
     id: "browser",
@@ -95,6 +95,12 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     title: "Chain of thought",
     content:
       "Every reply shows how Arcanus decided: the route Hippocampus chose and how sure it was, the remembered phrasings that voted, what was recalled, and which model wrote and spoke the answer.",
+  },
+  {
+    id: "source",
+    title: "Source code and the editor",
+    content:
+      "Arcanus is aware of its own code. It is a Next.js and React app: src/app is the page, src/modules/brain is Hippocampus and what it knows, src/modules/chat is the conversation, src/modules/llm is SmolLM2, src/modules/voice is Paradee, src/modules/listen is Whisper, src/modules/sphere is the orb, src/modules/workspace is the Files pane, src/modules/web is the browser, and src/modules/harness is who it is allowed to be. The Files pane is its IDE. Its own notes are in .arcanus/, including self.md. Open the project folder from Files to read and edit the source that is running; Ctrl+S saves, and a reload runs the change.",
   },
   {
     id: "stack",

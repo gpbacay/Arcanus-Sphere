@@ -65,7 +65,7 @@ export const ROUTES: Route[] = [
   },
   {
     route: "about",
-    description: "A question about Arcanus itself: who it is, who created it, what it can do, its models, voice, sphere, memory or privacy",
+    description: "A question about Arcanus itself: who it is, who created it, what it can do, its source code, its files, its models, voice, sphere, memory or privacy",
     seeds: [
       "who are you",
       "who made you",
@@ -87,6 +87,8 @@ export const ROUTES: Route[] = [
       "which ai model are you",
       "what is the orb",
       "are you an assistant",
+      "where is your source code",
+      "can you edit your own files",
     ],
   },
   {

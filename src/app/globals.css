@@ -1179,6 +1179,10 @@ textarea.field {
   background: var(--surface-2);
   color: var(--text);
 }
+.crumbs [aria-current="page"] {
+  padding: 2px 4px;
+  color: var(--text);
+}
 .crumbs .icon-btn {
   margin-left: auto;
 }

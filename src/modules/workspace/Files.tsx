@@ -1,9 +1,10 @@
 "use client";
 
-import { BookPlus, ChevronRight, File, Folder, FolderOpen, HardDrive, MessageSquareText, Plus, Save, Trash2, X } from "lucide-react";
+import { BookPlus, File, Folder, FolderOpen, HardDrive, MessageSquareText, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { closePane, pane, pin } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
+import { Breadcrumb, type Crumb } from "@/shared/ui/breadcrumb";
 import { HOME, addBooks, canOpenFolder, list, openFolder, read, reconnect, remove, backToHome, workspace, write, type Entry } from "./fs";
 
 /** Arcanus's files: browse the workspace, open and edit a file, hand one to Arcanus to read. */
@@ -41,7 +42,14 @@ function FilesPane() {
   const act = (run: () => Promise<unknown>) => () =>
     run().catch((err) => (err instanceof DOMException && err.name === "AbortError" ? undefined : setError(errorText(err))));
   const join = (entry: string) => (dir ? `${dir}/${entry}` : entry);
-  const crumbs = dir ? dir.split("/") : [];
+  const crumbs = (path: string): Crumb[] => {
+    const parts = path ? path.split("/") : [];
+    return parts.map((name, i) => ({ name, path: i < parts.length - 1 ? parts.slice(0, i + 1).join("/") : undefined }));
+  };
+  const openCrumb = (path: string) => {
+    setFile(null);
+    setDir(path);
+  };
 
   async function openEntry(entry: Entry) {
     if (entry.kind === "directory") return setDir(join(entry.name));
@@ -113,10 +121,7 @@ function FilesPane() {
 
       {file ? (
         <div className="pane-body editor">
-          <p className="pane-path truncate" title={file.path}>
-            {file.path}
-            {file.text !== file.saved ? " · edited" : ""}
-          </p>
+          <Breadcrumb label="Editing" root={name || "root"} segments={crumbs(file.path)} onOpen={openCrumb} />
           <textarea
             className="field"
             value={file.text}
@@ -157,22 +162,17 @@ function FilesPane() {
         </div>
       ) : (
         <div className="pane-body">
-          <nav className="crumbs" aria-label="Folder">
-            <button type="button" onClick={() => setDir("")}>
-              {name || "root"}
-            </button>
-            {crumbs.map((crumb, i) => (
-              <span key={i}>
-                <ChevronRight size={12} aria-hidden />
-                <button type="button" onClick={() => setDir(crumbs.slice(0, i + 1).join("/"))}>
-                  {crumb}
-                </button>
-              </span>
-            ))}
-            <button type="button" className="icon-btn" aria-label="New file" title="New file (name/with/folders.md)" onClick={() => setNewName("")}>
-              <Plus size={15} />
-            </button>
-          </nav>
+          <Breadcrumb
+            label="Folder"
+            root={name || "root"}
+            segments={crumbs(dir)}
+            onOpen={setDir}
+            action={
+              <button type="button" className="icon-btn" aria-label="New file" title="New file (name/with/folders.md)" onClick={() => setNewName("")}>
+                <Plus size={15} />
+              </button>
+            }
+          />
           {newName !== null ? (
             <form
               onSubmit={(e) => {
@@ -205,9 +205,10 @@ function FilesPane() {
           {entries && !entries.length ? <p className="pane-note">This folder is empty.</p> : null}
           {!dir ? (
             <p className="pane-note">
-              Arcanus keeps its own files in <code>.arcanus/</code>: <code>ARCANUS.md</code> (instructions it reads before every reply), <code>skills/</code>{" "}
-              (run with /name), <code>memory/</code>, <code>artifacts/</code> and <code>knowledge/</code> (books Arcanus answers from).
-              {kind === "home" ? " They live privately in this browser until you open a folder on this device." : ""}
+              Arcanus keeps its own files in <code>.arcanus/</code>. <code>self.md</code> is what it knows about itself. <code>ARCANUS.md</code> is read
+              before every reply. <code>skills/</code> run with /name. <code>memory/</code>, <code>artifacts/</code> and <code>knowledge/</code> hold notes,
+              saved replies and books. Open a file to edit it; Ctrl+S saves.
+              {kind === "home" ? " These live privately in this browser. Open the project folder to edit the source that is running." : " This folder is on this device. Saving a source file changes it; reload to run it."}
             </p>
           ) : null}
         </div>
