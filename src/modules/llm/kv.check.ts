@@ -1,7 +1,7 @@
 // Run: node src/modules/llm/kv.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
 import { Tensor } from "@huggingface/transformers";
-import { crop, ReplyPenalty, shared } from "./kv.ts";
+import { crop, earlier, ReplyPenalty, shared } from "./kv.ts";
 
 const ids = (...n: number[]) => BigInt64Array.from(n.map(BigInt));
 
