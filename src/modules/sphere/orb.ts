@@ -17,8 +17,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  *   The outer rings tick round like clockwork, in small quick steps, and every few seconds, at random, they blink like
  *   eyes: their slices snap up or down and back, and a ring or two may swing back the other way, swell or shrink.
  * - Thinking (`boost`): the parts turn faster, with a small flutter in size.
- * - Speaking (`analyser`): everything whirls several times faster and shakes, and the shells, rings and core each
- *   twitch in size at their own random moments, as if the orb were talking. The brightness stays the same.
+ * - Speaking (`analyser`): swells roll across the shells and round the rings in waves that keep changing direction, the
+ *   sections rising well past their idle beat, louder voice higher; the core jumps like a mouth.
  *
  * This file is the orb alone, with no renderer: the studio (SphereScene) and the AR view (ar.ts) each add `root`
  * to their own three.js scene and call `update(dt)` once per frame.
@@ -110,7 +110,17 @@ const LINE_VERTEX = /* glsl */ `
     float beat = (kind == 0.0 ? mix(side, scattered, uScatter) : scattered) * heart(uBeatAge - arrive) * uBeat.w * beats;
     // A blink: every slice of an outer ring snaps up or down and back, quick as an eyelid.
     float blink = (hash(id + uBlinkSeed) > 0.5 ? 1.0 : -1.0) * uBlink * (1.0 - beats);
-    float raw = breathe * 0.2 + think * 0.35 * uBoost + speak * uTalk + beat * 0.6 + blink * 0.8;
+    // Talking: swells roll across each shell and round each ring like waves, in directions that keep wandering, every
+    // section a touch early or late, so it never repeats. It leans outward, so the orb visibly grows with the voice.
+    vec3 n = kind == 0.0 ? panel.xyz : normalize(vec3(position.x, 0.0, position.z) + 0.0001); // where round the ring
+    vec3 d1 = normalize(vec3(wander(uTime * 1.3, 11.0), wander(uTime * 1.3, 23.0), wander(uTime * 1.3, 37.0)) + 0.0001);
+    vec3 d2 = normalize(vec3(wander(uTime * 0.9, 41.0), wander(uTime * 0.9, 53.0), wander(uTime * 0.9, 67.0)) + 0.0001);
+    float wave = 0.6 * sin(dot(n, d1) * 4.0 - uTime * 18.0 + hash(id + 7.0) * 1.2)
+               + 0.4 * sin(dot(n, d2) * 2.5 - uTime * 11.0 + hash(id + 8.0) * 1.2);
+    float talking = 0.3 + 0.7 * wave + 0.3 * speak;
+    // The idle moves keep their old size: the reach was raised (export-orb.mjs) only to give talking more room.
+    float idle = kind == 0.0 ? 0.05 / uReach.x : 0.1 / uReach.y;
+    float raw = (breathe * 0.2 + think * 0.35 * uBoost + beat * 0.6 + blink * 0.8) * idle + talking * uTalk;
     // Held to the reach the orb was laid out for, so a lifted section or slice never touches its neighbour.
     vRaise = clamp(raw, -1.0, 1.0) * (kind == 0.0 ? uReach.x : uReach.y) * uLift;
     p += panel.xyz * vRaise * length(position);
@@ -455,7 +465,8 @@ export async function loadOrb({ analyser = () => null, boost: boostIn = () => 0,
     // Each part: its own drifting turn and a twitching size. Talking never speeds the turn up: the parts only swell
     // and shrink with the voice, like a mouth. Thinking flutters a little and slowly: the twitch is smoothed harder for it.
     const pace = (1 + boost * 2.5) * whirl * motion * dt;
-    const flutter = Math.max(talk, boost * 0.35) * motion;
+    // Talking mostly moves the sections in waves (the shader), so whole parts only twitch a little, not all at once.
+    const flutter = Math.max(talk * 0.4, boost * 0.35) * motion;
     const snap = 1 - Math.exp(-dt * (boost > talk ? 12 : 45));
     const tickSnap = 1 - Math.exp(-dt * 30);
     for (const m of movers) {

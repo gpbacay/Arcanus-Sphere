@@ -52,31 +52,42 @@ function tangents(p) {
   return [t1, n.cross(t1)];
 }
 
-/** A solder pad: a small square (or a `ring`) flat on the surface at `p`, in the bright `pads` set. */
+/** A box's 12 edges, centred on `p`, `a` along t1, `b` along t2 and `c` along their normal (all half-sizes). */
+function box(out, p, [t1, t2], a, b, c, traceSeed) {
+  const n = t1.clone().cross(t2).normalize();
+  const at = (i, h) => {
+    const [x, y] = [[-1, -1], [1, -1], [1, 1], [-1, 1]][i % 4];
+    return p.clone().addScaledVector(t1, x * a).addScaledVector(t2, y * b).addScaledVector(n, h * c);
+  };
+  for (const h of [-1, 1]) polyline(out, [0, 1, 2, 3, 4].map((i) => at(i, h)), traceSeed);
+  for (let i = 0; i < 4; i++) polyline(out, [at(i, -1), at(i, 1)], traceSeed);
+}
+
+/** A solder pad at `p` on the surface, in the bright `pads` set: a flat `ring`, or (only one time in three) a tiny cube. */
 function pad(pads, p, [t1, t2], size, traceSeed, ring = random() < 0.3) {
-  const n = ring ? 8 : 4;
-  const s = ring ? size : size * Math.SQRT2;
-  const pts = Array.from({ length: n + 1 }, (_, i) => {
-    const a = ((i % n) / n) * Math.PI * 2 + (ring ? 0 : Math.PI / 4);
-    return p.clone().addScaledVector(t1, Math.cos(a) * s).addScaledVector(t2, Math.sin(a) * s);
+  if (!ring) return random() < 0.35 && box(pads, p, [t1, t2], size, size, size, traceSeed);
+  const pts = Array.from({ length: 9 }, (_, i) => {
+    const a = ((i % 8) / 8) * Math.PI * 2;
+    return p.clone().addScaledVector(t1, Math.cos(a) * size).addScaledVector(t2, Math.sin(a) * size);
   });
   polyline(pads, pts, traceSeed);
 }
 
-// A printed trace on a shell: it runs straight, turns at right angles (now and then 45 degrees, as circuit boards do), and
-// lands on a pad at some corners and at its end. It stops where it would leave its section (`inside`).
+// A printed trace on a shell: it runs straight and turns by 90 or 45 degrees, as circuit boards do. A 45-degree turn
+// starts a short diagonal that turns 45 degrees again: back the way it was going (a jog) or on round (a cut corner).
+// It lands on a pad at some corners and at its end, and stops where it would leave its section (`inside`).
 function trace(out, pads, r, lat, lon, steps, step, inside) {
   const traceSeed = random();
-  let k = Math.floor(random() * 8);
+  let k = Math.floor(random() * 4) * 2;
   let run = 0;
   const pts = [onSphere(lat, lon, r)];
   for (let s = 0; s < steps; s++) {
     if (run <= 0) {
       if (s) {
-        k = (k + (random() < 0.7 ? 2 : 1) * (random() < 0.5 ? 1 : 7)) % 8;
+        k = (k + (k % 2 || random() < 0.55 ? 1 : 2) * (random() < 0.5 ? 1 : 7)) % 8;
         if (random() < 0.25) pad(pads, pts[pts.length - 1], tangents(pts[pts.length - 1]), r * 0.006, traceSeed);
       }
-      run = Math.floor(rand(2, 7));
+      run = k % 2 ? Math.floor(rand(1, 3)) : Math.floor(rand(2, 7));
     }
     const a = (k / 8) * Math.PI * 2;
     const nextLat = lat + Math.sin(a) * step;
@@ -214,17 +225,21 @@ function band(out, pads, r, width, height, span = Math.PI * 2, h = 0, slices = 1
         }
       }
     }
-    // Jumpers: short hops between neighbouring traces of a face, some landing on a pad.
+    // Jumpers: short hops between neighbouring traces of a face, straight across or at 45 degrees, some landing on a pad.
     for (const face of faces) {
       const wall = face.length > 1 && face[0][0] === face[1][0]; // a wall: traces stacked up the axis
       for (let i = 0; i < Math.ceil(((face.length - 1) * 10) / slices); i++) {
         const l = Math.floor(rand(0, face.length - 1));
         const a = rand(from, to);
         const traceSeed = random();
-        polyline(out, [at(a, ...face[l]), at(a, ...face[l + 1])], traceSeed);
+        // A diagonal hop goes as far round the ring as it goes across, so it leaves at 45 degrees.
+        const across = at(a, ...face[l]).distanceTo(at(a, ...face[l + 1])) / ((face[l][0] + face[l + 1][0]) / 2);
+        const turn = random() < 0.5 ? 0 : a + across < to ? across : -across;
+        polyline(out, [at(a, ...face[l]), at(a + turn, ...face[l + 1])], traceSeed);
         if (random() < 0.5) {
+          const end = random() < 0.5;
           const [radial, around] = flatTangents(a);
-          pad(pads, at(a, ...face[random() < 0.5 ? l : l + 1]), [wall ? new THREE.Vector3(0, 1, 0) : radial, around], Math.min(0.008, Math.max(width, height) * 0.1), traceSeed);
+          pad(pads, end ? at(a + turn, ...face[l + 1]) : at(a, ...face[l]), [wall ? new THREE.Vector3(0, 1, 0) : radial, around], Math.min(0.008, Math.max(width, height) * 0.1), traceSeed);
         }
       }
     }
@@ -254,8 +269,8 @@ function band(out, pads, r, width, height, span = Math.PI * 2, h = 0, slices = 1
 /** How many pieces a ring of radius `r` covering `span` radians is cut into: about one per 0.3 of its length. */
 const slicesFor = (r, span) => Math.max(3, Math.round((r * span) / 0.3));
 
-// Circuits wired in towards the core: traces from rFrom to rTo across one plane, each stepping aside at a right angle
-// once or twice on the way, with a pad where it turns and a small component body on some.
+// Circuits wired in towards the core: traces from rFrom to rTo across one plane, each stepping aside once or twice on
+// the way, at a right angle or at 45 degrees, with a pad where it turns and a small component body on some.
 function spokes(out, pads, count, rFrom, rTo) {
   for (let i = 0; i < count; i++) {
     const a = rand(0, Math.PI * 2);
@@ -266,22 +281,23 @@ function spokes(out, pads, count, rFrom, rTo) {
     let s = 0;
     const pts = [at(rFrom, 0)];
     const jogs = Array.from({ length: Math.floor(rand(1, 4)) }, () => rand(rTo + 0.04, rFrom - 0.04)).sort((p, q) => q - p);
-    for (const r of jogs) {
-      pts.push(at(r, s));
+    jogs.forEach((r, j) => {
+      const ds = (random() < 0.5 ? -1 : 1) * rand(0.015, 0.05);
+      // A 45-degree jog covers as much ground inward as aside; it only fits if it stays clear of the jogs around it.
+      const half = Math.abs(ds) / 2;
+      const slant = random() < 0.5 && r + half < (j ? jogs[j - 1] : rFrom) && r - half > (jogs[j + 1] ?? rTo) ? half : 0;
+      pts.push(at(r + slant, s));
       if (random() < 0.5) pad(pads, pts[pts.length - 1], frame, 0.007, traceSeed);
-      s += (random() < 0.5 ? -1 : 1) * rand(0.015, 0.05);
-      pts.push(at(r, s));
-    }
+      s += ds;
+      pts.push(at(r - slant, s));
+    });
     pts.push(at(rTo, s));
     polyline(out, pts, traceSeed);
     if (random() < 0.7) pad(pads, pts[pts.length - 1], frame, 0.009, traceSeed, false);
     if (random() < 0.5) {
-      // A component: a small rectangle sitting on the trace.
+      // A component: a small box sitting on the trace.
       const r = rand(rTo + 0.1, rFrom - 0.1);
-      const along = rand(0.02, 0.05);
-      const across = rand(0.01, 0.02);
-      const corner = (dr, ds) => at(r + dr, s + ds);
-      polyline(out, [corner(-along, -across), corner(along, -across), corner(along, across), corner(-along, across), corner(-along, -across)], traceSeed);
+      box(out, at(r, s), frame, rand(0.02, 0.05), rand(0.01, 0.02), rand(0.006, 0.012), traceSeed);
     }
   }
 }
@@ -317,7 +333,7 @@ const PARTS = 17;
 // How far a shell section (`shell`, outward) or a ring slice (`ring`, along the ring's axis) is ever lifted, as a share
 // of its distance from the core. orb.ts reads these from the file and holds the shader to them, and zone() leaves room
 // for them, so a lifted section or slice never touches its neighbour.
-const REACH = { shell: 0.05, ring: 0.1 };
+const REACH = { shell: 0.08, ring: 0.13 };
 
 /** The point of segment a-b nearest the core, and how far it is. */
 function nearest(a, b) {
