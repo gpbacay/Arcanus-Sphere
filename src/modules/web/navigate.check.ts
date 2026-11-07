@@ -18,6 +18,15 @@ assert.equal(commandTool("open https://github.com")?.arguments.site, "https://gi
 assert.equal(commandTool("read https://news.ycombinator.com")?.name, "read_page");
 assert.equal(commandTool("search the web for electric cars")?.arguments.query, "electric cars");
 assert.equal(commandTool("what time is it"), null);
+// Naming a site after the search opens that site's own search, not a web search for part of its name.
+for (const text of ["search asmr in youtube", "search asmr on YouTube.", "search youtube for asmr"]) {
+  const call = commandTool(text);
+  assert.equal(call?.name, "open_browser", text);
+  assert.equal(browserUrl(call!.arguments.site, call!.arguments.query), "https://www.youtube.com/results?search_query=asmr", text);
+}
+assert.deepEqual(commandTool("search restaurants in manila"), { name: "search_web", arguments: { query: "restaurants in manila" } });
+// The command's own query wins over ARC 1's span.
+assert.equal(mergeCall({ name: "search_web", arguments: { query: "you" } }, commandTool("search the web for asmr"))?.arguments.query, "asmr");
 
 const merged = mergeCall({ name: "open_browser", arguments: { site: "ASMR", query: "ASMR" } }, go);
 assert.equal(merged?.arguments.site, "youtube");

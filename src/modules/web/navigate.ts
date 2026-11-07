@@ -64,6 +64,16 @@ export function browserUrl(site: string, query = ""): string {
   return `https://www.google.com/search?q=${encodeURIComponent(words)}`;
 }
 
+/** A search, unless it names a known site ("asmr on youtube", "youtube for asmr"): then that site's own search. */
+function searchCall(query: string): WebCall {
+  const q = query.replace(/[?.!]+$/, "").trim();
+  const on = q.match(/^(.+?)\s+(?:on|in|at|from)\s+(\S+)$/i);
+  if (on && known(on[2])) return { name: "open_browser", arguments: { site: on[2], query: on[1] } };
+  const at = q.match(/^(\S+)\s+for\s+(.+)$/i);
+  if (at && known(at[1])) return { name: "open_browser", arguments: { site: at[1], query: at[2] } };
+  return { name: "search_web", arguments: { query: q } };
+}
+
 /**
  * The web action spelled out in the message, or null when it isn't a command.
  * Used when ARC 1 holds a tool back, and as the tool ARC 1 is asked to fill when the command is plain.
@@ -80,10 +90,10 @@ export function commandTool(text: string): WebCall | null {
   const link = text.match(/\bhttps?:\/\/[^\s<>"')\]]+/i)?.[0];
   if (link) return { name: "read_page", arguments: { url: link } };
   const ask = text.trim().match(ASK);
-  if (ask) return { name: "search_web", arguments: { query: ask[1].replace(/\s+(?:online|on the (?:web|internet))\s*[?.!]*$/i, "").trim() } };
+  if (ask) return searchCall(ask[1].replace(/\s+(?:online|on the (?:web|internet))\s*[?.!]*$/i, ""));
   if (/\b(?:search|google|look up|on the (?:web|internet)|online)\b/i.test(text)) {
     const query = text.replace(/\b(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look up|find online)\b/gi, " ").replace(/\s+/g, " ").trim();
-    return query ? { name: "search_web", arguments: { query } } : null;
+    return query ? searchCall(query) : null;
   }
   return null;
 }
@@ -92,15 +102,15 @@ const filled = (args: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(args).flatMap(([k, v]) => (typeof v === "string" && v.trim() ? [[k, v.trim()]] : [])));
 
 /**
- * ARC 1's tool, with arguments filled in. A navigation command already names the site and the query
- * ("go to youtube and search ASMR"); those win, because ARC 1 anchors a span and can put the same word in both fields.
+ * ARC 1's tool, with arguments filled in. A command already names its fields ("go to youtube and search ASMR",
+ * "search asmr"); those win, because ARC 1 anchors a span and can put the same word in both fields, or cut a word
+ * short ("you" out of "youtube"). ARC 1 only fills what the command left out.
  */
 export function mergeCall(arc: { name: string; arguments: Record<string, unknown> } | null, fallback: WebCall | null): WebCall | null {
-  if (!arc && !fallback) return null;
-  if (fallback?.name === "open_browser") {
-    const fromArc = arc?.name === "open_browser" ? filled(arc.arguments) : {};
-    return { name: "open_browser", arguments: { ...fromArc, ...fallback.arguments } };
+  if (fallback) {
+    const fromArc = arc?.name === fallback.name ? filled(arc.arguments) : {};
+    return { name: fallback.name, arguments: { ...fromArc, ...fallback.arguments } };
   }
-  if (!arc || (arc.name !== "open_browser" && arc.name !== "search_web" && arc.name !== "read_page")) return fallback;
-  return { name: arc.name, arguments: { ...fallback?.arguments, ...filled(arc.arguments) } };
+  if (!arc || (arc.name !== "open_browser" && arc.name !== "search_web" && arc.name !== "read_page")) return null;
+  return { name: arc.name, arguments: filled(arc.arguments) };
 }
