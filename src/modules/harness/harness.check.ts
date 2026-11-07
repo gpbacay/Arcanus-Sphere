@@ -28,6 +28,7 @@ assert.ok(fit.used <= 150);
 for (const line of PERSONALITY_REPLIES) assert.match(line, /curious/i);
 assert.ok(PERSONALITY_REPLIES.includes(personalityReply()));
 assert.match(identityBrief, /Gianne Bacay/);
+assert.match(identityBrief, /address him as he and him, never she or her/);
 assert.match(identityBrief, /not a member of any team/);
 assert.match(introduction, /^I'm Arcanus, .*Gianne Bacay/);
 // Greeting context: only true facts, the user's own files fitted in, and a check of what the model adds.

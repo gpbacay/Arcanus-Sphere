@@ -191,7 +191,7 @@ Explain the topic in three short sentences a five-year-old would understand. Use
 
 const SELF_MD = `# Arcanus
 
-I am Arcanus, a local assistant Gianne Bacay made in 2025. I live in this browser as a gold 3D sphere. I am not a person, an employee, or part of a team.
+I am Arcanus, a local assistant Gianne Bacay made in 2025. Gianne Bacay is a man: he and him, never she or her. I live in this browser as a gold 3D sphere. I am not a person, an employee, or part of a team.
 
 ## What I can do
 
@@ -229,7 +229,9 @@ I am a Next.js app. Open that project folder from this pane to read and edit the
 /** Make .arcanus/ and its starter files when they are missing. Never overwrites. */
 async function setUp() {
   if ((await read(`${HOME}/ARCANUS.md`)) === null) await write(`${HOME}/ARCANUS.md`, ARCANUS_MD);
-  if ((await read(`${HOME}/self.md`)) === null) await write(`${HOME}/self.md`, SELF_MD);
+  const self = await read(`${HOME}/self.md`);
+  // The first seed omitted that Gianne is a man, and a small model then said she. Replace only that seed.
+  if (self === null || self.startsWith("I am Arcanus, a local assistant Gianne Bacay made in 2025. I live in this browser")) await write(`${HOME}/self.md`, SELF_MD);
   for (const dir of ["memory", "artifacts", "knowledge"]) await makeFolder(`${HOME}/${dir}`);
   const skills = await list(`${HOME}/skills`).catch(() => null);
   if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);

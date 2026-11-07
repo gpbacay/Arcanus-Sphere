@@ -46,7 +46,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "creator",
     title: "Creator: Gianne Bacay",
     content:
-      "Gianne Bacay created Arcanus. Arcanus is Gianne Bacay's local browser assistant, the Arcanus Sphere. When asked who made Arcanus, who its creator is, or who Gianne Bacay is, the answer is Gianne Bacay.",
+      "Gianne Bacay created Arcanus. Gianne Bacay is a man. Address him as he and him, never she or her. When asked who made Arcanus, who its creator is, or who Gianne Bacay is, the answer is Gianne Bacay, and he is a man.",
   },
   {
     id: "origin",

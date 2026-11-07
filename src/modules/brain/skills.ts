@@ -67,7 +67,7 @@ export const SKILLS: Skill[] = [
       const step = { label: "Recalled from memory", results: notes.map((k) => k.title) };
       // Who it is, and who made it, are facts. The language model does not get to rewrite them.
       if (/\b(who are you|what are you|introduce yourself)\b/i.test(text)) return { step, reply: introduction };
-      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me." };
+      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };
       return { step, facts: notes.map((k) => k.content) };
     },
   },
