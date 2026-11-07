@@ -9,6 +9,7 @@
 // Two things keep it quick. Whisper starts on what you said as soon as you start to pause, so by the time the pause
 // counts as the end of your turn the words are mostly written (a pause you talk on from is thrown away). And talking
 // over Arcanus is written down after about a second (onWords), so it can stop then, not only once you've finished.
+import { afterGpu } from "@/shared/boot";
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
 import { FPS, FRAME, Loudness, RATE, Segmenter } from "./segment";
 
@@ -88,13 +89,13 @@ class Listen {
   }
 
   private whisper() {
-    this.worker ??= startWorker(this.state, () => new Worker(new URL("./listen.worker.ts", import.meta.url), { type: "module" }), (data) => {
+    this.worker ??= afterGpu(() => startWorker(this.state, () => new Worker(new URL("./listen.worker.ts", import.meta.url), { type: "module" }), (data) => {
       const job = this.pending.get(data.id as number);
       if (!job) return;
       this.pending.delete(data.id as number);
       if (data.type === "text") job.resolve(data.text as string);
       else if (data.type === "error") job.reject(new Error(String(data.message)));
-    });
+    }));
     this.worker.catch(() => (this.worker = null));
     return this.worker;
   }
@@ -263,7 +264,8 @@ export const canListen = Listen.supported;
 
 export const listenEngine: Engine = {
   name: "Speech",
-  detail: "Whisper base",
+  detail: "Whisper base · when you talk",
   state: listen.state,
+  later: true, // shares the GPU with SmolLM2; loading it at boot crashes the tab. converse() starts it.
   start: () => void listen.start().catch(() => undefined),
 };

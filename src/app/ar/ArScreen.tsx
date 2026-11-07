@@ -10,30 +10,10 @@ import { llmEngine } from "@/modules/llm";
 import { offlineReady } from "@/modules/offline";
 import { ArView } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
-import { useStore } from "@/shared/store";
+import { bootInTurn, useStore } from "@/shared/store";
 
 // Smallest first, the voice early for the greeting.
 const ENGINES = [brainEngine, voiceEngine, llmEngine, listenEngine];
-
-/**
- * One engine at a time. Started together, the four models set up at once, each on several WASM threads, and on a phone
- * that leaves the AR tracking short of CPU, so the camera stutters. Anything used before its turn still loads on demand.
- */
-async function bootInTurn() {
-  for (const engine of ENGINES) {
-    if (engine.state.state.off) continue;
-    engine.start();
-    await new Promise<void>((done) => {
-      const check = () => {
-        if (engine.state.state.status === "loading") return;
-        stop();
-        done();
-      };
-      const stop = engine.state.subscribe(check);
-      check();
-    });
-  }
-}
 
 export function ArScreen() {
   const busy = useBusy();
@@ -44,8 +24,12 @@ export function ArScreen() {
     hydrateChats();
     voice.restore();
     greet(ENGINES);
-    void offlineReady().then(() => void bootInTurn());
-    return () => cancelGreet();
+    let current = true;
+    void offlineReady().then(() => bootInTurn(ENGINES, () => current));
+    return () => {
+      current = false;
+      cancelGreet();
+    };
   }, []);
 
   // Same inputs as the studio's sphere: the thinking boost only until the voice starts, then the voice drives it.

@@ -40,11 +40,15 @@ export type LoadState = {
 
 export const IDLE: LoadState = { status: "idle", loaded: 0, total: 0 };
 
-/** An on-device model a module owns. The app boots each one on its own, so one failing never holds up the rest. */
+export { bootInTurn, engineSettled } from "./boot";
+
+/** An on-device model a module owns. Boot starts each one except those that wait until first use. */
 export interface Engine {
   name: string;
   detail: string;
   state: Store<LoadState>;
+  /** Load on first use, not at boot. A second WebGPU model beside SmolLM2 crashes the tab. */
+  later?: boolean;
   /** Start loading. Safe to call again, and the way to retry after an error. */
   start(): void;
 }
@@ -56,9 +60,18 @@ export function startWorker(store: Store<LoadState>, make: () => Worker, onMessa
   return new Promise<Worker>((resolve, reject) => {
     const worker = make();
     store.set({ ...IDLE, status: "loading", error: undefined });
+    // Transformers reports every download chunk. Posting each one re-renders the boot log and freezes the tab.
+    let posted = 0;
     worker.onmessage = ({ data }) => {
-      if (data.type === "progress") store.set({ loaded: data.loaded, total: data.total });
-      else if (data.type === "ready") {
+      if (data.type === "progress") {
+        const now = performance.now();
+        const finished = (data.total as number) > 0 && data.loaded >= data.total;
+        if (!finished && now - posted < 250) return;
+        posted = now;
+        store.set({ loaded: data.loaded, total: data.total });
+        return;
+      }
+      if (data.type === "ready") {
         store.set({ status: "ready", device: data.device });
         resolve(worker);
       } else if (data.type === "error" && data.id == null) {

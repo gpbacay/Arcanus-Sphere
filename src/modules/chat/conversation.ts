@@ -11,7 +11,7 @@ import { finishGreeting, isEcho, isIntroduction, takeSentences, voice, wholeSent
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
-import { Store, errorText, useStore, type Engine } from "@/shared/store";
+import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { MAX, chatStore, currentChat, newChat, push, remove, write, type Msg, type Removal } from "./store";
 
@@ -159,16 +159,17 @@ let engines: Engine[] = [];
 export const booting = new Store<{ id: string | null; steps: ThoughtStep[] }>({ id: null, steps: [] });
 
 /** One model as a step of the boot log: its size as the description, its state as the chip. */
-function engineStep({ name, detail, state: { state: s } }: Engine): ThoughtStep {
+function engineStep({ name, detail, later, state: { state: s } }: Engine): ThoughtStep {
   const pct = s.total ? Math.min(100, Math.round((s.loaded / s.total) * 100)) : 0;
   if (s.off) return { label: name, description: detail, status: "pending", results: ["off"] };
   if (s.status === "ready") return { label: name, description: detail, results: [s.device === "webgpu" ? "WebGPU" : "ready"] };
   if (s.status === "loading") return { label: name, description: detail, status: "active", results: [s.total ? `${pct}%` : "starting"] };
   if (s.status === "error") return { label: name, description: `${detail} · ${s.error ?? "failed"} · /run retries`, results: ["failed"] };
+  if (later) return { label: name, description: detail, status: "pending", results: ["when you talk"] };
   return { label: name, description: detail, status: "pending", results: ["waiting"] };
 }
 const engineSteps = () => engines.map(engineStep);
-const settled = () => engines.every(({ state: { state: s } }) => s.off || s.status === "ready" || s.status === "error");
+const settled = () => engines.every(engineSettled);
 
 let unwatch: (() => void) | null = null;
 
@@ -180,9 +181,12 @@ function watchBoot(chatId: string, id: string) {
   const settleLoads = (stopped = false) => {
     for (const [e, t] of loads) {
       const s = e.state.state;
-      const done = s.off || s.status === "ready" || s.status === "error";
+      const done = engineSettled(e);
       if (!done && !stopped) continue;
-      settle(t, { failed: s.status === "error", detail: s.off ? "off" : s.status === "error" ? s.error : !done ? "boot stopped" : s.device === "webgpu" ? "ready · WebGPU" : "ready" });
+      settle(t, {
+        failed: s.status === "error",
+        detail: s.off ? "off" : s.status === "error" ? s.error : e.later && s.status === "idle" ? "when you talk" : !done ? "boot stopped" : s.device === "webgpu" ? "ready · WebGPU" : "ready",
+      });
       loads.delete(e);
     }
   };
@@ -648,7 +652,7 @@ function command(chatId: string, input: string) {
   if (name === "/run") {
     if (!power.state.on) return setPower(true); // the boot message that follows is the answer
     const failed = engines.filter((e) => !e.state.state.off && e.state.state.status === "error");
-    failed.forEach((e) => e.start());
+    void bootInTurn(failed);
     return out(failed.length ? `Already running. Retrying ${failed.map((e) => e.name).join(", ")}.` : "Already running.", engineSteps());
   }
   out(`Unknown command ${name}. /help lists them.`);

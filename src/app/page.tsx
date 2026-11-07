@@ -1,7 +1,8 @@
 "use client";
 
 // The composition root: the only place that knows every module. Modules talk through their public APIs
-// (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it boots and gets a line in the chat's boot log.
+// (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it gets a line in the chat's boot log.
+// Whisper is not in this boot: it shares the GPU with SmolLM2, and loading both crashed the tab.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
@@ -16,10 +17,11 @@ import { Browser } from "@/modules/web";
 import { Files, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
 import { power, restorePower } from "@/shared/power";
-import { useStore } from "@/shared/store";
+import { bootInTurn, useStore } from "@/shared/store";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
-const ENGINES = [brainEngine, llmEngine, voiceEngine, listenEngine];
+// Speech waits until the mic is opened. The others start together; Whisper cannot compile until SmolLM2 has.
+const ENGINES = [brainEngine, voiceEngine, llmEngine, listenEngine];
 
 export default function Home() {
   const on = useStore(power, (s) => s.on);
@@ -45,14 +47,10 @@ export default function Home() {
       return;
     }
     // Engines start once the service worker controls the page, so everything they download is kept for offline use.
-    // Each loads on its own: a slow or failed one never holds up the others. Off at load: nothing downloads yet.
-    // The boot message goes up first, so the chat shows each model waiting, then loading.
+    // Off at load: nothing downloads yet. The boot message goes up first, so the chat shows each model waiting.
     greet(ENGINES);
     let current = true;
-    void offlineReady().then(() => {
-      if (!current) return;
-      for (const engine of ENGINES) if (!engine.state.state.off) engine.start();
-    });
+    void offlineReady().then(() => bootInTurn(ENGINES, () => current));
     return () => {
       current = false;
       cancelGreet();
