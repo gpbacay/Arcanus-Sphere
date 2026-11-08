@@ -479,8 +479,9 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       finish("I don't have that in your books, and the web search found nothing I can quote.", trace);
       return;
     }
-    // A tool result or a note is the answer. SmolLM2 rewrites it into something else, so it is not called.
-    if (!skill && plan.facts?.length && (spoken || plan.source)) {
+    // A tool or a web result is spoken as it is. SmolLM2 rewrites those into something else, so it is not called.
+    // A note about Arcanus, including who made it, is written by SmolLM2.
+    if (!skill && plan.source && plan.facts?.length) {
       const line = spokenLine(plan.facts[0]);
       const said = thought("generate", line, { parents: [decision], detail: "spoken from the result" });
       sayAll(line);
@@ -510,10 +511,16 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     });
     // A reply grounded in its own notes is about itself, so it is said by itself (asSelf), whatever the model slipped into.
     const own = plan.facts && !plan.source ? asSelf : (s: string) => s;
+    const note = plan.facts?.length && !plan.source ? plan.facts.join("\n") : "";
     const turns: Turn[] = built
       ? built.turns
       : [
-          { role: "system", content: "One short spoken sentence. No introduction." },
+          {
+            role: "system",
+            content: note
+              ? `One short spoken sentence, from these notes:\n${note}\nSpeak as "I". No introduction.`
+              : "One short spoken sentence. No introduction.",
+          },
           { role: "user", content: user.text },
         ];
     let speaking: (() => void) | null = null;

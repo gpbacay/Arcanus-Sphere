@@ -69,12 +69,16 @@ export const SKILLS: Skill[] = [
     ...route("about"),
     run(text) {
       if (FEATURES.test(text)) return { step: { label: "My abilities", description: "From the harness, not the language model" }, reply: featuresReply };
+      // Who made Arcanus is a fact for SmolLM2 to phrase. A fixed line here is what it used to say every time.
+      if (/\b(who (made|created|built|designed) you|your creator|who(?:'s| is) (?:your )?(?:creator|maker|gianne))\b/i.test(text)) {
+        const about = KNOWLEDGE.filter((k) => k.id === "creator" || k.id === "origin");
+        return { step: { label: "Recalled from memory", results: about.map((k) => k.title) }, facts: about.map((k) => k.content) };
+      }
       const notes = selfNotes(text);
       if (!notes.length) return null;
       const step = { label: "Recalled from memory", results: notes.map((k) => k.title) };
-      // Who it is, and who made it, are fixed lines. The language model does not get to rewrite them into a biography.
+      // Who it is stays a fixed introduction. Anything else, including who made it, is written by SmolLM2.
       if (/\b(who are you|what are you|introduce yourself)\b/i.test(text)) return { step, reply: introduction };
-      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };
       return { step, facts: notes.map((k) => k.content) };
     },
   },
