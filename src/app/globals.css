@@ -140,10 +140,7 @@ body {
 
 /* —— Glass: every pane over the stage is the same material —— */
 .app-nav,
-.panel,
-.rail,
 .side-pane,
-[data-variant="floating"] [data-slot="sidebar-inner"],
 [data-mobile="true"][data-sidebar="sidebar"],
 .app-dialog,
 .ar-dialog,
@@ -159,8 +156,6 @@ body {
 /* Registration ticks: the four corners of each pane, drawn in light. */
 .app-nav::before,
 .side-pane::before,
-[data-variant="floating"] [data-slot="sidebar-inner"]::before,
-.panel:not(.panel-docked)::before,
 .app-dialog::before,
 .ar-dialog::before {
   --t: 9px;
@@ -193,14 +188,8 @@ body {
     clip-path: inset(0 0 0 0);
   }
 }
-.app-nav,
-[data-variant="floating"] [data-slot="sidebar-inner"],
-.panel:not(.panel-docked) {
+.app-nav {
   animation: scan-in 0.7s var(--ease) both;
-}
-[data-variant="floating"] [data-slot="sidebar-inner"],
-.panel:not(.panel-docked) {
-  animation-delay: 0.16s;
 }
 
 /* —— Stage —— */
@@ -260,25 +249,33 @@ body {
   }
 }
 
-/* —— Chat pane —— */
+/* —— Chat: a clear overlay. The sphere stays visible; each line carries its own scrim. —— */
 .panel {
   position: absolute;
-  top: var(--gap);
+  top: auto;
   bottom: var(--gap);
   left: var(--gap);
   z-index: 10;
   width: var(--panel-w);
+  height: auto;
+  max-height: calc(100dvh - 2 * var(--gap));
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  border: none;
+  background: linear-gradient(to bottom, transparent 0%, rgba(2, 6, 12, 0.04) 28%, rgba(2, 6, 12, 0.22) 100%);
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .panel-docked {
   position: relative;
   inset: auto;
   width: auto;
-  height: 100%;
+  height: auto;
+  max-height: calc(100dvh - 2 * var(--gap));
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -292,8 +289,11 @@ body {
   bottom: 0;
   z-index: 20;
   width: var(--panel-w);
-  border-bottom: 0;
-  border-radius: var(--r) var(--r) 0 0;
+  border: none;
+  border-radius: 0;
+  background: linear-gradient(to top, rgba(2, 6, 12, 0.55), transparent);
+  box-shadow: none;
+  backdrop-filter: none;
   padding-bottom: env(safe-area-inset-bottom);
   animation: dock-up 0.35s var(--ease) both;
 }
@@ -312,8 +312,22 @@ body {
   position: relative;
   display: flex;
   align-items: flex-start;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
   gap: 0;
   padding: 8px 6px 8px 12px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.65);
+}
+.panel-head .title-btn .truncate {
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: min(240px, calc(100vw - 12.5rem));
+}
+.panel-head .icon-btn,
+.panel-head .brand-logo {
+  color: var(--text);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
 }
 
 .brand-logo {
@@ -336,15 +350,16 @@ body {
   opacity: 0.35;
 }
 .brand-logo[data-state="thinking"] {
-  filter: drop-shadow(0 0 5px var(--think));
+  filter: drop-shadow(0 0 5px var(--think)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
 }
 .brand-logo[data-state="speaking"] {
-  filter: drop-shadow(0 0 6px var(--speak));
+  filter: drop-shadow(0 0 6px var(--speak)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
 }
 
 .panel-title {
   position: relative;
-  flex: 1;
+  flex: 0 0 auto;
+  max-width: min(280px, calc(100vw - 11.5rem));
   min-width: 0;
 }
 
@@ -368,7 +383,7 @@ body {
 .panel-status {
   margin: 1px 0 0;
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: #d5e6ef;
 }
 
 .menu {
@@ -475,21 +490,25 @@ textarea.field {
 
 /* —— Thread —— */
 .thread {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 22px 12px 10px;
   overflow-y: auto;
-  border-top: 1px solid var(--line);
+  overscroll-behavior: contain;
+  border-top: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22px);
+  mask-image: linear-gradient(to bottom, transparent, #000 22px);
 }
 
 .msg {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 90%;
+  width: fit-content;
+  max-width: min(92%, 34rem);
 }
 .msg[data-role="user"] {
   align-self: flex-end;
@@ -497,14 +516,16 @@ textarea.field {
 }
 .msg[data-role="assistant"] {
   align-self: flex-start;
-  width: 96%;
-  max-width: 96%;
 }
 
 .msg-bubble {
+  width: fit-content;
+  max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.5;
+  line-height: 1.45;
+  color: #f4fbff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.72);
 }
 .msg-bubble.md {
   white-space: normal;
@@ -573,14 +594,16 @@ textarea.field {
   color: var(--text-muted);
 }
 .msg[data-role="user"] .msg-bubble {
-  padding: 6px 10px;
-  border: 1px solid rgba(111, 224, 255, 0.24);
+  padding: 5px 10px;
+  border: 1px solid rgba(111, 224, 255, 0.34);
   border-radius: 0;
-  background: linear-gradient(180deg, rgba(111, 224, 255, 0.13), rgba(111, 224, 255, 0.07));
+  background: rgba(4, 22, 32, 0.58);
 }
 .msg[data-role="assistant"] .msg-bubble {
-  padding: 0 2px;
+  padding: 5px 10px;
   font-size: 13.5px;
+  border: 1px solid rgba(190, 230, 255, 0.16);
+  background: rgba(2, 6, 12, 0.52);
 }
 
 .msg[data-kind="command"] .msg-bubble {
@@ -607,7 +630,11 @@ textarea.field {
 .msg-trace {
   --cot-accent: var(--accent);
   --cot-bg: #070b10;
-  padding: 0 2px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: rgba(7, 11, 16, 0.78);
+  border: 1px solid rgba(150, 215, 245, 0.14);
 }
 
 .msg-quote {
@@ -629,7 +656,8 @@ textarea.field {
   gap: 2px;
   padding: 0 2px;
   font-size: 11px;
-  color: var(--text-faint);
+  color: #d5e6ef;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -744,7 +772,7 @@ textarea.field {
   padding: 4px 4px 4px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  background: var(--surface-2);
+  background: rgba(2, 6, 12, 0.72);
   font-size: 12px;
 }
 .undo p {
@@ -758,12 +786,17 @@ textarea.field {
 }
 
 /* The chat crashed: the sphere keeps running behind this. */
-.panel-fallback {
+.panel.panel-fallback {
+  top: var(--gap);
   left: auto;
   right: var(--gap);
   bottom: auto;
   gap: 10px;
   padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--glass-sheen), var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
 }
 .panel-fallback p {
   margin: 0;
@@ -779,11 +812,12 @@ textarea.field {
 .chip {
   height: 24px;
   padding: 0 9px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(150, 215, 245, 0.28);
   border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text-muted);
+  background: rgba(2, 6, 12, 0.55);
+  color: #e7f4fb;
   font-size: 11.5px;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .chip:hover {
@@ -807,9 +841,9 @@ textarea.field {
   padding: 2px 2px 2px 9px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  background: var(--surface);
+  background: rgba(2, 6, 12, 0.72);
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: #d5e6ef;
 }
 .attachment p {
   flex: 1;
@@ -850,9 +884,10 @@ textarea.field {
 
 .composer-box {
   position: relative;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(150, 215, 245, 0.32);
   border-radius: var(--r);
-  background: rgba(2, 5, 9, 0.55);
+  background: rgba(2, 6, 12, 0.58);
+  backdrop-filter: blur(12px) saturate(1.3);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .composer-box[data-command] textarea {
@@ -875,11 +910,12 @@ textarea.field {
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--text);
+  color: #f4fbff;
   line-height: 1.45;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 .composer textarea::placeholder {
-  color: var(--text-faint);
+  color: #d5e6ef;
 }
 
 .composer-bar {
@@ -931,16 +967,29 @@ textarea.field {
   }
 }
 
-/* —— Floating right sidebar: the chat pane on desktop —— */
+/* —— Floating right sidebar: the chat sits on the sphere, only as tall as the thread —— */
 [data-side="right"] > [data-slot="sidebar-gap"] {
   display: none;
 }
 [data-side="right"][data-variant="floating"] > [data-slot="sidebar-container"] {
   z-index: 20;
+  top: auto;
+  height: auto;
   padding: var(--gap);
+  pointer-events: none;
+  background: transparent;
 }
 [data-variant="floating"] [data-slot="sidebar-inner"] {
   position: relative;
+  height: auto;
+  max-height: calc(100dvh - 2 * var(--gap));
+  pointer-events: auto;
+  overflow: visible;
+  border: none;
+  border-radius: 0;
+  background: linear-gradient(to bottom, transparent 0%, rgba(2, 6, 12, 0.04) 28%, rgba(2, 6, 12, 0.22) 100%);
+  box-shadow: none;
+  backdrop-filter: none;
 }
 [data-side="right"] [data-sidebar="trigger"] svg {
   transform: scaleX(-1);
@@ -1493,11 +1542,6 @@ textarea.field {
     height: 100dvh;
     padding-top: env(safe-area-inset-top);
   }
-  .app-shell:has(.panel) {
-    grid-template-rows: auto minmax(0, 1fr) minmax(0, 36dvh);
-    grid-template-areas: "nav status" "stage stage" "chat chat";
-  }
-
   /* One strip across the top: the mark and the two dialogs, then the telemetry, scrolling sideways, beside them. */
   .app-nav {
     grid-area: nav;
@@ -1560,25 +1604,40 @@ textarea.field {
   }
 
   .panel {
-    grid-area: chat;
-    position: relative;
-    inset: auto;
-    width: auto;
-    height: 100%;
-    min-height: 0;
+    position: absolute;
+    left: 0;
+    right: auto;
+    bottom: 0;
+    top: auto;
+    z-index: 20;
+    width: min(100%, 440px);
+    height: auto;
+    max-height: min(68dvh, calc(100dvh - 56px - env(safe-area-inset-top)));
     margin: 0;
-    overflow: hidden;
-    border-width: 1px 0 0;
-    border-radius: var(--r) var(--r) 0 0;
+    overflow: visible;
+    border: none;
+    border-radius: 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   .rail {
-    right: 0;
-    width: 100%;
-    border-width: 1px 0 0;
+    right: auto;
+    left: 0;
+    width: min(100%, 440px);
+    border: none;
   }
-  .panel::before {
-    display: none;
+  .panel-head {
+    flex-wrap: nowrap;
+    padding-left: 10px;
+  }
+  .composer textarea {
+    font-size: 16px; /* stops iOS from zooming the page when the field is focused */
+  }
+  .msg {
+    max-width: min(94%, 34rem);
+  }
+  .msg-bubble,
+  .msg[data-role="assistant"] .msg-bubble {
+    font-size: 14.5px;
   }
   .icon-btn {
     width: 34px;
