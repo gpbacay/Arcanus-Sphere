@@ -2,7 +2,7 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { grounding, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
-import { abilities, asSelf, assemble, FIRST_PERSON, greetingPrompt, identityBrief, personality, unsupported } from "@/modules/harness";
+import { asSelf, assemble, FIRST_PERSON, greetingPrompt, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
@@ -23,12 +23,12 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 // While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
 const busy = () => live.state.reply !== null || !power.state.on;
 
-// The date is in, so the model never guesses it; the abilities are in, so it never offers ones it doesn't have.
-// Its self is given in its own words, so it answers in them: "I can…", never "Arcanus can…".
+// The biography is not in here. Pasted in, a small model recites "I am Arcanus, a local AI assistant…" instead of answering.
+// Who it is stays in the about route, and only when the question is about that.
 const system = () =>
-  `${FIRST_PERSON} What you know about yourself, in your own words: ${identityBrief} ${personality.line} I can ${abilities.join(", ")}. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}. Answer clearly and briefly. About yourself, use only these facts. If you do not know something, say so instead of guessing. Do not invent a job, a team, a company, or a personal history.`;
+  `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
-const SPOKEN = " You are speaking out loud in a live conversation: reply in one or two short sentences, in plain words, with no lists.";
+const SPOKEN = " You are speaking out loud: one or two short sentences, plain words, no lists, and no introduction.";
 const VOICE_TOKENS = 70; // about three short sentences
 const VOICE_HISTORY = 4;
 const BOOKS = /\b(books?|chapters?|library|shelf|my notes)\b/i; // a spoken turn searches the user's books only when asked
@@ -59,6 +59,9 @@ let lastContext: { report: Report; used: number } | null = null;
 
 /** The message as the model should read it: a skill's command name taken off. */
 const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/, "") || skill.description : user.text);
+
+/** A reply that is the biography and nothing else. Left in the history, the model copies it onto the next question. */
+const recited = (m: Msg) => m.role === "assistant" && /^I am Arcanus, a local AI assistant created by Gianne Bacay\b/.test(m.text) && m.text.length < 800;
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
@@ -91,7 +94,7 @@ async function buildTurns(
     ? ""
     : plan.source
       ? `${listed}\n\nAnswer from this, and say which site it came from.`
-      : `${listed}\n\nAnswer from these facts only, as yourself: "I" and "my", never "Arcanus" or "it". Do not add a job, a team, a personal history, or anything these facts do not say.`;
+      : `${listed}\n\nAnswer the user's question in one or two sentences, from the one fact that answers it. Do not recite the other facts, and do not introduce yourself. Speak as "I" and "my". Do not add a job, a team, or a personal history.`;
   const { sections, report, used } = assemble(
     [
       { label: STANDING, text: rules, priority: 1 },
@@ -117,10 +120,12 @@ async function buildTurns(
   ]
     .filter(Boolean)
     .join("\n\n");
+  const asked = `${content}\n\nAnswer that directly. Do not introduce yourself.`;
   // Only the conversation itself: not commands, and not the boot greeting, which a tiny model wrote about itself and
-  // which would otherwise be read back as fact.
+  // which would otherwise be read back as fact. A reply that only recited the biography is dropped too, or the next
+  // reply copies it.
   const history = prior
-    .filter((m) => !m.kind && m.text)
+    .filter((m) => !m.kind && m.text && !recited(m))
     .slice(spoken ? -VOICE_HISTORY : -HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
   const base = system() + (spoken ? SPOKEN : "");
@@ -134,7 +139,7 @@ async function buildTurns(
     results: report.map(reportLine),
   });
   const evidence = [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])];
-  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content }], step, evidence, context };
+  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content: asked }], step, evidence, context };
 }
 
 function reportLine(r: Report[number]) {
@@ -736,10 +741,11 @@ export function talk() {
   };
   void listen.converse({
     strict: () => voice.state.state.speaking,
-    onSpeech: (cut) => {
-      over = cut || voice.state.state.speaking;
-      if (cut) interrupt();
-      else if (over) voice.duck(true);
+    onSpeech: () => {
+      // Duck, but do not stop. The mic hears Arcanus's own first sentence; stopping here saved that sentence and a "…".
+      // Real words still interrupt, once they are written and are not an echo (onText).
+      over = voice.state.state.speaking;
+      if (over) voice.duck(true);
       hearing ??= thought("perceive", "Hearing you…", { active: true, detail: "microphone" });
     },
     onText: (text) => {

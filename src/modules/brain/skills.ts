@@ -35,10 +35,13 @@ function recall(text: string) {
   return memory.neighbors(text).flatMap((n) => KNOWLEDGE.filter((k) => k.id === n.label));
 }
 
-/** Notes for a chat message that is about Arcanus: who it is always, plus the notes most like the message. */
+const WHO = /\b(who|what) are you\b|\b(your name|introduce yourself|who (made|created|built)|your creator)\b/i;
+
+/** Notes for a chat message that is about Arcanus. The biography only when the question is who it is: otherwise the model recites it. */
 export function selfNotes(text: string) {
   const identity = KNOWLEDGE.filter((k) => k.id === "identity");
-  return [...identity, ...recall(text).filter((k) => k.id !== "identity")];
+  const rest = recall(text).filter((k) => k.id !== "identity");
+  return WHO.test(text) ? [...identity, ...rest] : rest;
 }
 
 const route = (name: string) => ROUTES.find((r) => r.route === name)!;
@@ -66,12 +69,13 @@ export const SKILLS: Skill[] = [
     ...route("about"),
     run(text) {
       if (FEATURES.test(text)) return { step: { label: "My abilities", description: "From the harness, not the language model" }, reply: featuresReply };
-      const notes = recall(text);
+      const notes = selfNotes(text);
       if (!notes.length) return null;
       const step = { label: "Recalled from memory", results: notes.map((k) => k.title) };
-      // Who it is, and who made it, are facts. The language model does not get to rewrite them.
+      // Who it is, and who made it, are fixed lines. The language model does not get to rewrite them into a biography.
       if (/\b(who are you|what are you|introduce yourself)\b/i.test(text)) return { step, reply: introduction };
-      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };      return { step, facts: notes.map((k) => k.content) };
+      if (/\b(who (made|created|built) you|your creator|who is gianne)\b/i.test(text)) return { step, reply: "Gianne Bacay created me. He is a man." };
+      return { step, facts: notes.map((k) => k.content) };
     },
   },
   {

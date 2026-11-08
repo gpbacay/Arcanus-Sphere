@@ -133,8 +133,10 @@ export async function think(text: string): Promise<Plan> {
   // the model answers from them instead of inventing a self.
   if (decided.aboutSelf || skill.route === "about") {
     const notes = selfNotes(text);
-    trace.push({ label: "About Arcanus: grounded in its notes", results: notes.map((k) => k.title) });
-    return { route: "chat", trace, facts: notes.map((k) => k.content) };
+    if (notes.length) {
+      trace.push({ label: "About Arcanus: grounded in its notes", results: notes.map((k) => k.title) });
+      return { route: "chat", trace, facts: notes.map((k) => k.content) };
+    }
   }
   return { route: "chat", trace };
 }
