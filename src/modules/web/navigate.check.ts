@@ -15,6 +15,8 @@ assert.equal(go?.arguments.site, "youtube");
 assert.equal(go?.arguments.query, "ASMR");
 assert.equal(browserUrl(go!.arguments.site, go!.arguments.query), "https://www.youtube.com/results?search_query=ASMR");
 assert.equal(commandTool("open https://github.com")?.arguments.site, "https://github.com");
+assert.equal(commandTool("goto facebook")?.name, "open_browser");
+assert.equal(browserUrl(commandTool("goto facebook")!.arguments.site), "https://www.facebook.com/");
 assert.equal(commandTool("read https://news.ycombinator.com")?.name, "read_page");
 assert.equal(commandTool("search the web for electric cars")?.arguments.query, "electric cars");
 assert.equal(commandTool("what time is it"), null);

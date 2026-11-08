@@ -3,7 +3,7 @@
 // Re-run it after changing SIZE, TOP, STOP or fits() in shelf.ts.
 import assert from "node:assert/strict";
 import { grounding } from "./ground.ts";
-import { Shelf, fits } from "./shelf.ts";
+import { Shelf, asksForFact, fits, lookupQuery } from "./shelf.ts";
 
 // A small "book": one topic per paragraph, so each question has exactly one right passage.
 const BOOK = [
@@ -63,6 +63,12 @@ assert.equal(shelf.search("octopus hearts")[0]?.book, "a.md");
 assert.ok(fits("octopus hearts", "Octopuses have three hearts"));
 assert.ok(!fits("how are you today", "How are you today, reader?")); // no telling word at all
 assert.ok(!fits("octopus recipes with garlic", "The octopus has three hearts.")); // one of three is not enough
+assert.equal(asksForFact("give me a quote of einstein"), true);
+assert.equal(asksForFact("what's his famous quote?"), true);
+assert.equal(asksForFact("tell me a joke"), false);
+assert.equal(asksForFact("how are you today"), false);
+assert.equal(lookupQuery("what's his famous quote?", "give me a quote of einstein"), "give me a quote of einstein what's his famous quote?");
+assert.equal(lookupQuery("what is the capital of france"), "what is the capital of france");
 
 // Grounding (ARCANE's Graph of Thought support check): a reply in the evidence's words is backed, an invention isn't.
 const octopus = ["The octopus has three hearts and blue blood, which carries oxygen with a copper-based protein called hemocyanin."];

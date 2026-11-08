@@ -34,6 +34,24 @@ export const same = (a: string, b: string) => (a.length < b.length ? b.startsWit
  * a passage counts only if it holds at least half of the question's telling words, and two of them when there are two.
  * ponytail: prefix matching, not real stemming; swap for Hippocampus's own tokenizer if it is ever exported.
  */
+// A fact question. Small talk and "write me a poem" are not: those still go to the language model.
+// ponytail: a pattern, not a classifier. Add a phrase when a real question slips through and gets invented.
+const LOOKUP = /\bquotes?\b|^(?:who|what|when|where|why|how many|how much)\b|\?$/i;
+const CHATTER = /^(?:hi|hello|hey|thanks|thank you|ok|okay)\b|\b(joke|poem|story)\b|\bhow are you\b/i;
+const DANGLING = /\b(he|she|his|her|hers|their|they|them|it|its|that|this)\b/i;
+
+export function asksForFact(text: string) {
+  const t = text.trim();
+  return LOOKUP.test(t) && !CHATTER.test(t);
+}
+
+/** The words to retrieve for `text`. A follow-up ("what's his famous quote?") keeps the previous question's topic. */
+export function lookupQuery(text: string, earlier = "") {
+  const q = text.replace(/\s+/g, " ").trim();
+  const prev = earlier.replace(/[?.!]+$/g, "").replace(/\s+/g, " ").trim();
+  return prev && DANGLING.test(q) ? `${prev} ${q}` : q;
+}
+
 export function fits(question: string, passage: string) {
   const asked = words(question);
   if (!asked.length) return false;

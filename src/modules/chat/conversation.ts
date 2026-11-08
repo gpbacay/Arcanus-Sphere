@@ -1,12 +1,12 @@
 // Answering a message: brain decides, the language model writes, the voice speaks, each sentence as it is written.
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
-import { grounding, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
+import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { asSelf, assemble, FIRST_PERSON, greetingPrompt, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
-import { go } from "@/modules/web";
+import { go, search } from "@/modules/web";
 import { finishGreeting, isEcho, isIntroduction, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
@@ -61,7 +61,11 @@ let lastContext: { report: Report; used: number } | null = null;
 const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/, "") || skill.description : user.text);
 
 /** A reply that is the biography and nothing else. Left in the history, the model copies it onto the next question. */
-const recited = (m: Msg) => m.role === "assistant" && /^I am Arcanus, a local AI assistant created by Gianne Bacay\b/.test(m.text) && m.text.length < 800;
+const recited = (m: Msg) =>
+  m.role === "assistant" &&
+  ((/^I am Arcanus, a local AI assistant created by Gianne Bacay\b/.test(m.text) && m.text.length < 800) ||
+    /^Gianne Bacay created me\b/.test(m.text) ||
+    /^I,\s/.test(m.text));
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
@@ -438,13 +442,50 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       finish(plan.reply, trace);
       return;
     }
-    // Live voice: a tool result or a note is spoken as it is. ARC 1 already chose the tool. SmolLM2 is not called.
-    if (spoken && !skill && plan.facts?.length) {
+    // A fact with nothing retrieved is not SmolLM2's to invent. Books first, then the web, then an honest miss.
+    if (!skill && plan.route === "chat" && !plan.facts?.length && asksForFact(user.text)) {
+      const earlier = prior.findLast((m) => m.role === "user" && m.text && !m.kind)?.text ?? "";
+      const query = lookupQuery(user.text, earlier);
+      const passages = await recallPassages(query).catch(() => []);
+      if (stale()) return;
+      if (passages[0]) {
+        const line = `${spokenLine(passages[0].text)} (${passages[0].book})`;
+        const said = thought("generate", line, { parents: [decision], detail: "the passage that answers it" });
+        sayAll(line);
+        voiced(said)();
+        finish(line, [...trace, { label: "From your books", description: passages[0].book }]);
+        return;
+      }
+      try {
+        const found = await search(query);
+        if (stale()) return;
+        const raw = (found.brief && found.brief.length < 400 ? found.brief : "") || found.results[0]?.snippet || "";
+        const line = spokenLine(raw);
+        if (line) {
+          const url = found.results[0]?.url;
+          const said = thought("generate", line, { parents: [decision], detail: "the search result, not rewritten" });
+          sayAll(line);
+          voiced(said)();
+          finish(url ? `${line}\n${url}` : line, [
+            ...trace,
+            { label: `From ${found.engine || "the web"}`, description: query, results: found.results.slice(0, 3).map((r) => r.title) },
+          ]);
+          return;
+        }
+      } catch (err) {
+        finish(`I don't have that in your books, and I couldn't reach the web. ${errorText(err)}`, trace);
+        return;
+      }
+      finish("I don't have that in your books, and the web search found nothing I can quote.", trace);
+      return;
+    }
+    // A tool result or a note is the answer. SmolLM2 rewrites it into something else, so it is not called.
+    if (!skill && plan.facts?.length && (spoken || plan.source)) {
       const line = spokenLine(plan.facts[0]);
       const said = thought("generate", line, { parents: [decision], detail: "spoken from the result" });
       sayAll(line);
       voiced(said)();
-      finish(line, [...trace, { label: "ARC 1", description: plan.source ? "Spoke the tool result" : "Spoke the note that answers it" }]);
+      finish(line, [...trace, { label: plan.source ?? "ARC 1", description: plan.source ? "Answered from the result, not rewritten" : "Spoke the note that answers it" }]);
       return;
     }
 
@@ -523,16 +564,16 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
     const written = own(result.text || shown.trim() || "…");
-    const text = cutOff ? wholeSentences(written) : written;
+    let text = cutOff ? wholeSentences(written) : written;
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
           label: "SmolLM2-135M wrote this",
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
-    settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
-    // ARCANE's Graph of Thought check: each sentence of the reply against the evidence it was given (no model, <1 ms).
     const grounded = built && built.evidence.length ? grounding(text, built.evidence) : null;
+    if (grounded && grounded.score < 0.5 && built) text = spokenLine(built.evidence[0]);
+    settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     const checked = grounded
       ? {
           label: `Checked against its sources: ${Math.round(grounded.score * 100)}% grounded`,

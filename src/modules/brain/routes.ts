@@ -31,7 +31,7 @@ export type Route = {
 export const LINK = /\bhttps?:\/\/[^\s<>"')\]]+/i;
 export const ASK_WEB = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look\s+up|browse(?:\s+to)?|find\s+online)\s+/i;
 /** "go to youtube", "open github", "browse to wikipedia.org": open the user's browser, not the reader. */
-export const GO = /^(?:please\s+)?(?:go to|navigate to|take me to|pull up|open|browse to)\b/i;
+export const GO = /^(?:please\s+)?(?:go\s*to|navigate to|take me to|pull up|open|browse to)\b/i;
 
 export const ROUTES: Route[] = [
   {

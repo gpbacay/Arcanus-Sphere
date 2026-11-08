@@ -34,7 +34,7 @@ const SITES: { names: string[]; home: string; search: (q: string) => string }[] 
   { names: ["maps"], home: "https://maps.google.com/", search: (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}` },
 ];
 
-const GO = /^(?:please\s+)?(?:go to|navigate to|take me to|pull up|open|browse to)\s+([\s\S]+)$/i;
+const GO = /^(?:please\s+)?(?:go\s*to|navigate to|take me to|pull up|open|browse to)\s+([\s\S]+)$/i;
 const AND_SEARCH = /^(.*?)(?:\s+and\s+|\s*,\s*)(?:search(?:\s+for)?|look up|find)\s+(.+)$/i;
 const ASK = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|google|look\s+up|find\s+online)\s+([\s\S]+)$/i;
 
