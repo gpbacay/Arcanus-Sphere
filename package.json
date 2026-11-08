@@ -7,7 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/shared/lru.check.ts && node src/shared/boot.check.ts && node src/shared/html.check.ts && node src/modules/web/navigate.check.ts && node src/modules/listen/segment.check.ts && node src/modules/brain/routing.check.ts && node src/modules/brain/shelf.check.ts && node src/modules/chat/markdown.check.ts && node src/modules/device/command.check.ts && node src/modules/mind/threads.check.ts",
+    "check": "node src/modules/brain/tools.check.ts && node src/modules/voice/text.check.ts && node src/modules/harness/harness.check.ts && node src/shared/lru.check.ts && node src/shared/boot.check.ts && node src/shared/html.check.ts && node src/modules/web/navigate.check.ts && node src/modules/listen/segment.check.ts && node src/modules/brain/routing.check.ts && node src/modules/brain/shelf.check.ts && node src/modules/chat/markdown.check.ts && node src/modules/device/command.check.ts && node src/modules/mind/threads.check.ts && node src/modules/llm/kv.check.ts",
     "orb": "node scripts/export-orb.mjs",
     "postinstall": "node scripts/copy-8thwall-engine.mjs",
     "copy:8thwall": "node scripts/copy-8thwall-engine.mjs",
@@ -20,7 +20,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
     "lucide-react": "^1.66.0",
-    "next": "^15.5.22",
+    "next": "^15.5.29",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "open-computer-use": "1.1.3",
     "phonemizer": "1.2.1",
@@ -38,7 +38,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^15.5.22",
+    "eslint-config-next": "^15.5.29",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
