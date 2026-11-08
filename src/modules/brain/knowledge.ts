@@ -68,13 +68,13 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "smollm2",
     title: "Language model: SmolLM2",
     content:
-      "I write my replies with SmolLM2-Instruct from Hugging Face, a small text-only language model. On WebGPU I run the 360 million parameter model at 4 bits; without WebGPU I run the 135 million parameter model at 4 bits on WebAssembly, so replies still start quickly. It reads and writes text only: I cannot look at images.",
+      "I write open answers with SmolLM2-135M Q4, on the CPU. In live voice I call it only when the turn needs a sentence I cannot take from a tool or a note, and then only for one short sentence. It reads and writes text only: I cannot look at images.",
   },
   {
     id: "arc1",
     title: "Argument reader: ARC 1",
     content:
-      "ARC 1 from ARCANE is a 1.3 million parameter System 1 model inside me. It does not write text. It chooses which tool a web or tool request needs, and reads that tool's arguments from the words of the message, such as the site in go to youtube and search ASMR, the city in a question about the time, or the fields a connected MCP tool needs. SmolLM2 only writes my reply. Hippocampus still decides whether a message is chat, the time, math, or the web.",
+      "ARC 1 from ARCANE is a 1.3 million parameter System 1 model inside me. It does not write free text. In live voice it is how I answer at once: it chooses the tool and reads the arguments, and I speak the result. SmolLM2 is called only when the turn needs a sentence that result does not already say. Hippocampus still decides whether a message is chat, the time, math, or the web.",
   },
   {
     id: "memory",

@@ -1,7 +1,7 @@
 // Arcanus's System 1. Hippocampus (remembered phrasings) with Occipital (letter-level recall, for typos) decides which
 // skill a message needs, in well under a millisecond (routes.ts). Skills (skills.ts) answer what they can without the
-// language model. ARC 1 chooses the tool and reads its arguments (arc1.ts, loaded on first use); SmolLM2
-// only writes the reply.
+// language model. ARC 1 chooses the tool and reads its arguments (arc1.ts). In live voice the result is spoken as it
+// is. SmolLM2 is called only for an open question, and then for one sentence.
 //
 // Hippocampus learns as it is used: from claims (a link, a sum: certain, so worth remembering how they were worded)
 // and from /teach, a correction. What it learned is kept in .arcanus/routing.json, which you can read and edit.
@@ -11,6 +11,7 @@ import { HOME, readFile, writeFile } from "@/modules/workspace";
 import { Hippocampus, type Example } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { syncShelf } from "./library";
+import { arc1 } from "./arc1";
 import { decide, routerMemory } from "./routes";
 import { CHAT, SKILLS, selfNotes } from "./skills";
 
@@ -79,6 +80,7 @@ export const brainEngine: Engine = {
     if (state.state.status !== "idle" && state.state.status !== "error") return;
     state.set({ status: "loading", error: undefined });
     void syncShelf().catch(() => undefined); // index the books now, in their worker, so the first question finds them
+    void arc1().catch(() => undefined); // warm ARC 1 now, so a live tool call does not wait on its first load
     loadRouter().then(
       () => state.set({ status: "ready" }),
       (err) => state.set({ status: "error", error: errorText(err) })

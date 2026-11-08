@@ -68,6 +68,13 @@ export function takeSentences(buffer: string, long = 80): { sentences: string[];
   return { sentences: parts.map((s) => s.trim()).filter(Boolean), rest };
 }
 
+/** The words to say from a note or a tool result: the first sentence, kept short enough to speak at once. */
+export function spokenLine(text: string) {
+  const sentence = text.split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
+  const line = (sentence || text).replace(/\s+/g, " ").trim();
+  return line.length > 220 ? `${line.slice(0, 217)}…` : line;
+}
+
 /** `text` without a sentence cut off at the end (a reply stopped at its token cap); whole if it has no full stop yet. */
 export const wholeSentences = (text: string) => text.match(/^[\s\S]*[.!?…]/)?.[0] ?? text;
 

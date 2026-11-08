@@ -7,7 +7,7 @@ import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
-import { finishGreeting, isEcho, isIntroduction, takeSentences, voice, wholeSentences } from "@/modules/voice";
+import { finishGreeting, isEcho, isIntroduction, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
@@ -29,7 +29,7 @@ const system = () =>
   `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
 const SPOKEN = " You are speaking out loud: one or two short sentences, plain words, no lists, and no introduction.";
-const VOICE_TOKENS = 70; // about three short sentences
+const VOICE_TOKENS = 32; // one short spoken sentence, so the language-model tool call stays short
 const VOICE_HISTORY = 4;
 const BOOKS = /\b(books?|chapters?|library|shelf|my notes)\b/i; // a spoken turn searches the user's books only when asked
 const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
@@ -438,23 +438,43 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       finish(plan.reply, trace);
       return;
     }
+    // Live voice: a tool result or a note is spoken as it is. ARC 1 already chose the tool. SmolLM2 is not called.
+    if (spoken && !skill && plan.facts?.length) {
+      const line = spokenLine(plan.facts[0]);
+      const said = thought("generate", line, { parents: [decision], detail: "spoken from the result" });
+      sayAll(line);
+      voiced(said)();
+      finish(line, [...trace, { label: "ARC 1", description: plan.source ? "Spoke the tool result" : "Spoke the note that answers it" }]);
+      return;
+    }
 
-    // If the first words are slow, say so out loud rather than leave a silence. Cleared once any sentence is spoken.
+    // An open question in live voice is the only time SmolLM2 is called, and only for one short sentence, so it starts at once.
+    const liveCall = spoken && !skill;
     if (spoken && !voice.state.state.off && voice.state.state.analyser)
       filler = setTimeout(() => {
         if (stale() || voice.state.state.speaking) return;
         fillerLine = FILLERS[Math.floor(Math.random() * FILLERS.length)];
         voice.say(fillerLine);
       }, FILLER_MS);
-    const built = await buildTurns(prior, user, plan, skill, decision, spoken);
+    const built = liveCall ? null : await buildTurns(prior, user, plan, skill, decision, spoken);
     if (stale()) return;
-    if (built.step) trace = [...trace, built.step];
-    const writing = (description: string): ThoughtStep => ({ label: "SmolLM2", description, status: "active" });
+    if (built?.step) trace = [...trace, built.step];
+    const writing = (description: string): ThoughtStep => ({ label: liveCall ? "SmolLM2 · one sentence" : "SmolLM2", description, status: "active" });
     const ready = llm.state.state.status === "ready";
     show([...trace, writing(ready ? "Writing on this device" : "Waiting for the model to load on this device")]);
-    const generating = thought("generate", "", { parents: [built.context], active: true, detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load" });
+    const generating = thought("generate", "", {
+      parents: built ? [built.context] : [decision],
+      active: true,
+      detail: ready ? (liveCall ? "SmolLM2 is writing one sentence" : "SmolLM2 is writing") : "waiting for SmolLM2 to load",
+    });
     // A reply grounded in its own notes is about itself, so it is said by itself (asSelf), whatever the model slipped into.
     const own = plan.facts && !plan.source ? asSelf : (s: string) => s;
+    const turns: Turn[] = built
+      ? built.turns
+      : [
+          { role: "system", content: "One short spoken sentence. No introduction." },
+          { role: "user", content: user.text },
+        ];
     let speaking: (() => void) | null = null;
     let shown = "";
     let unspoken = "";
@@ -462,7 +482,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     let result;
     try {
       result = await llm.generate(
-        built.turns,
+        turns,
         (piece) => {
           if (stale()) return;
           // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
@@ -512,7 +532,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
         };
     settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     // ARCANE's Graph of Thought check: each sentence of the reply against the evidence it was given (no model, <1 ms).
-    const grounded = built.evidence.length ? grounding(text, built.evidence) : null;
+    const grounded = built && built.evidence.length ? grounding(text, built.evidence) : null;
     const checked = grounded
       ? {
           label: `Checked against its sources: ${Math.round(grounded.score * 100)}% grounded`,
@@ -520,7 +540,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           results: grounded.unsupported.slice(0, 3).map((u) => `not in the sources: ${u.slice(0, 70)}`),
         }
       : null;
-    if (checked) thought("refine", checked.label, { parents: [generating, built.context], detail: checked.description, results: checked.results });
+    if (checked && built) thought("refine", checked.label, { parents: [generating, built.context], detail: checked.description, results: checked.results });
     finish(text, [
       ...trace,
       wrote,
