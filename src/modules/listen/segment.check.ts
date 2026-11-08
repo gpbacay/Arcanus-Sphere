@@ -1,6 +1,6 @@
 // Run: node src/modules/listen/segment.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { FRAME, Loudness, Segmenter } from "./segment.ts";
+import { detectorFree, FRAME, Loudness, Segmenter } from "./segment.ts";
 
 const run = (probs: number[], strict = false) => {
   const seg = new Segmenter();
@@ -65,4 +65,7 @@ assert.ok(feed(tone(0.01), 200) < 0.35);
 // Digital silence (a muted mic) doesn't drag the floor down, or the room would score as speech after it.
 feed(new Float32Array(FRAME), 30);
 assert.ok(loud.score(tone(0.01)) < 0.35);
+assert.equal(detectorFree(0, true), true);
+assert.equal(detectorFree(1, true), false, "a frame already in flight must not queue another");
+assert.equal(detectorFree(0, false), false);
 console.log("segment ok");

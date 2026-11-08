@@ -1,23 +1,17 @@
-// Whisper base.en (OpenAI, MIT; ONNX build by onnx-community) on ONNX Runtime Web, off the main thread. Speech in as
-// 16 kHz mono samples, text out. English only. The encoder stays full precision: an 8-bit Whisper encoder mishears
-// badly and often returns nothing. On the GPU when there is one (shared with SmolLM2), else on the CPU.
-import { pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
+// Whisper tiny.en (OpenAI, MIT; ONNX build by onnx-community) on the CPU, off the main thread. Speech in as
+// 16 kHz mono samples, text out. English only. The CPU, and one WASM thread, so it never shares SmolLM2's GPU:
+// that compile is what froze the tab when live voice turned on. The encoder stays full precision: an 8-bit encoder mishears.
+import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 
-const MODEL = "onnx-community/whisper-base.en";
+const MODEL = "onnx-community/whisper-tiny.en";
 const post = (message: unknown) => self.postMessage(message);
 
 let loading: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
 
-async function hasGpu() {
-  try {
-    return Boolean(await (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu?.requestAdapter());
-  } catch {
-    return false;
-  }
-}
-
 function load() {
   loading ??= (async () => {
+    const wasm = (env.backends.onnx as { wasm?: { numThreads?: number } }).wasm;
+    if (wasm) wasm.numThreads = 1; // leave the other cores to the sphere, Silero, and Paradee
     const files = new Map<string, { loaded: number; total: number }>();
     const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status !== "progress" || !p.file) return;
@@ -29,14 +23,13 @@ function load() {
       }
       post({ type: "progress", loaded, total });
     };
-    const device = (await hasGpu()) ? "webgpu" : "wasm";
     const asr = (await pipeline("automatic-speech-recognition", MODEL, {
-      device,
-      dtype: { encoder_model: "fp32", decoder_model_merged: device === "webgpu" ? "q4" : "q8" },
+      device: "wasm",
+      dtype: { encoder_model: "fp32", decoder_model_merged: "q8" },
       progress_callback,
     })) as unknown as AutomaticSpeechRecognitionPipeline;
-    await asr(new Float32Array(16000)); // compiles the GPU shaders now, not on the first thing you say
-    post({ type: "ready", device });
+    await asr(new Float32Array(16000)); // warms the runtime now, not on the first thing you say
+    post({ type: "ready", device: "wasm" });
     return asr;
   })();
   loading.catch((err: unknown) => {

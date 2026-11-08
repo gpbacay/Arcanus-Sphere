@@ -32,14 +32,14 @@ function load() {
 
 let queue: Promise<unknown> = Promise.resolve(); // run() calls share `state`, so one frame at a time, in order
 
-self.onmessage = ({ data }: MessageEvent<{ type: string; sid: number; samples?: Float32Array }>) => {
+self.onmessage = ({ data }: MessageEvent<{ type: string; sid: number; id?: number; gap?: boolean; samples?: Float32Array }>) => {
   if (data.type === "load") {
     queue = queue.then(() => load()).then(() => post({ type: "ready" }), (e: unknown) => post({ type: "error", message: e instanceof Error ? e.message : String(e) }));
   } else if (data.type === "frame" && data.samples?.length === FRAME) {
     const samples = data.samples;
     queue = queue.then(async () => {
-      if (data.sid !== sid) {
-        sid = data.sid; // a new session starts from silence, not from where the last one left off
+      if (data.sid !== sid || data.gap) {
+        sid = data.sid; // a new session, or frames we skipped, starts from silence
         state = fresh();
         input.fill(0);
       }
@@ -49,9 +49,9 @@ self.onmessage = ({ data }: MessageEvent<{ type: string; sid: number; samples?: 
         input.set(samples, CONTEXT);
         const out = await session.run({ input: inputTensor, state, sr });
         state = out.stateN as typeof state;
-        post({ type: "p", sid: data.sid, p: (out.output.data as Float32Array)[0] });
+        post({ type: "p", sid: data.sid, id: data.id, p: (out.output.data as Float32Array)[0] });
       } catch {
-        post({ type: "p", sid: data.sid, p: -1 }); // -1: no score; the caller falls back to loudness for this frame
+        post({ type: "p", sid: data.sid, id: data.id, p: -1 }); // -1: no score; the caller falls back to loudness for this frame
       }
     });
   }

@@ -7,7 +7,7 @@ export const FRAME = 512; // 32 ms
 export const FPS = RATE / FRAME;
 
 const ON = 0.5; // a frame at or above this is speech
-const OFF = 0.35; // and speech has to drop below this to count as a pause
+const OFF = 0.35; // speech has to drop below this to count as a pause
 const START = 6; // frames of speech in a row (~0.2 s) before it counts: a click or a cough never does
 // While Arcanus is talking, its own voice can leak into the mic: only clear, sustained speech interrupts it.
 // ponytail: fixed thresholds. Tune STRICT_* if Arcanus interrupts itself on your speakers, or ignores you.
@@ -71,6 +71,9 @@ export class Segmenter {
     this.quiet = 0;
   }
 }
+
+/** Silero can take this frame. If one is already in flight, score it by loudness so the mic never waits on the model. */
+export const detectorFree = (inFlight: number, ready: boolean) => ready && inFlight < 1;
 
 function join(frames: Float32Array[]) {
   const clip = new Float32Array(frames.length * FRAME);

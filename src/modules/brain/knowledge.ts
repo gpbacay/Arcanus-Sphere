@@ -86,7 +86,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "voice",
     title: "Voice: Paradee TTS",
     content:
-      "I speak with Paradee-8M, an open text-to-speech model by Sahil Mahendrakar distilled from Kokoro-82M, in a British male voice. It is only 8.5 MB and runs in your browser many times faster than real time. I start speaking each sentence as soon as it is written, and my voice drives my sphere through the Web Audio analyser.",
+      "I speak with Paradee-8M, an open text-to-speech model by Sahil Mahendrakar distilled from Kokoro-82M, in a British male voice. It is only 8.5 MB and runs in your browser many times faster than real time. I start speaking each sentence as soon as it is written, and my voice drives my sphere through the Web Audio analyser. The microphone stays open while I speak, and I stop when you talk over me.",
   },
   {
     id: "sphere",

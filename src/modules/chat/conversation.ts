@@ -718,15 +718,14 @@ export function discard(what: Removal) {
 }
 
 /**
- * Talk hands-free, full duplex: one tap opens the mic until the next. Each pause sends what you said, Arcanus answers
- * aloud, and speaking over it turns it down at once and stops it once your words are written. Call from a click: it unlocks audio and asks for the mic.
+ * Talk hands-free, full duplex: one tap opens the mic until the next. The mic stays open while Arcanus speaks.
+ * Talking over it stops it at once, then the pause sends what you said. Call from a click: it unlocks audio and asks for the mic.
  */
 export function talk() {
   voice.unlock();
   if (listen.state.state.on) return listen.cancel();
   if (!power.state.on) return;
-  // Arcanus keeps talking (and thinking) while the mic listens. A sound only turns it down; it stops for real words,
-  // never for noise or its own voice leaking back into the mic.
+  // Arcanus keeps talking (and thinking) while the mic listens. Clear speech stops it; noise and its own echo do not.
   let over = false; // Arcanus was talking while this was said, so it may be its own echo
   let hearing: string | null = null; // the Graph of Thought's thought for what is being heard right now
   const said = () => `${live.state.reply?.text || lastAssistant()} ${fillerLine}`;
@@ -737,16 +736,11 @@ export function talk() {
   };
   void listen.converse({
     strict: () => voice.state.state.speaking,
-    onSpeech: () => {
-      over = voice.state.state.speaking;
-      if (over) voice.duck(true);
+    onSpeech: (cut) => {
+      over = cut || voice.state.state.speaking;
+      if (cut) interrupt();
+      else if (over) voice.duck(true);
       hearing ??= thought("perceive", "Hearing you…", { active: true, detail: "microphone" });
-    },
-    // Two words that aren't Arcanus's own: it's you, so stop now rather than when you finish.
-    onWords: (text) => {
-      if (!over || (text.match(/[a-z0-9']+/gi)?.length ?? 0) < 2 || isEcho(text, said())) return;
-      over = false;
-      interrupt();
     },
     onText: (text) => {
       const echo = (over || voice.state.state.speaking) && isEcho(text, said());

@@ -1,23 +1,18 @@
 "use client";
 
-// Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open: the mic is
-// captured as 16 kHz frames (an AudioWorklet), each is scored for speech by Silero VAD in its own worker (vad.worker.ts;
-// by its loudness, Loudness in segment.ts, until that has loaded or if it can't), the segmenter
-// (segment.ts) cuts out each thing you say when you pause, and Whisper (listen.worker.ts) writes it down while the mic
-// keeps listening. Speaking while Arcanus talks is reported at once (onSpeech), so the caller can turn it down, and
-// stop it once the words show it was you, not noise or its own echo: barge-in.
-// Two things keep it quick. Whisper starts on what you said as soon as you start to pause, so by the time the pause
-// counts as the end of your turn the words are mostly written (a pause you talk on from is thrown away). And talking
-// over Arcanus is written down after about a second (onWords), so it can stop then, not only once you've finished.
+// Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open while
+// Arcanus speaks: both share one AudioContext, so echo cancellation hears the voice and the mic is not muted by it.
+// Frames (an AudioWorklet, 16 kHz) are scored by Silero when it is keeping up, otherwise by loudness, in the same
+// order, so a slow score never stalls the mic. The segmenter cuts out each thing you say when you pause, and Whisper
+// writes it down while the mic keeps listening. Clear speech over Arcanus stops it at once.
 import { afterGpu } from "@/shared/boot";
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
-import { FPS, FRAME, Loudness, RATE, Segmenter } from "./segment";
+import { voice } from "@/modules/voice";
+import { detectorFree, FRAME, Loudness, RATE, Segmenter } from "./segment";
 
 export type Talk = {
-  /** Someone may have started speaking (or it's Arcanus's own echo): turn down, the words will tell. */
-  onSpeech: () => void;
-  /** The first second or so of what was said over Arcanus, while they keep talking: enough to tell if it's them. */
-  onWords: (text: string) => void;
+  /** Someone started speaking. `cut` means it happened over Arcanus and the speech model is sure, so stop now. */
+  onSpeech: (cut: boolean) => void;
   /** What they said, once they paused. Empty when it was noise or couldn't be written down. */
   onText: (text: string) => void;
   /** True while Arcanus is speaking, so its own voice leaking into the mic needs more to count as speech. */
@@ -25,6 +20,7 @@ export type Talk = {
 };
 
 type Pending = { resolve: (text: string) => void; reject: (e: Error) => void };
+type Held = { id: number; sid: number; samples: Float32Array; loud: number };
 
 // Runs in the audio thread: turns the mic's native rate into 16 kHz frames of FRAME samples, by averaging.
 const WORKLET = `
@@ -47,22 +43,17 @@ class Frames extends AudioWorkletProcessor {
 registerProcessor("arcanus-frames", Frames);
 `;
 
-// Talking over Arcanus is written down this long after it counts as speech (which already took ~0.4 s).
-const PEEK = Math.round(0.8 * FPS);
-
 type Session = {
   sid: number;
   stream: MediaStream;
-  ctx: AudioContext;
+  node: AudioWorkletNode;
+  src: MediaStreamAudioSourceNode;
+  mute: GainNode;
   seg: Segmenter;
   loud: Loudness;
   talk: Talk;
   /** Words for the pause going on now, written while it runs out. */
   guess: Promise<string> | null;
-  /** Frames left until the words said over Arcanus are written down; 0 when not waiting to. */
-  peek: number;
-  /** Frames sent to the voice detector and not scored yet, oldest first. */
-  waiting: Float32Array[];
 };
 
 class Listen {
@@ -82,6 +73,12 @@ class Listen {
   private jobs = 0;
   private vad: Worker | null = null;
   private vadReady = false;
+  private worklet = false;
+  /** The one frame waiting on Silero. Flushed with loudness if the next frame arrives first, so the mic never queues. */
+  private held: Held | null = null;
+  private inFlight = false;
+  private missed = false; // a frame Silero didn't see: the next one it does see resets its state
+  private frame = 0;
 
   /** Load Whisper. Safe to call again; the way to retry after an error. */
   start(): Promise<unknown> {
@@ -109,31 +106,47 @@ class Listen {
   async converse(talk: Talk) {
     if (this.state.state.on) return;
     const sid = ++this.sid;
+    this.held = null;
+    this.inFlight = false;
+    this.missed = false;
     this.state.set({ on: true, hearing: false, problem: "" });
     void this.start().catch(() => undefined);
     this.detector();
     let stream: MediaStream | null = null;
-    let ctx: AudioContext | null = null;
+    let node: AudioWorkletNode | null = null;
+    let src: MediaStreamAudioSourceNode | null = null;
     try {
-      ctx = new AudioContext(); // made here, inside the click, because Safari only lets a gesture start audio
-      stream = await navigator.mediaDevices.getUserMedia({
-        // echo cancellation takes Arcanus's own voice out of the mic, as far as the browser can
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      const ctx = voice.audio();
+      if (!ctx) throw new Error("This browser can't play audio.");
       await ctx.resume();
-      const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
-      await ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+      stream = await navigator.mediaDevices.getUserMedia({
+        // One context with the voice, so echo cancellation hears it. Noise suppression and auto gain mute the mic
+        // while that voice plays: that is the half-duplex. Leave them off.
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+      });
+      if (!this.worklet) {
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
+        await ctx.audioWorklet.addModule(url).then(
+          () => (this.worklet = true),
+          (error: unknown) => {
+            if (!/already/i.test(error instanceof Error ? error.message : "")) throw error;
+            this.worklet = true;
+          },
+        ).finally(() => URL.revokeObjectURL(url));
+      }
       if (sid !== this.sid) throw new Error("cancelled"); // while the mic was opening: the catch closes it quietly
-      const node = new AudioWorkletNode(ctx, "arcanus-frames");
+      node = new AudioWorkletNode(ctx, "arcanus-frames");
       node.port.onmessage = ({ data }: MessageEvent<Float32Array>) => this.scored(sid, data);
       const mute = ctx.createGain(); // a worklet only runs while it is connected to the output; silence it
       mute.gain.value = 0;
-      ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
-      this.session = { sid, stream, ctx, seg: new Segmenter(), loud: new Loudness(), talk, guess: null, peek: 0, waiting: [] };
+      src = ctx.createMediaStreamSource(stream);
+      src.connect(node).connect(mute).connect(ctx.destination);
+      this.session = { sid, stream, node, src, mute, seg: new Segmenter(), loud: new Loudness(), talk, guess: null };
       this.session.seg.fast = this.vadReady;
     } catch (error) {
+      node?.disconnect();
+      src?.disconnect();
       stream?.getTracks().forEach((track) => track.stop());
-      void ctx?.close();
       if (sid !== this.sid) return;
       this.state.set({
         on: false,
@@ -154,60 +167,71 @@ class Listen {
       worker.terminate(); // no detector: loudness it is, and the next open tries again
       this.vad = null;
       this.vadReady = false;
-      if (this.session) {
-        this.session.waiting = [];
-        this.session.seg.fast = false;
-      }
+      this.inFlight = false;
+      if (this.session) this.session.seg.fast = false;
     };
     worker.onerror = drop;
-    worker.onmessage = ({ data }: MessageEvent<{ type: string; sid?: number; p?: number }>) => {
+    worker.onmessage = ({ data }: MessageEvent<{ type: string; sid?: number; id?: number; p?: number }>) => {
       if (data.type === "ready") {
         this.vadReady = true;
         if (this.session) this.session.seg.fast = true;
       } else if (data.type === "error") drop();
-      else if (data.type === "p") {
-        const s = this.session;
-        const frame = s && s.sid === data.sid ? s.waiting.shift() : undefined;
-        if (s && frame) this.heard(s, frame, data.p! >= 0 ? data.p! : s.loud.score(frame));
-      }
+      else if (data.type === "p") this.scoredBack(data.sid ?? -1, data.id ?? -1, data.p ?? -1);
     };
     worker.postMessage({ type: "load" });
   }
 
-  /** One frame came in: have it scored, then hear it. */
+  /** One frame came in. Hear it now if Silero is busy or absent; otherwise hold it for the one frame Silero needs. */
   private scored(sid: number, samples: Float32Array) {
     const s = this.session;
     if (!s || s.sid !== sid) return;
-    if (this.vadReady) {
-      s.waiting.push(samples);
-      this.vad!.postMessage({ type: "frame", sid, samples: samples.slice() }); // a copy: the segmenter keeps this one
-    } else this.heard(s, samples, s.loud.score(samples));
+    const loud = s.loud.score(samples);
+    if (this.held) {
+      this.heard(s, this.held.samples, this.held.loud, false);
+      this.held = null;
+      this.missed = true;
+      if (this.session !== s) return;
+    }
+    if (detectorFree(this.inFlight ? 1 : 0, this.vadReady)) {
+      const id = ++this.frame;
+      this.held = { id, sid, samples, loud };
+      this.inFlight = true;
+      const copy = samples.slice();
+      this.vad!.postMessage({ type: "frame", sid, id, gap: this.missed, samples: copy }, [copy.buffer]);
+      this.missed = false;
+      return;
+    }
+    this.missed = true;
+    this.heard(s, samples, loud, false);
+  }
+
+  /** Silero's score for one frame. A frame already flushed (the next one arrived first) is left as loudness scored it. */
+  private scoredBack(sid: number, id: number, p: number) {
+    const s = this.session;
+    if (!s || s.sid !== sid) return;
+    this.inFlight = false;
+    const held = this.held;
+    if (!held || held.id !== id) return;
+    this.held = null;
+    this.heard(s, held.samples, p >= 0 ? p : held.loud, p >= 0);
   }
 
   /** A frame and its speech score: feed the segmenter, and act on a start or a finished utterance. */
-  private heard(s: Session, samples: Float32Array, p: number) {
+  private heard(s: Session, samples: Float32Array, p: number, sure: boolean) {
     const strict = s.talk.strict();
     const out = s.seg.push(samples, p, strict);
     if (out === "start") {
       this.state.set({ hearing: true });
-      s.peek = strict ? PEEK : 0;
-      s.talk.onSpeech();
+      s.talk.onSpeech(sure && strict);
     } else if (out === "pause") {
-      // ponytail: only on WebGPU, where a guess thrown away costs ~0.3 s. On the CPU it could hold up the next one.
-      if (this.state.state.device === "webgpu") s.guess = this.later(s.seg.clip());
+      // The pause is already the finished clip. Tiny writes it while the pause runs out, so the words are ready when you stop.
+      s.guess = this.later(s.seg.clip());
     } else if (out === "resume") {
       s.guess = null;
-    } else if (out) {
+    } else if (out instanceof Float32Array) {
       this.state.set({ hearing: false });
-      s.peek = 0;
       this.write(s, s.guess ?? this.later(out));
       s.guess = null;
-    }
-    if (s.peek && !--s.peek) {
-      void this.later(s.seg.clip()).then(
-        (text) => this.session === s && s.talk.onWords(text),
-        () => undefined,
-      );
     }
   }
 
@@ -234,13 +258,20 @@ class Listen {
       .finally(() => this.state.set({ writing: --this.jobs > 0 }));
   }
 
-  /** Close the microphone. Anything still being written down is dropped. */
+  /** Close the microphone. Anything still being written down is dropped. The shared audio context stays; the voice uses it. */
   cancel() {
     this.sid++;
     const s = this.session;
     this.session = null;
-    s?.stream.getTracks().forEach((track) => track.stop());
-    void s?.ctx.close();
+    this.held = null;
+    this.inFlight = false;
+    if (s) {
+      s.node.port.onmessage = null;
+      s.node.disconnect();
+      s.src.disconnect();
+      s.mute.disconnect();
+      s.stream.getTracks().forEach((track) => track.stop());
+    }
     this.state.set({ on: false, hearing: false });
   }
 
@@ -264,8 +295,8 @@ export const canListen = Listen.supported;
 
 export const listenEngine: Engine = {
   name: "Speech",
-  detail: "Whisper base · when you talk",
+  detail: "Whisper tiny · on the CPU",
   state: listen.state,
-  later: true, // shares the GPU with SmolLM2; loading it at boot crashes the tab. converse() starts it.
+  later: true, // loads when the mic opens. On the CPU, so it never compiles next to SmolLM2.
   start: () => void listen.start().catch(() => undefined),
 };

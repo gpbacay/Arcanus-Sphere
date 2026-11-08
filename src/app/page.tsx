@@ -2,7 +2,7 @@
 
 // The composition root: the only place that knows every module. Modules talk through their public APIs
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it gets a line in the chat's boot log.
-// Whisper is not in this boot: it shares the GPU with SmolLM2, and loading both crashed the tab.
+// Whisper is not in this boot: it loads when the mic opens, on the CPU, so it never shares SmolLM2's GPU.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
@@ -20,7 +20,7 @@ import { power, restorePower } from "@/shared/power";
 import { bootInTurn, useStore } from "@/shared/store";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 
-// Speech waits until the mic is opened. The others start together; Whisper cannot compile until SmolLM2 has.
+// Speech waits until the mic is opened and stays on the CPU. The others start together.
 const ENGINES = [brainEngine, voiceEngine, llmEngine, listenEngine];
 
 export default function Home() {

@@ -61,7 +61,7 @@ class Voice {
       if (!this.ctx) {
         const Context = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!Context) return;
-        this.ctx = new Context();
+        this.ctx = new Context({ latencyHint: "interactive" });
         const analyser = this.ctx.createAnalyser();
         analyser.fftSize = 512;
         analyser.smoothingTimeConstant = 0.75;
@@ -83,9 +83,18 @@ class Voice {
     void this.start().then((w) => w.postMessage({ type: "speak", gen, text: spoken }), () => undefined);
   }
 
+  /**
+   * The context this voice plays through. The microphone records in this same context, so the browser's echo
+   * cancellation hears the voice and can keep the mic open while it plays.
+   */
+  audio() {
+    this.unlock();
+    return this.ctx;
+  }
+
   /** Turn the voice down while someone may be talking over it (and its echo out of the mic), or back up. */
   duck(on: boolean) {
-    if (this.ctx && this.out) this.out.gain.setTargetAtTime(on ? 0.2 : 1, this.ctx.currentTime, 0.05);
+    if (this.ctx && this.out) this.out.gain.setTargetAtTime(on ? 0.08 : 1, this.ctx.currentTime, 0.03);
   }
 
   /** Stop speaking now and drop every queued sentence. */
