@@ -1,9 +1,9 @@
-// SmolLM2-Instruct (Hugging Face, Apache-2.0) on ONNX Runtime Web, off the main thread so the sphere keeps its frame
-// rate. Text only. 360M on WebGPU (q4f16, ~270 MB); on the CPU the 135M (q4, ~180 MB), since every parameter there
-// costs time. q4, not int8: int8 wrote at about half the speed on the CPU.
+// SmolLM2-135M-Instruct Q4 (Hugging Face, Apache-2.0) on ONNX Runtime Web, off the main thread so the sphere keeps its
+// frame rate. Text only, always this build (~180 MB on the CPU). q4, not int8: int8 wrote at about half the speed.
 import {
   AutoModelForCausalLM,
   AutoTokenizer,
+  env,
   InterruptableStoppingCriteria,
   TextStreamer,
   type PreTrainedModel,
@@ -22,19 +22,15 @@ const MIN_REUSE = 16; // tokens; under this, cropping costs about what it saves
 
 let loading: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> | null = null;
 
-async function hasGpu() {
-  try {
-    return Boolean(await (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu?.requestAdapter());
-  } catch {
-    return false;
-  }
-}
-
 function load() {
   loading ??= (async () => {
-    // ponytail: SmolVLM's Q4 decoder once wrote garbage on WebGPU. If SmolLM2 ever does, force "wasm" here.
-    const device = (await hasGpu()) ? "webgpu" : "wasm";
-    const name = `HuggingFaceTB/SmolLM2-${device === "webgpu" ? "360M" : "135M"}-Instruct`;
+    const cores = navigator.hardwareConcurrency || 2;
+    // This worker loads and runs the model on several threads at once. Two cores stay out of that pool: one for the
+    // sphere's render loop, one for the voice worker, so those keep going while the weights come in.
+    const wasm = (env.backends.onnx as { wasm?: { numThreads?: number } }).wasm;
+    if (wasm) wasm.numThreads = Math.max(1, Math.min(4, cores - 2));
+    const device = "wasm";
+    const name = "HuggingFaceTB/SmolLM2-135M-Instruct";
     const files = new Map<string, { loaded: number; total: number }>();
     const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status !== "progress" || !p.file) return;
@@ -49,10 +45,10 @@ function load() {
     const tokenizer = await AutoTokenizer.from_pretrained(name, { progress_callback });
     const model = await AutoModelForCausalLM.from_pretrained(name, {
       device,
-      dtype: device === "webgpu" ? "q4f16" : "q4",
+      dtype: "q4",
       progress_callback,
     });
-    await model.generate({ ...tokenizer("Hi"), max_new_tokens: 1 }); // compiles the GPU shaders now, not on the first reply
+    await model.generate({ ...tokenizer("Hi"), max_new_tokens: 1 }); // warms the runtime now, not on the first reply
     post({ type: "ready", device });
     return { tokenizer, model };
   })();

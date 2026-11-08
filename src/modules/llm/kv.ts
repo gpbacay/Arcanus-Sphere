@@ -20,7 +20,7 @@ export function crop(past: Past, n: number): Past {
 }
 
 /** The cache moved off the GPU, so it can be cropped and kept between replies without holding GPU memory.
- *  ponytail: a copy each reply (~40 KB a token on the 360M). Keep it on the GPU if that copy ever shows in timings. */
+ *  ponytail: a copy each reply. Keep it on the GPU if that copy ever shows in timings. */
 export async function onCpu(past: Past): Promise<Past> {
   const out: Past = {};
   for (const [name, t] of Object.entries(past)) {

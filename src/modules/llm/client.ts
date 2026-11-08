@@ -3,7 +3,6 @@
 // SmolLM2 runs in its own Web Worker (llm.worker.ts). This is the main-thread side: load state, streaming, stop,
 // and a cache of finished replies.
 import { Lru } from "@/shared/lru";
-import { afterGpu } from "@/shared/boot";
 import { Store, IDLE, startWorker, type Engine, type LoadState } from "@/shared/store";
 
 export type Turn = { role: "system" | "user" | "assistant"; content: string };
@@ -24,14 +23,15 @@ class Llm {
   private turn: Promise<unknown> = Promise.resolve();
 
   start() {
-    this.worker ??= afterGpu(() => startWorker(this.state, () => new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" }), (data) => {
+    // Its own worker, started with the sphere, not after it. The render loop never waits on this download.
+    this.worker ??= startWorker(this.state, () => new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" }), (data) => {
       const job = this.pending.get(data.id as number);
       if (!job) return;
       if (data.type === "token") job.onToken(data.text as string);
       else if (data.type === "done") job.resolve(data as never);
       else if (data.type === "error") job.reject(new Error(String(data.message)));
       if (data.type !== "token") this.pending.delete(data.id as number);
-    }));
+    });
     this.worker.catch(() => (this.worker = null));
     return this.worker;
   }
@@ -76,7 +76,7 @@ export const llm = new Llm();
 
 export const llmEngine: Engine = {
   name: "SmolLM2",
-  detail: "360M on WebGPU (~270 MB) · 135M on CPU (~180 MB)",
+  detail: "135M Q4 · on the CPU (~180 MB)",
   state: llm.state,
   start: () => void llm.start().catch(() => undefined),
 };

@@ -507,7 +507,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
-          label: `SmolLM2-${device === "WebGPU" ? "360M" : "135M"} wrote this`,
+          label: "SmolLM2-135M wrote this",
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
     settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
