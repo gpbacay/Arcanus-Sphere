@@ -2,7 +2,7 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
-import { asSelf, assemble, FIRST_PERSON, greetingPrompt, unsupported } from "@/modules/harness";
+import { asSelf, assemble, FIRST_PERSON, greetingPrompt, liveTurns, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
@@ -28,10 +28,7 @@ const busy = () => live.state.reply !== null || !power.state.on;
 const system = () =>
   `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
-const SPOKEN = " You are speaking out loud: one or two short sentences, plain words, no lists, and no introduction.";
-const VOICE_TOKENS = 32; // one short spoken sentence, so the language-model tool call stays short
-const VOICE_HISTORY = 4;
-const BOOKS = /\b(books?|chapters?|library|shelf|my notes)\b/i; // a spoken turn searches the user's books only when asked
+const VOICE_TOKENS = 48; // a sentence or two. The first clause is spoken as soon as it is written, so the cap only bounds the end.
 const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
 const FILLERS = ["Let me think.", "Hmm, let me see.", "One moment."]; // two words or more, so isEcho can tell them from you
 const NO_MODEL =
@@ -55,7 +52,10 @@ const HISTORY_CHARS = 600;
 
 type Report = ReturnType<typeof assemble>["report"];
 /** The last reply's context, for /context. */
-let lastContext: { report: Report; used: number } | null = null;
+let lastContext: { report: Report; used: number; budget: number } | null = null;
+/** What a reply is written from: the model's turns, the evidence it should rest on (for the grounding check), and
+ *  the Graph of Thought's aggregate thought, which the writing grows from. */
+type Built = { turns: Turn[]; step: ThoughtStep | null; evidence: string[]; context: string };
 
 /** The message as the model should read it: a skill's command name taken off. */
 const ask = (user: Msg, skill?: Skill) => (skill ? user.text.replace(/^\/\S+\s*/, "") || skill.description : user.text);
@@ -69,22 +69,43 @@ const recited = (m: Msg) =>
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
-/** The model's turns, plus the evidence the reply should rest on (for the grounding check) and the Graph of Thought's
- *  aggregate thought, which the writing grows from. `from` is the thought the context is built for. */
-async function buildTurns(
-  prior: Msg[],
-  user: Msg,
-  plan: Plan,
-  skill: Skill | undefined,
-  from: string,
-  spoken: boolean
-): Promise<{ turns: Turn[]; step: ThoughtStep | null; evidence: string[]; context: string }> {
+/** The conversation itself: not commands, and not the boot greeting, which a tiny model wrote about itself and which
+ *  would otherwise be read back as fact. A reply that only recited the biography is dropped too, or the next reply copies it. */
+const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !recited(m));
+
+/**
+ * What a spoken reply is written from (harness liveTurns): the conversation so far, then, with the message itself,
+ * the notes Hippocampus and Occipital recall for it and what Arcanus knows about itself when the question is about
+ * that. Small, and laid out so SmolLM2 reads only the new turn. `from` is the thought the context is built for.
+ */
+async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Promise<Built> {
+  const recalled = recallNotes(user.text, await memories().catch(() => []));
+  const own = plan.facts?.length && !plan.source ? plan.facts : [];
+  const { turns, report, used, budget } = liveTurns(
+    conversed(prior).map((m): Turn => ({ role: m.role, content: m.text })),
+    user.text,
+    [
+      { label: "What you know about yourself, in your own words", text: own.map((f) => `- ${f}`).join("\n"), priority: 0 },
+      { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 1 },
+    ],
+  );
+  lastContext = { report, used, budget };
+  const description = `${turns.length - 2} earlier turns · ${used.toLocaleString()} of ${budget.toLocaleString()} characters of notes`;
+  const results = report.map(reportLine);
+  const source = recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null;
+  const context = thought("aggregate", "Gathered what SmolLM2 will read", { parents: [from, source], detail: description, results });
+  // Only its own facts are evidence: a recalled note may have nothing to do with the question.
+  return { turns, step: { label: "Context", description, results }, evidence: own, context };
+}
+
+/** What a typed reply is written from. `from` is the thought the context is built for. */
+async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | undefined, from: string): Promise<Built> {
   const text = ask(user, skill);
   // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
   const [rules, notes, passages] = await Promise.all([
     instructions().catch(() => ""),
     memories().catch(() => []),
-    !skill && plan.route === "chat" && !plan.facts && (!spoken || BOOKS.test(text)) ? recallPassages(text).catch(() => []) : [],
+    !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
   ]);
   const pinned = pane.state.pinned;
   const recalled = recallNotes(text, notes);
@@ -114,7 +135,7 @@ async function buildTurns(
     ],
     BUDGET
   );
-  lastContext = { report, used };
+  lastContext = { report, used, budget: BUDGET };
   const standing = sections.find((s) => s.label === STANDING);
   const quote = user.replyToId ? prior.find((m) => m.id === user.replyToId) : undefined;
   const content = [
@@ -125,15 +146,10 @@ async function buildTurns(
     .filter(Boolean)
     .join("\n\n");
   const asked = `${content}\n\nAnswer that directly. Do not introduce yourself.`;
-  // Only the conversation itself: not commands, and not the boot greeting, which a tiny model wrote about itself and
-  // which would otherwise be read back as fact. A reply that only recited the biography is dropped too, or the next
-  // reply copies it.
-  const history = prior
-    .filter((m) => !m.kind && m.text && !recited(m))
-    .slice(spoken ? -VOICE_HISTORY : -HISTORY)
+  const history = conversed(prior)
+    .slice(-HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
-  const base = system() + (spoken ? SPOKEN : "");
-  const prompt = standing ? `${base}\n\n${standing.label}:\n${standing.text}` : base;
+  const prompt = standing ? `${system()}\n\n${standing.label}:\n${standing.text}` : system();
   const step: ThoughtStep | null = report.length
     ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
     : null;
@@ -490,7 +506,8 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       return;
     }
 
-    // An open question in live voice is the only time SmolLM2 is called, and only for one short sentence, so it starts at once.
+    // An open question in live voice is the only time SmolLM2 is called, and only for a sentence or two, from a
+    // context built so it reads almost nothing new (buildLive).
     const liveCall = spoken && !skill;
     if (spoken && !voice.state.state.off && voice.state.state.analyser)
       filler = setTimeout(() => {
@@ -498,31 +515,19 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
         fillerLine = FILLERS[Math.floor(Math.random() * FILLERS.length)];
         voice.say(fillerLine);
       }, FILLER_MS);
-    const built = liveCall ? null : await buildTurns(prior, user, plan, skill, decision, spoken);
+    const built = liveCall ? await buildLive(prior, user, plan, decision) : await buildTurns(prior, user, plan, skill, decision);
     if (stale()) return;
-    if (built?.step) trace = [...trace, built.step];
-    const writing = (description: string): ThoughtStep => ({ label: liveCall ? "SmolLM2 · one sentence" : "SmolLM2", description, status: "active" });
+    if (built.step) trace = [...trace, built.step];
+    const writing = (description: string): ThoughtStep => ({ label: liveCall ? "SmolLM2 · spoken" : "SmolLM2", description, status: "active" });
     const ready = llm.state.state.status === "ready";
     show([...trace, writing(ready ? "Writing on this device" : "Waiting for the model to load on this device")]);
     const generating = thought("generate", "", {
-      parents: built ? [built.context] : [decision],
+      parents: [built.context],
       active: true,
-      detail: ready ? (liveCall ? "SmolLM2 is writing one sentence" : "SmolLM2 is writing") : "waiting for SmolLM2 to load",
+      detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load",
     });
     // A reply grounded in its own notes is about itself, so it is said by itself (asSelf), whatever the model slipped into.
     const own = plan.facts && !plan.source ? asSelf : (s: string) => s;
-    const note = plan.facts?.length && !plan.source ? plan.facts.join("\n") : "";
-    const turns: Turn[] = built
-      ? built.turns
-      : [
-          {
-            role: "system",
-            content: note
-              ? `One short spoken sentence, from these notes:\n${note}\nSpeak as "I". No introduction.`
-              : "One short spoken sentence. No introduction.",
-          },
-          { role: "user", content: user.text },
-        ];
     let speaking: (() => void) | null = null;
     let shown = "";
     let unspoken = "";
@@ -530,7 +535,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     let result;
     try {
       result = await llm.generate(
-        turns,
+        built.turns,
         (piece) => {
           if (stale()) return;
           // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
@@ -578,8 +583,8 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           label: "SmolLM2-135M wrote this",
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
-    const grounded = built && built.evidence.length ? grounding(text, built.evidence) : null;
-    if (grounded && grounded.score < 0.5 && built) text = spokenLine(built.evidence[0]);
+    const grounded = built.evidence.length ? grounding(text, built.evidence) : null;
+    if (grounded && grounded.score < 0.5) text = spokenLine(built.evidence[0]);
     settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     const checked = grounded
       ? {
@@ -588,7 +593,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           results: grounded.unsupported.slice(0, 3).map((u) => `not in the sources: ${u.slice(0, 70)}`),
         }
       : null;
-    if (checked && built) thought("refine", checked.label, { parents: [generating, built.context], detail: checked.description, results: checked.results });
+    if (checked) thought("refine", checked.label, { parents: [generating, built.context], detail: checked.description, results: checked.results });
     finish(text, [
       ...trace,
       wrote,
@@ -718,7 +723,7 @@ function command(chatId: string, input: string) {
   if (name === "/context") {
     const where = `Workspace: ${workspace.state.name || "not ready"} · ${workspace.state.skills.length} skills in ${HOME}/skills`;
     if (!lastContext) return out(`${where}\nNo reply has read any context yet.`);
-    return out(`${where}\nThe last reply read ${lastContext.used} of ${BUDGET} characters of context:\n${lastContext.report.map(reportLine).join("\n")}`);
+    return out(`${where}\nThe last reply read ${lastContext.used} of ${lastContext.budget} characters of context:\n${lastContext.report.map(reportLine).join("\n")}`);
   }
   if (name === "/shutdown") {
     if (!power.state.on) return out("Already off. /run starts Arcanus.");
@@ -798,9 +803,15 @@ export function talk() {
   voice.unlock();
   if (listen.state.state.on) return listen.cancel();
   if (!power.state.on) return;
-  // Arcanus keeps talking (and thinking) while the mic listens. Clear speech stops it; noise and its own echo do not.
+  // Arcanus keeps talking (and thinking) while the mic listens. Real words stop it; noise and its own echo do not.
   let over = false; // Arcanus was talking while this was said, so it may be its own echo
   let hearing: string | null = null; // the Graph of Thought's thought for what is being heard right now
+  // A sentence said in two breaths is one message. The microphone says when speech began right after the last thing
+  // said ended (listen's `resumed`); the two are then joined, whichever way their words arrive.
+  const resumed: boolean[] = []; // one per thing said and not yet written down, oldest first
+  let carried = ""; // the first half, when its words arrived while you were already saying the rest
+  let sent: string | null = null; // the last spoken message's id
+  let tail = false; // the last thing heard is that message, or led straight on from it
   const said = () => `${live.state.reply?.text || lastAssistant()} ${fillerLine}`;
   const interrupt = () => {
     cancelGreet();
@@ -809,28 +820,58 @@ export function talk() {
   };
   void listen.converse({
     strict: () => voice.state.state.speaking,
-    onSpeech: () => {
+    onSpeech: (_cut, again) => {
       // Duck, but do not stop. The mic hears Arcanus's own first sentence; stopping here saved that sentence and a "…".
-      // Real words still interrupt, once they are written and are not an echo (onText).
+      // Real words still interrupt, as soon as they are written and are not an echo (onPartial, onText).
       over = voice.state.state.speaking;
       if (over) voice.duck(true);
+      resumed.push(again);
       hearing ??= thought("perceive", "Hearing you…", { active: true, detail: "microphone" });
     },
-    onText: (text) => {
+    onPartial: (text) => {
+      revise(hearing, { content: text });
+      // Two words or more, and not Arcanus's own: you are talking over it. It stops now, not when you finish.
+      const talkingOver = voice.state.state.speaking || live.state.reply !== null;
+      if (!talkingOver || text.split(/\s+/).length < 2 || isEcho(text, said())) return;
+      over = false; // these words were checked: the rest of what you say is yours too
+      interrupt();
+    },
+    onText: (text, seconds) => {
       const echo = (over || voice.state.state.speaking) && isEcho(text, said());
       over = false;
       const id = hearing;
       hearing = null;
-      if (!text || echo) {
-        settle(id, { content: echo ? "Only my own voice, echoing back" : "Only noise", detail: "ignored" });
-        return voice.duck(false);
-      }
-      settle(id, { content: text, detail: "heard through the microphone" });
+      const mine = echo ? "" : text;
+      const sound = `${seconds.toFixed(1)} s of sound`;
+      settle(
+        id,
+        mine
+          ? { content: mine, detail: `heard through the microphone · ${sound}, written in ${listen.took} ms` }
+          : { content: echo ? "Only my own voice, echoing back" : "Only noise", detail: `ignored · ${sound}` },
+      );
+      // This carries your last message on: said right after it, or right after what led on from it.
+      const joins = (resumed.shift() ?? false) && tail;
+      tail = joins;
+      const whole = `${carried} ${mine}`.trim();
+      if (!whole) return voice.duck(false);
+      // You went straight on talking: that was the first half of a sentence. It waits for the rest.
+      if (resumed[0]) return void (carried = whole);
+      carried = "";
       interrupt();
-      heard = id; // the reply's root: send() answers at once, so it takes this
+      const chat = currentChat();
+      const first = joins && chat ? chat.messages.findIndex((m) => m.id === sent) : -1;
+      heard = id; // the reply's root: the message is answered at once, so it takes this
       viaVoice = true;
-      send(text);
-      viaVoice = false; // send() refused it (busy), so the next typed message isn't taken for speech
+      if (chat && first >= 0 && power.state.on) {
+        // The rest of your last message: answer the two together, in place of the reply to the first half.
+        const message = chat.messages[first];
+        tail = true;
+        void answer(chat.id, chat.messages.slice(0, first), { ...message, text: `${message.text} ${whole}`.slice(0, MAX), at: Date.now() });
+      } else if (send(whole)) {
+        sent = currentChat()?.messages.findLast((m) => m.role === "user")?.id ?? null;
+        tail = true;
+      }
+      viaVoice = false; // send() may have refused it (busy), so the next typed message isn't taken for speech
       heard = null;
     },
   });

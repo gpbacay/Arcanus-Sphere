@@ -14,7 +14,7 @@
 //   cheap and is what lets a misspelled seed word still count.
 import { Hippocampus, type Neighbor } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
-import { findExpression, spoken } from "./tools.ts"; // with its extension, so Node runs routing.check.ts
+import { findExpression, numerals, spoken } from "./tools.ts"; // with its extension, so Node runs routing.check.ts
 // eslint-disable-next-line no-restricted-imports -- Node runs routing.check.ts and can't resolve "@/"; command.ts is pure
 import { deviceCommand } from "../device/command.ts";
 
@@ -40,6 +40,14 @@ export const ROUTES: Route[] = [
     seeds: [
       "hi there",
       "good morning, how are you",
+      // Small talk, as it is said aloud. Without these, "how are you today" was answered with the date ("today")
+      // and "what's up" with a web search ("up": "look up the latest news online").
+      "hello, how are you today",
+      "how are you doing today",
+      "hey, what's up",
+      "nice to meet you",
+      "okay, thanks a lot",
+      "goodbye for now",
       "tell me a joke",
       "write a short poem about the sea",
       "what is the capital of france",
@@ -181,7 +189,8 @@ export type Decision = {
 /** Route `text`: a claim if one applies, else the memory's vote if sure enough, else chat. */
 export async function decide(memory: Hippocampus, text: string, routes: Route[] = ROUTES): Promise<Decision> {
   const labels = routes.map((r) => r.route);
-  const voted = await memory.classify(text, labels);
+  // Numbers said aloud are read as digits ("twelve times seven" -> "12 times 7"), so a spoken sum votes like a typed one.
+  const voted = await memory.classify(numerals(text), labels);
   const claim = routes.map((r) => ({ route: r.route, why: r.claim?.(text) })).find((c) => c.why);
   let route = claim?.route ?? (voted.label && voted.confidence >= SURE ? voted.label : "chat");
   // Seeds hold numbers ("what is 12 * 7"), so any "12" votes math. Math with nothing to compute is chat.

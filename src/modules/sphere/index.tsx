@@ -5,6 +5,7 @@
 import dynamic from "next/dynamic";
 import { useState, useSyncExternalStore } from "react";
 import { Boundary } from "@/shared/boundary";
+import { TALK_FPS, WORK_FPS } from "./pace";
 import type { Tool } from "./SphereScene";
 import { SphereTools } from "./Tools";
 
@@ -35,7 +36,8 @@ function hasWebGL() {
 }
 const never = () => () => undefined;
 
-export function Sphere({ analyser, state, on = true }: { analyser: AnalyserNode | null; state: SphereState; on?: boolean }) {
+/** `working`: a model is running right now (listening, thinking, writing), so the sphere may have to draw less (pace.ts). */
+export function Sphere({ analyser, state, on = true, working = false }: { analyser: AnalyserNode | null; state: SphereState; on?: boolean; working?: boolean }) {
   const canDraw = useSyncExternalStore(never, hasWebGL, () => true);
   const [tool, setTool] = useState<Tool>("view");
   const [resetKey, setResetKey] = useState(0);
@@ -44,7 +46,14 @@ export function Sphere({ analyser, state, on = true }: { analyser: AnalyserNode 
   return (
     <>
       <Boundary fallback={orb}>
-        <Scene analyser={analyser} activityBoost={state === "thinking" ? 0.55 : 0} tool={tool} on={on} resetKey={resetKey} />
+        <Scene
+          analyser={analyser}
+          activityBoost={state === "thinking" ? 0.55 : 0}
+          cap={!working ? 0 : state === "speaking" ? TALK_FPS : WORK_FPS}
+          tool={tool}
+          on={on}
+          resetKey={resetKey}
+        />
       </Boundary>
       <SphereTools
         tool={tool}

@@ -1,9 +1,15 @@
-// Whisper tiny.en (OpenAI, MIT; ONNX build by onnx-community) on the CPU, off the main thread. Speech in as
-// 16 kHz mono samples, text out. English only. The CPU, and one WASM thread, so it never shares SmolLM2's GPU:
-// that compile is what froze the tab when live voice turned on. The encoder stays full precision: an 8-bit encoder mishears.
+// Moonshine tiny (Useful Sensors, MIT; ONNX build by onnx-community, ~51 MB) on the CPU, off the main thread. Speech
+// in as 16 kHz mono samples, text out. English only. Whisper encodes 30 s of audio whatever you said; Moonshine encodes
+// only what it was given, so a short turn costs a short time. Measured on one thread, the same words from both:
+// Whisper tiny took 1.9 s for 1.5 s, 3 s or 6 s of speech; Moonshine tiny took 0.19 s, 0.34 s and 0.57 s. That is
+// what lets the words be written while you are still talking (client.ts). The CPU, and one WASM thread, so it never
+// shares SmolLM2's GPU. The encoder stays full precision: an 8-bit encoder mishears.
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 
-const MODEL = "onnx-community/whisper-tiny.en";
+const MODEL = "onnx-community/moonshine-tiny-ONNX";
+const RATE = 16000;
+// Moonshine writes about 6.5 tokens for a second of speech. Capped there, noise can't set it repeating itself.
+const TOKENS_A_SECOND = 6.5;
 const post = (message: unknown) => self.postMessage(message);
 
 let loading: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
@@ -39,7 +45,7 @@ function load() {
   return loading;
 }
 
-// Whisper writes these for silence and noise: "[BLANK_AUDIO]", "(music)", "*sigh*", and a lone "you".
+// Speech models write these for silence and noise: "[BLANK_AUDIO]", "(music)", "*sigh*", and a lone "you".
 const NOISE = /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g;
 const HALLUCINATION = /^(?:you\.?|thanks for watching!?|\W*)$/i;
 
@@ -48,7 +54,7 @@ self.onmessage = async ({ data }: MessageEvent<{ type: string; id?: number; samp
     if (data.type === "load") await load();
     else if (data.type === "transcribe") {
       const asr = await load();
-      const out = await asr(data.samples!);
+      const out = await asr(data.samples!, { max_new_tokens: Math.max(8, Math.ceil((data.samples!.length / RATE) * TOKENS_A_SECOND)) });
       const text = (Array.isArray(out) ? out.map((o) => o.text).join(" ") : out.text).replace(NOISE, " ").replace(/\s+/g, " ").trim();
       post({ type: "text", id: data.id, text: HALLUCINATION.test(text) ? "" : text });
     }

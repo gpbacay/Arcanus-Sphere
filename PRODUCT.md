@@ -25,7 +25,8 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 - Single-page web app (Next.js): chat panel + Three.js sphere scene; no server-side inference
 - Decide: Hippocampus + Occipital (ARCANE), main thread, under 1 ms per message; ARC 1 reads skill arguments
 - Write: SmolLM2-Instruct (360M on WebGPU, 135M on WASM) via Transformers.js / ONNX Runtime Web, in a Web Worker
-- Speak: Kokoro-82M via kokoro-js, in a Web Worker; audio drives the sphere through the Web Audio analyser
+- Speak: Paradee-8M, in a Web Worker; audio drives the sphere through the Web Audio analyser
+- Hear: Moonshine tiny, in a Web Worker; live voice is full duplex, with the user's words written as they speak
 - Knowledge notes live in `src/modules/brain/knowledge.ts`; skills and their routing examples in `src/modules/brain/skills.ts`
 - Models download from Hugging Face on first visit and are cached by the browser
 

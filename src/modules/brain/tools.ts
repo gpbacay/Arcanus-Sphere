@@ -4,12 +4,42 @@ const ARITHMETIC = /[\d.()\s+\-*/%^]+/g;
 
 const N = String.raw`(-?\d+(?:\.\d+)?)`;
 
+const UNITS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(" ");
+const TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split(" ");
+const NUMBER_WORD = [...UNITS, ...TENS, "hundred", "thousand"].join("|");
+// A run of number words. "and" joins only after hundred or thousand: "three hundred and five" is one number, "twenty and nineteen" is two.
+const NUMBER_WORDS = new RegExp(String.raw`\b(?:${NUMBER_WORD})(?:(?:[\s-]+|(?<=hundred|thousand)\s+and\s+)(?:${NUMBER_WORD}))*\b`, "gi");
+
+/**
+ * Numbers written as words, in digits: "twelve" -> "12", "twenty-one" -> "21", "three hundred and five" -> "305".
+ * A speech model writes numbers this way, so a sum said aloud ("twelve times seven") has no digits in it.
+ * ponytail: whole numbers under a million, and digits read out one by one ("one two three") come out added up.
+ */
+export function numerals(text: string): string {
+  return text.replace(NUMBER_WORDS, (run) => {
+    let total = 0;
+    let part = 0;
+    for (const word of run.toLowerCase().split(/[\s-]+/)) {
+      const unit = UNITS.indexOf(word);
+      const ten = TENS.indexOf(word);
+      if (unit >= 0) part += unit;
+      else if (ten >= 0) part += (ten + 2) * 10;
+      else if (word === "hundred") part = (part || 1) * 100;
+      else if (word === "thousand") {
+        total += (part || 1) * 1000;
+        part = 0;
+      }
+    }
+    return String(total + part);
+  });
+}
+
 /**
  * Arithmetic said in words, written as symbols: "multiply 6 by 7" -> "6 * 7", "2 to the power of 8" -> "2 ^ 8".
  * ponytail: the common phrasings only. ARC 1 was measured for this and mixed up operations, so it stays rules.
  */
 export function spoken(text: string): string {
-  return text
+  return numerals(text)
     .replace(new RegExp(String.raw`\bmultiply\s+${N}\s+(?:by|and|with)\s+${N}`, "gi"), "$1 * $2")
     .replace(new RegExp(String.raw`\bdivide\s+${N}\s+by\s+${N}`, "gi"), "$1 / $2")
     .replace(new RegExp(String.raw`\badd\s+${N}\s+(?:and|to|plus)\s+${N}`, "gi"), "$1 + $2")

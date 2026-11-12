@@ -219,7 +219,7 @@ I am a Next.js app. Open that project folder from this pane to read and edit the
 - src/modules/chat — the conversation
 - src/modules/llm — SmolLM2
 - src/modules/voice — Paradee
-- src/modules/listen — Whisper, loaded when you talk
+- src/modules/listen — Moonshine, loaded when you talk
 - src/modules/sphere — the orb
 - src/modules/workspace — these files
 - src/modules/web — the browser

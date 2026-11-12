@@ -9,6 +9,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { loadOrb, ORB_BLOOM, type Orb } from "./orb";
+import { Pace } from "./pace";
 
 /**
  * The studio: Arcanus's orb standing in a 3D space grid. Drag to orbit the camera, scroll or pinch to zoom, and pick a
@@ -20,6 +21,8 @@ type Props = {
   analyser: AnalyserNode | null;
   /** 0..1: how busy Arcanus is while there is no audio yet (thinking). */
   activityBoost?: number;
+  /** The frames a second the models' work leaves room for, 0 when none is working (pace.ts). */
+  cap?: number;
   tool?: Tool;
   /** Arcanus's power switch: flipping it plays the boot-up or shutdown animation. */
   on?: boolean;
@@ -77,12 +80,13 @@ function makeGrid() {
   return grid;
 }
 
-export default function SphereScene({ analyser, activityBoost = 0, tool = "view", on = true, resetKey = 0 }: Props) {
+export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool = "view", on = true, resetKey = 0 }: Props) {
   const [broken, setBroken] = useState(false);
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const boostRef = useRef(0);
   const onRef = useRef(on);
+  const capRef = useRef(cap);
   const api = useRef<{ tool: (tool: Tool) => void; reset: () => void } | null>(null);
 
   useEffect(() => {
@@ -96,6 +100,10 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
   useEffect(() => {
     boostRef.current = Math.max(0, Math.min(1, activityBoost));
   }, [activityBoost]);
+
+  useEffect(() => {
+    capRef.current = cap;
+  }, [cap]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -188,12 +196,14 @@ export default function SphereScene({ analyser, activityBoost = 0, tool = "view"
         if (dead) return loaded.dispose();
         orb = loaded;
         rig.add(loaded.root);
-        const render = () => {
+        const pace = new Pace();
+        const render = (now = 0) => {
           frame = requestAnimationFrame(render);
+          if (!pace.draw(now, capRef.current)) return; // a model is working and this machine can't do both: skip the frame
           controls.update();
           grid.position.x = camera.position.x;
           grid.position.z = camera.position.z;
-          loaded.update(Math.min(clock.getDelta(), 0.05));
+          loaded.update(Math.min(clock.getDelta(), 0.1)); // 0.1 s: a held frame is ~0.08 s, and the orb must not slow down for it
           composer.render();
         };
         clock.getDelta();

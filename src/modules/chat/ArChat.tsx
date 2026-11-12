@@ -27,6 +27,7 @@ export function ArChat() {
   const hearing = useStore(listen.state, (s) => s.hearing);
   const writing = useStore(listen.state, (s) => s.writing);
   const problem = useStore(listen.state, (s) => s.problem);
+  const partial = useStore(listen.state, (s) => s.partial);
   const model = useStore(llm.state, (s) => s.status);
   const pct = useStore(llm.state, (s) => (s.total ? Math.min(99, Math.round((s.loaded / s.total) * 100)) : 0));
   const liveText = useStore(live, (s) => s.reply?.text ?? "");
@@ -65,10 +66,11 @@ export function ArChat() {
   const loading = model === "loading" || model === "idle";
   const caption = busy ? liveText || "Thinking…" : lastReply;
   // A reply on screen stays readable: "Listening…" only shows when nothing else is up.
+  // Your own words, as they are written while you talk.
   const status = hearing
-    ? "Hearing you… I'll answer when you pause"
+    ? partial || "Hearing you… I'll answer when you pause"
     : writing
-      ? "Writing down what you said…"
+      ? partial || "Writing down what you said…"
       : talking && !busy && !speaking && !(visible && caption)
         ? "Listening… just talk"
         : "";

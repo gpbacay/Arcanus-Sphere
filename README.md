@@ -50,11 +50,24 @@ Before each reply, the harness (`assemble` in `src/modules/harness`) fits what t
 
 ## Speech to text
 
-Tap the mic once and just talk: it's a hands-free, full-duplex conversation. The microphone stays open; each time you pause (about 0.7 s) Arcanus sends what you said, answers aloud, and keeps listening. Talk over it and it stops mid-sentence to hear you. Tap the mic again to end the conversation.
+Tap the mic once and just talk: it's a hands-free, full-duplex conversation. The microphone stays open; each time you pause (about half a second) Arcanus sends what you said, answers aloud, and keeps listening. Talk over it and it stops mid-sentence to hear you. Tap the mic again to end the conversation.
 
-Everything runs on the device. Every 32 ms of microphone audio is scored for speech by its loudness over the room's noise (no model to load); `src/modules/listen/segment.ts` cuts each utterance out of the stream; Whisper base.en (English) writes it down in a worker while the mic keeps listening, on WebGPU when there is one (about 206 MB) or WebAssembly (about 136 MB). Its encoder stays full precision, because an 8-bit Whisper encoder mishears and often returns nothing.
+Everything runs on the device. Every 32 ms of microphone audio is scored for speech by Silero VAD (2 MB), or by its loudness over the room's noise when Silero is busy; `src/modules/listen/segment.ts` cuts each utterance out of the stream; Moonshine tiny (English, about 51 MB, on the CPU) writes it down in a worker while the mic keeps listening. Moonshine encodes only the audio it is given, where Whisper always encodes 30 seconds: measured in Chrome on one thread, Whisper tiny took 2.6 s for 1.5 s of speech and Moonshine tiny 0.28 s. Its encoder stays full precision, because an 8-bit encoder mishears.
 
-While Arcanus speaks, only clear, sustained speech interrupts it, and anything heard that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers. Talking over it, your first second is written down at once, so it stops as soon as those words show it's you, not when you finish. On WebGPU, Whisper starts writing as soon as you begin to pause, so your words are mostly ready when the pause ends. Replies start speaking at their first comma rather than their first full stop. Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
+That speed is what makes it live:
+
+- **Your words appear as you say them.** Every half second while you talk, what you have said so far is written again and shown.
+- **Talking over Arcanus stops it mid-sentence.** Two words of yours that are not its own echo are enough; it does not wait for you to finish. Only clear, sustained speech counts while it speaks, and anything that is mostly Arcanus's own words is dropped, so it doesn't answer itself through your speakers.
+- **A sentence said in two breaths is one message.** Speak again within about a second of pausing and both halves are answered together, in place of the reply to the first half ("what time is it … in Tokyo").
+- **The words are ready when you stop.** Writing starts as soon as you begin to pause, and replies start speaking at their first comma rather than their first full stop.
+
+Headphones make barge-in the most reliable. The microphone needs HTTPS (or localhost).
+
+### Staying real time
+
+- **The sphere gives way to the models.** Drawing the sphere and running the models share one machine. Measured in Chrome on a 12-core laptop with integrated graphics, SmolLM2 wrote 2 tokens a second while the sphere drew 30 frames a second, and 10 to 12 at 5 frames. So while a model is working, a sphere that can't reach 50 frames a second on its own draws 12 (20 while it speaks), and goes back to full speed after (`src/modules/sphere/pace.ts`). A machine that draws it with room to spare is left alone.
+- **A spoken reply reads only what is new.** Its prompt is one fixed system line, then the conversation exactly as the model read it last turn, then the new message with the notes Hippocampus and Occipital recall for it (`liveTurns` in `src/modules/harness`). SmolLM2's cache from the last reply covers everything but the new turn.
+- **Each reply's trace says what it cost:** the route and how long Hippocampus took, SmolLM2's first word and tokens a second. That is where to look if it feels slow.
 
 ## 3D studio and AR
 
@@ -89,9 +102,10 @@ src/
     web/          Arcanus's browser: history, reader view, the Browser pane (pages come through src/app/api/web)
     llm/          SmolLM2: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
-    listen/       speech to text, full duplex: microphone frames, loudness voice detection and utterance segmenter (segment.ts), Whisper base.en (listen.worker.ts)
+    listen/       speech to text, full duplex: microphone frames, Silero voice detection (vad.worker.ts), the utterance segmenter (segment.ts), Moonshine tiny (listen.worker.ts)
+    mind/         the live Graph of Thought: every thought a node, its parents its edges, drawn as a graph (layout.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
-    sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback
+    sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback; pace.ts is its frame budget
     offline/      service worker registration, online status
   shared/         kernel every module may use: Store, Engine, Boundary, Lru, the HTML reader, the side-pane state, UI components
 ```

@@ -3,18 +3,33 @@
 // Speech to text, hands-free and full duplex, all on the device. Tap once and the microphone stays open while
 // Arcanus speaks: both share one AudioContext, so echo cancellation hears the voice and the mic is not muted by it.
 // Frames (an AudioWorklet, 16 kHz) are scored by Silero when it is keeping up, otherwise by loudness, in the same
-// order, so a slow score never stalls the mic. The segmenter cuts out each thing you say when you pause, and Whisper
-// writes it down while the mic keeps listening. Clear speech over Arcanus stops it at once.
+// order, so a slow score never stalls the mic. The segmenter cuts out each thing you say when you pause, and Moonshine
+// writes it down while the mic keeps listening. It also writes what you have said so far every half second while you
+// are still talking (onPartial): that is what shows your words as you say them, and what lets real words stop Arcanus
+// mid-sentence instead of after you finish.
 import { afterGpu } from "@/shared/boot";
 import { Store, IDLE, errorText, startWorker, type Engine, type LoadState } from "@/shared/store";
 import { voice } from "@/modules/voice";
-import { detectorFree, FRAME, Loudness, RATE, Segmenter } from "./segment";
+import { detectorFree, FPS, FRAME, Loudness, RATE, Segmenter } from "./segment";
+
+// Words so far, while you talk. The whole utterance is written again each time, so the cost grows with its length:
+// past PARTIAL_MOST nothing more is written until you pause, or the last words would wait behind it.
+// ponytail: re-reads the utterance from its start. A streaming encoder would only read the new audio.
+const PARTIAL_FIRST = Math.round(0.3 * FPS); // after you start: early, so talking over Arcanus stops it soon
+const PARTIAL_EVERY = Math.round(0.5 * FPS);
+const PARTIAL_MOST = 8 * RATE; // samples
+// Speaking again this soon after a pause ended your turn: you hadn't finished. With the pause itself, about 1.3 s of
+// silence. ponytail: a fixed gap. Shorten it if two separate questions get joined, lengthen it if a slow speaker is cut in two.
+const RESUME_MS = 900;
 
 export type Talk = {
-  /** Someone started speaking. `cut` means it happened over Arcanus and the speech model is sure, so stop now. */
-  onSpeech: (cut: boolean) => void;
-  /** What they said, once they paused. Empty when it was noise or couldn't be written down. */
-  onText: (text: string) => void;
+  /** Someone started speaking. `cut`: it happened over Arcanus and the speech model is sure. `resumed`: it began
+   *  right after the last thing they said ended, so it carries that sentence on. */
+  onSpeech: (cut: boolean, resumed: boolean) => void;
+  /** What they have said so far, while they are still talking. Never empty. */
+  onPartial?: (text: string) => void;
+  /** What they said, once they paused, and how many seconds of sound it was. Empty when it was noise or couldn't be written down. */
+  onText: (text: string, seconds: number) => void;
   /** True while Arcanus is speaking, so its own voice leaking into the mic needs more to count as speech. */
   strict: () => boolean;
 };
@@ -54,15 +69,22 @@ type Session = {
   talk: Talk;
   /** Words for the pause going on now, written while it runs out. */
   guess: Promise<string> | null;
+  /** Counts the things said, so words written for an earlier one are not taken for this one's. */
+  utterance: number;
+  /** Frames since the words so far were last written. */
+  since: number;
+  /** When the last thing said was cut out of the stream. */
+  cutAt: number;
 };
 
 class Listen {
-  state = new Store<LoadState & { on: boolean; hearing: boolean; writing: boolean; problem: string }>({
+  state = new Store<LoadState & { on: boolean; hearing: boolean; writing: boolean; problem: string; partial: string }>({
     ...IDLE,
     on: false,
     hearing: false,
     writing: false,
     problem: "",
+    partial: "", // what is being said right now, as far as it has been written
   });
   private worker: Promise<Worker> | null = null;
   private pending = new Map<number, Pending>();
@@ -70,6 +92,9 @@ class Listen {
   private sid = 0; // bumped by every open and close, so frames and words from an ended session are dropped
   private session: Session | null = null;
   private queue: Promise<unknown> = Promise.resolve(); // one transcription at a time, in the order things were said
+  private queued = 0; // transcriptions waiting or running
+  /** How long the last thing took to write down, ms: the Graph of Thought shows it beside what was heard. */
+  took = 0;
   private jobs = 0;
   private vad: Worker | null = null;
   private vadReady = false;
@@ -80,12 +105,12 @@ class Listen {
   private missed = false; // a frame Silero didn't see: the next one it does see resets its state
   private frame = 0;
 
-  /** Load Whisper. Safe to call again; the way to retry after an error. */
+  /** Load Moonshine. Safe to call again; the way to retry after an error. */
   start(): Promise<unknown> {
-    return this.whisper();
+    return this.speech();
   }
 
-  private whisper() {
+  private speech() {
     this.worker ??= afterGpu(() => startWorker(this.state, () => new Worker(new URL("./listen.worker.ts", import.meta.url), { type: "module" }), (data) => {
       const job = this.pending.get(data.id as number);
       if (!job) return;
@@ -109,7 +134,7 @@ class Listen {
     this.held = null;
     this.inFlight = false;
     this.missed = false;
-    this.state.set({ on: true, hearing: false, problem: "" });
+    this.state.set({ on: true, hearing: false, problem: "", partial: "" });
     void this.start().catch(() => undefined);
     this.detector();
     let stream: MediaStream | null = null;
@@ -141,7 +166,7 @@ class Listen {
       mute.gain.value = 0;
       src = ctx.createMediaStreamSource(stream);
       src.connect(node).connect(mute).connect(ctx.destination);
-      this.session = { sid, stream, node, src, mute, seg: new Segmenter(), loud: new Loudness(), talk, guess: null };
+      this.session = { sid, stream, node, src, mute, seg: new Segmenter(), loud: new Loudness(), talk, guess: null, utterance: 0, since: 0, cutAt: -Infinity };
       this.session.seg.fast = this.vadReady;
     } catch (error) {
       node?.disconnect();
@@ -221,38 +246,61 @@ class Listen {
     const strict = s.talk.strict();
     const out = s.seg.push(samples, p, strict);
     if (out === "start") {
-      this.state.set({ hearing: true });
-      s.talk.onSpeech(sure && strict);
+      s.utterance++;
+      s.since = PARTIAL_EVERY - PARTIAL_FIRST;
+      this.state.set({ hearing: true, partial: "" });
+      s.talk.onSpeech(sure && strict, performance.now() - s.cutAt < RESUME_MS);
     } else if (out === "pause") {
-      // The pause is already the finished clip. Tiny writes it while the pause runs out, so the words are ready when you stop.
-      s.guess = this.later(s.seg.clip());
+      // The pause is already the finished clip. It is written while the pause runs out, so the words are ready when you stop.
+      s.guess = this.sofar(s, s.seg.clip());
     } else if (out === "resume") {
       s.guess = null;
     } else if (out instanceof Float32Array) {
       this.state.set({ hearing: false });
-      this.write(s, s.guess ?? this.later(out));
+      s.cutAt = performance.now();
+      this.write(s, s.guess ?? this.later(out), out.length / RATE);
       s.guess = null;
+    } else if (s.seg.speaking && ++s.since >= PARTIAL_EVERY && !this.queued && s.seg.samples <= PARTIAL_MOST) {
+      // Mid-word and nothing else being written: write the words so far. In a pause it waits, so the last words never do.
+      this.sofar(s, s.seg.clip());
     }
+  }
+
+  /** Write the utterance so far, and hand its words on as soon as they are written, unless it was the one before. */
+  private sofar(s: Session, clip: Float32Array) {
+    const utterance = s.utterance;
+    s.since = 0;
+    const text = this.later(clip);
+    void text.then(
+      (words) => {
+        if (this.session !== s || s.utterance !== utterance || !words) return;
+        this.state.set({ partial: words });
+        s.talk.onPartial?.(words);
+      },
+      () => undefined,
+    );
+    return text;
   }
 
   /** Transcribe after whatever is already being written, so words come back in the order they were said. */
   private later(clip: Float32Array) {
+    this.queued++;
     const text = this.queue.then(() => this.transcribe(clip));
-    this.queue = text.catch(() => undefined);
+    this.queue = text.then(() => undefined, () => undefined).then(() => void this.queued--);
     return text;
   }
 
   /** Hand an utterance's words to the caller once written, while the mic keeps listening. */
-  private write(s: Session, text: Promise<string>) {
+  private write(s: Session, text: Promise<string>, seconds: number) {
     this.state.set({ writing: ++this.jobs > 0 });
     void text
       .then(
         (text) => {
-          if (this.session === s) s.talk.onText(text);
+          if (this.session === s) s.talk.onText(text, seconds);
         },
         (error: unknown) => {
           this.state.set({ problem: errorText(error) });
-          if (this.session === s) s.talk.onText("");
+          if (this.session === s) s.talk.onText("", seconds);
         },
       )
       .finally(() => this.state.set({ writing: --this.jobs > 0 }));
@@ -272,19 +320,20 @@ class Listen {
       s.mute.disconnect();
       s.stream.getTracks().forEach((track) => track.stop());
     }
-    this.state.set({ on: false, hearing: false });
+    this.state.set({ on: false, hearing: false, partial: "" });
   }
 
   private async transcribe(samples: Float32Array) {
     let worker: Worker;
     try {
-      worker = await this.whisper();
+      worker = await this.speech();
     } catch {
       throw new Error("The speech model couldn't load. Check the Speech pill, then try again.");
     }
     const id = ++this.seq;
+    const began = performance.now();
     return new Promise<string>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve: (text) => ((this.took = Math.round(performance.now() - began)), resolve(text)), reject });
       worker.postMessage({ type: "transcribe", id, samples }, [samples.buffer]);
     });
   }
@@ -295,7 +344,7 @@ export const canListen = Listen.supported;
 
 export const listenEngine: Engine = {
   name: "Speech",
-  detail: "Whisper tiny · on the CPU",
+  detail: "Moonshine tiny · on the CPU (~51 MB)",
   state: listen.state,
   later: true, // loads when the mic opens. On the CPU, so it never compiles next to SmolLM2.
   start: () => void listen.start().catch(() => undefined),

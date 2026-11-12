@@ -1,5 +1,5 @@
 // Silero VAD v5 (snakers4, MIT; 2.2 MB ONNX, in /public/vad so it is cached for offline use): the chance, per 32 ms
-// frame, that the frame holds speech. It runs here, off the main thread and apart from Whisper's worker, so a long
+// frame, that the frame holds speech. It runs here, off the main thread and apart from Moonshine's worker, so a long
 // transcription never holds up the next frame's score. One WASM thread: ~1 ms a frame, 3% of one core.
 import * as ort from "onnxruntime-web/wasm";
 

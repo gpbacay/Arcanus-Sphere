@@ -272,6 +272,41 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
   return { name: slug(meta.name || fallbackName) || "skill", description: meta.description || body.split("\n")[0].slice(0, 90), body };
 }
 
+// ------------------------------------------------------------------ live voice
+// A spoken turn's prompt is built for the model's KV cache (llm.worker.ts keeps the last prompt and reply, and reads a
+// new prompt only from where it differs). So everything that stays the same comes first and never changes: one fixed
+// system prompt, then the conversation exactly as it was read last turn. Everything that changes with the message
+// (recalled notes, facts) goes into the last turn, after it. A spoken reply then reads only the new words.
+
+export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
+
+export const LIVE_SYSTEM = `${FIRST_PERSON} You are talking out loud with the user. Answer in one or two short sentences, in plain words. No lists. Do not introduce yourself. If you do not know, say so.`;
+
+const LIVE_BUDGET = 480; // characters of notes and facts a spoken turn may read
+const LIVE_TURN = 160; // characters of each earlier turn
+// The conversation a spoken reply reads: between LEAST and MOST turns. The window's start moves only once every
+// MOST - LEAST turns, in one jump, so between jumps each prompt is the last one plus the new turn (see above).
+// ponytail: fixed sizes. Raise MOST if Arcanus forgets what was just said; lower it if a phone's first word is slow.
+const LIVE_MOST = 8;
+const LIVE_LEAST = 2;
+
+/** The turns SmolLM2 reads for something said aloud. `history` is the whole conversation so far, oldest first. */
+export function liveTurns(history: ChatTurn[], said: string, context: Section[] = []): Assembled & { turns: ChatTurn[]; budget: number } {
+  const step = LIVE_MOST - LIVE_LEAST;
+  const from = history.length <= LIVE_MOST ? 0 : Math.floor((history.length - LIVE_LEAST) / step) * step;
+  const fitted = assemble(context, LIVE_BUDGET);
+  const last = [...fitted.sections.map((s) => `${s.label}:\n${s.text}`), said].join("\n\n");
+  return {
+    ...fitted,
+    budget: LIVE_BUDGET,
+    turns: [
+      { role: "system", content: LIVE_SYSTEM },
+      ...history.slice(from).map((t) => ({ role: t.role, content: t.content.length > LIVE_TURN ? `${t.content.slice(0, LIVE_TURN)}…` : t.content })),
+      { role: "user", content: last },
+    ],
+  };
+}
+
 export type Section = { label: string; text: string; /** Lower goes in first when space is short. */ priority: number };
 export type Assembled = { sections: { label: string; text: string }[]; report: { label: string; chars: number; of: number }[]; used: number };
 

@@ -68,7 +68,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "smollm2",
     title: "Language model: SmolLM2",
     content:
-      "I write open answers with SmolLM2-135M Q4, on the CPU, including who made me. In live voice that is one short sentence. It reads and writes text only: I cannot look at images.",
+      "I write open answers with SmolLM2-135M Q4, on the CPU, including who made me. In live voice that is a sentence or two, written from the conversation so far and the notes I recall for what you said. It reads and writes text only: I cannot look at images.",
   },
   {
     id: "arc1",
@@ -86,7 +86,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "voice",
     title: "Voice: Paradee TTS",
     content:
-      "I speak with Paradee-8M, an open text-to-speech model by Sahil Mahendrakar distilled from Kokoro-82M, in a British male voice. It is only 8.5 MB and runs in your browser many times faster than real time. I start speaking each sentence as soon as it is written, and my voice drives my sphere through the Web Audio analyser. The microphone stays open while I speak, and I stop when you talk over me.",
+      "I speak with Paradee-8M, an open text-to-speech model by Sahil Mahendrakar distilled from Kokoro-82M, in a British male voice. It is only 8.5 MB and runs in your browser many times faster than real time. I start speaking each sentence as soon as it is written, and my voice drives my sphere through the Web Audio analyser. The microphone stays open while I speak. Moonshine, a small speech model, writes down what you say while you are still saying it, so I stop mid-sentence when you talk over me and answer as soon as you pause.",
   },
   {
     id: "sphere",
@@ -104,7 +104,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "source",
     title: "Source code and the editor",
     content:
-      "I am aware of my own code. I am a Next.js and React app: src/app is the page, src/modules/brain is Hippocampus and what I know, src/modules/chat is the conversation, src/modules/llm is SmolLM2, src/modules/voice is Paradee, src/modules/listen is Whisper, src/modules/sphere is my orb, src/modules/workspace is the Files pane, src/modules/web is the browser, and src/modules/harness is who I am allowed to be. The Files pane is my IDE. My own notes are in .arcanus/, including self.md. Open the project folder from Files to read and edit the source that is running; Ctrl+S saves, and a reload runs the change.",
+      "I am aware of my own code. I am a Next.js and React app: src/app is the page, src/modules/brain is Hippocampus and what I know, src/modules/chat is the conversation, src/modules/llm is SmolLM2, src/modules/voice is Paradee, src/modules/listen is Moonshine, src/modules/sphere is my orb, src/modules/workspace is the Files pane, src/modules/web is the browser, and src/modules/harness is who I am allowed to be. The Files pane is my IDE. My own notes are in .arcanus/, including self.md. Open the project folder from Files to read and edit the source that is running; Ctrl+S saves, and a reload runs the change.",
   },
   {
     id: "stack",

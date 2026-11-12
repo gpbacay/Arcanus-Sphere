@@ -2,7 +2,7 @@
 // "start" when someone is clearly talking, and the clip (with a little sound around it) once they pause. Pure, so
 // segment.check.ts runs it in Node.
 
-export const RATE = 16000; // what Whisper expects
+export const RATE = 16000; // what the speech model expects
 export const FRAME = 512; // 32 ms
 export const FPS = RATE / FRAME;
 
@@ -19,7 +19,7 @@ const FAST_STRICT_START = 8; // ~0.26 s
 const PAUSE = Math.round(0.7 * FPS); // this long under OFF ends the utterance
 const FAST_PAUSE = Math.round(0.5 * FPS);
 const PAD = Math.round(0.3 * FPS); // kept before and after, so the first and last words aren't clipped
-const MAX = Math.round(29 * FPS); // Whisper hears 30 s at a time: a longer turn is cut here and the rest is the next
+const MAX = Math.round(29 * FPS); // the speech model is trained on up to 30 s: a longer turn is cut here and the rest is the next
 
 export class Segmenter {
   /** True once the scores come from a speech model rather than from loudness: shorter waits, same thresholds. */
@@ -57,6 +57,16 @@ export class Segmenter {
     const clip = join(this.frames.slice(0, this.frames.length - Math.max(0, this.quiet - PAD)));
     this.reset();
     return clip;
+  }
+
+  /** Someone is talking right now: mid-word, not in a pause. */
+  get speaking() {
+    return this.talking && this.quiet === 0;
+  }
+
+  /** How long the utterance is so far, in samples. */
+  get samples() {
+    return this.frames.length * FRAME;
   }
 
   /** The utterance so far, while someone is talking. */

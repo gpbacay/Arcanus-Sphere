@@ -1,6 +1,6 @@
 // Run: node src/modules/brain/tools.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { calculate, findExpression, spoken, tellTime, zoneFor } from "./tools.ts";
+import { calculate, findExpression, numerals, spoken, tellTime, zoneFor } from "./tools.ts";
 
 assert.equal(findExpression("what's (3 + 4) * 2?"), "(3 + 4) * 2");
 assert.equal(findExpression("compute 2^10 please"), "2^10");
@@ -20,6 +20,12 @@ assert.equal(calculate(findExpression("what is 2 to the power of 8")!), "256");
 assert.equal(calculate(findExpression("what is 15% of 200")!), "30");
 assert.equal(findExpression("I'll be there in 5 minutes"), null);
 assert.equal(spoken("the x factor"), "the x factor");
+// Arithmetic said aloud: a speech model writes the numbers as words.
+assert.equal(numerals("three hundred and five, twenty-one and nineteen"), "305, 21 and 19");
+assert.equal(numerals("two thousand twenty six"), "2026");
+assert.equal(calculate(findExpression("Stop, tell me what is twelve times seven.")!), "84");
+assert.equal(findExpression("what is nine plus ten"), "9 + 10");
+assert.equal(findExpression("tell me one thing about the sea"), null);
 
 assert.equal(tellTime("time in Asia/Tokyo").zone, "Asia/Tokyo");
 assert.equal(zoneFor("new york"), "America/New_York");

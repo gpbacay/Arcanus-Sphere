@@ -1,12 +1,11 @@
 "use client";
 
 import { Network, Trash2, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { closePane, pane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
-import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtResult, ChainOfThoughtResults, ChainOfThoughtStep, ChainOfThoughtSubsteps } from "@/shared/ui/chain-of-thought";
-import { clearMind, mind } from "./mind";
-import { threads, type Row } from "./threads";
+import { graphs, type Graph } from "./layout";
+import { clearMind, mind, type Thought } from "./mind";
 
 /** The live Graph of Thought pane, beside the rail. Rendered only while open, so a closed pane costs nothing. */
 export function GraphOfThought() {
@@ -14,14 +13,20 @@ export function GraphOfThought() {
   return open ? <GraphPane /> : null;
 }
 
-const LONG = 320;
+const ROW = 54; // px from one layer to the next
+const NODE = 30; // px: a node's height
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const took = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
 function GraphPane() {
   const thoughts = useStore(mind, (s) => s.thoughts);
+  const [picked, setPicked] = useState<string | null>(null);
+  const pick = useCallback((id: string) => setPicked((was) => (was === id ? null : id)), []);
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true); // follow the newest thought unless you scrolled up to read
   const running = thoughts.filter((t) => t.status === "active").length; // threads running at once
+  // The thought read out below the graph: the one you picked, else whatever is running, else the newest.
+  const shown = thoughts.find((t) => t.id === picked) ?? thoughts.findLast((t) => t.status === "active") ?? thoughts.at(-1);
 
   useEffect(() => {
     const el = body.current;
@@ -52,16 +57,10 @@ function GraphPane() {
         }}
       >
         {thoughts.length ? (
-          threads(thoughts).map((thread) => (
-            <div key={thread[0].t.id} className="got-train">
-              <p className="got-when">{time(thread[0].t.at)}</p>
-              <ChainOfThought bare>
-                <ChainOfThoughtContent>
-                  {thread.map((row) => (
-                    <ThoughtNode key={row.t.id} rows={[row]} />
-                  ))}
-                </ChainOfThoughtContent>
-              </ChainOfThought>
+          graphs(thoughts).map((graph) => (
+            <div key={graph.nodes[0].t.id} className="got-train">
+              <p className="got-when">{time(graph.nodes[0].t.at)}</p>
+              <GraphView graph={graph} shown={graph.nodes.some((n) => n.t.id === shown?.id) ? shown?.id : undefined} onPick={pick} />
             </div>
           ))
         ) : (
@@ -71,47 +70,94 @@ function GraphPane() {
           </p>
         )}
       </div>
+      {shown ? <Detail t={shown} followed={!picked} /> : null}
     </section>
   );
 }
 
-/** A thought, then what it set running in parallel as branches. A branch that goes on (`then`) nests one level in. */
-function ThoughtNode({ rows: [{ t, branches }, ...then] }: { rows: Row[] }) {
-  const sub = then.length ? [...branches, then] : branches;
-  // The layout shows where a thought came from; only a join of several is spelled out.
-  const from = t.parents.length > 1 ? `joins ${t.parents.join(" + ")}` : "";
-  const took = t.ms !== undefined ? (t.ms < 1000 ? `${t.ms} ms` : `${(t.ms / 1000).toFixed(1)} s`) : "";
-  const description = [t.detail, from, took, t.status === "failed" ? "failed" : ""].filter(Boolean).join(" · ");
+/** One graph: its thoughts as nodes, layer by layer, and a curve from each thought down to every thought that came from it.
+ *  Drawn again only when one of its own thoughts changed, or the thought being read out moved into or out of it. */
+const GraphView = memo(
+  GraphDrawing,
+  (was, now) => was.shown === now.shown && was.graph.nodes.length === now.graph.nodes.length && was.graph.nodes.every((n, i) => n.t === now.graph.nodes[i].t),
+);
+
+function GraphDrawing({ graph, shown, onPick }: { graph: Graph; shown?: string; onPick: (id: string) => void }) {
+  const at = new Map(graph.nodes.map((n) => [n.t.id, n]));
+  const height = (graph.layers - 1) * ROW + NODE;
+  return (
+    <div className="got-graph" style={{ height }}>
+      {/* x runs 0 to 100 across whatever width the pane has; y is in pixels. */}
+      <svg className="got-edges" viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" aria-hidden>
+        {graph.edges.map(({ from, to }) => {
+          const a = at.get(from)!;
+          const b = at.get(to)!;
+          const y1 = a.layer * ROW + NODE;
+          const y2 = b.layer * ROW;
+          const mid = (y1 + y2) / 2;
+          return (
+            <path
+              key={`${from}-${to}`}
+              d={`M${a.x * 100} ${y1} C${a.x * 100} ${mid} ${b.x * 100} ${mid} ${b.x * 100} ${y2}`}
+              data-live={b.t.status === "active" || undefined}
+              data-lit={from === shown || to === shown || undefined}
+            />
+          );
+        })}
+      </svg>
+      {graph.nodes.map(({ t, layer, x, span }) => (
+        <button
+          key={t.id}
+          type="button"
+          className="got-node"
+          data-status={t.status}
+          data-tight={span < 0.3 || undefined}
+          aria-pressed={t.id === shown}
+          aria-label={`${t.operation}: ${t.content || "running"}`}
+          title={[t.content, t.detail].filter(Boolean).join(" · ")}
+          style={{ left: `${x * 100}%`, top: layer * ROW, width: `calc(${span * 100}% - 6px)` }}
+          onClick={() => onPick(t.id)}
+        >
+          <span className="got-op" data-op={t.operation}>
+            {t.operation}
+          </span>
+          <span className="got-text">{t.content || "…"}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const LONG = 600;
+
+/** The thought in full, under the graph: a node only has room for its first words. */
+function Detail({ t, followed }: { t: Thought; followed: boolean }) {
   // A long reply: its newest words while it is being written, its opening once done.
   const long = t.content.length > LONG;
   const content = !long ? t.content : t.status === "active" ? `…${t.content.slice(-LONG)}` : `${t.content.slice(0, LONG)}…`;
+  const facts = [
+    t.detail,
+    t.parents.length ? `from ${t.parents.join(" + ")}` : "a root",
+    t.ms !== undefined ? took(t.ms) : t.status === "active" ? "running" : "",
+    t.status === "failed" ? "failed" : "",
+  ].filter(Boolean);
   return (
-    <ChainOfThoughtStep
-      status={t.status === "active" ? "active" : "complete"}
-      label={
-        <>
-          <span className="got-op" data-op={t.operation}>
-            {t.id} · {t.operation}
-          </span>{" "}
-          {content || "…"}
-        </>
-      }
-      description={description || undefined}
-    >
+    <footer className="got-detail" aria-live={followed ? "off" : "polite"}>
+      <p className="got-detail-head">
+        <span className="got-op" data-op={t.operation}>
+          {t.id} · {t.operation}
+        </span>
+        <span>{followed ? "following the newest thought" : "picked · tap it again to follow"}</span>
+      </p>
+      <p className="got-detail-text">{content || "…"}</p>
+      <p className="got-detail-facts">{facts.join(" · ")}</p>
       {t.results?.length ? (
-        <ChainOfThoughtResults>
+        <ul className="got-detail-results">
           {t.results.map((r, i) => (
-            <ChainOfThoughtResult key={i}>{r}</ChainOfThoughtResult>
+            <li key={i}>{r}</li>
           ))}
-        </ChainOfThoughtResults>
+        </ul>
       ) : null}
-      {sub.length ? (
-        <ChainOfThoughtSubsteps>
-          {sub.map((branch) => (
-            <ThoughtNode key={branch[0].t.id} rows={branch} />
-          ))}
-        </ChainOfThoughtSubsteps>
-      ) : null}
-    </ChainOfThoughtStep>
+    </footer>
   );
 }

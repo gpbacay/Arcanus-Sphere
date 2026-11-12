@@ -25,7 +25,7 @@ export function engineSettled(engine: BootEngine) {
 }
 
 /**
- * Start the models this boot needs. A model with `later` stays unloaded until something asks for it (Whisper, when
+ * Start the models this boot needs. A model with `later` stays unloaded until something asks for it (Moonshine, when
  * the mic opens, on the CPU). A WebGPU compile still waits its turn through `afterGpu`.
  * `alive` goes false when this boot was cancelled, so a model that has not started yet never does.
  */

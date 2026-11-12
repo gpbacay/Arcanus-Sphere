@@ -1083,6 +1083,134 @@ textarea.field {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
+/* The graph itself: nodes in layers, a curve from each thought to the thoughts that came from it. */
+.got-graph {
+  position: relative;
+}
+.got-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.got-edges path {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke; /* the drawing stretches to the pane's width; the lines stay one pixel */
+}
+.got-edges path[data-lit] {
+  stroke: var(--accent);
+}
+.got-edges path[data-live] {
+  stroke: var(--think);
+  stroke-dasharray: 4 4;
+  animation: got-flow 0.6s linear infinite;
+}
+@keyframes got-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+.got-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 240px;
+  padding: 0 7px;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border: 1px solid var(--line-strong);
+  background: var(--glass-solid);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.got-node .got-op {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* Four or more side by side: the words say more than the operation, which the detail below still names. */
+.got-node[data-tight] .got-op {
+  display: none;
+}
+.got-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.got-node:hover,
+.got-node[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.got-node:focus-visible {
+  outline: 1px solid var(--accent-hot);
+  outline-offset: 1px;
+}
+.got-node[data-status="active"] {
+  border-color: var(--think);
+  color: var(--text);
+  box-shadow: 0 0 10px rgba(255, 191, 94, 0.28);
+}
+.got-node[data-status="failed"] {
+  border-color: var(--danger);
+}
+.got-detail {
+  flex: none;
+  max-height: 36%;
+  padding: 9px 12px 11px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.45;
+  scrollbar-width: thin;
+}
+.got-detail p {
+  margin: 0;
+}
+.got-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.got-detail-text {
+  margin-top: 6px !important;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.got-detail-facts {
+  margin-top: 4px !important;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.got-detail-results {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.got-detail-results li {
+  padding: 2px 0 2px 8px;
+  border-left: 1px solid var(--line-strong);
+  overflow-wrap: anywhere;
+}
 
 /* 3D orb tools: one horizontal row at the top center, above the sphere. */
 .stage-tools {

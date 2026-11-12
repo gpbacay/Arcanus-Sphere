@@ -2,7 +2,7 @@
 
 // The composition root: the only place that knows every module. Modules talk through their public APIs
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it gets a line in the chat's boot log.
-// Whisper is not in this boot: it loads when the mic opens, on the CPU, so it never shares SmolLM2's GPU.
+// Moonshine (speech to text) is not in this boot: it loads when the mic opens, on the CPU, so it never shares SmolLM2's GPU.
 import { useEffect } from "react";
 import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
@@ -80,12 +80,14 @@ function Stage() {
   const busy = useBusy();
   const analyser = useStore(voice.state, (s) => s.analyser);
   const speaking = useStore(voice.state, (s) => s.speaking);
+  const heard = useStore(listen.state, (s) => s.hearing || s.writing); // you are talking, or your words are being written
   const on = useStore(power, (s) => s.on);
   const state = !on ? "off" : speaking ? "speaking" : busy ? "thinking" : "idle";
   return (
     <div className="app-stage">
       {/* Paradee's audio runs through this analyser, so the sphere moves with the voice. */}
-      <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} />
+      {/* While a model works, the sphere draws fewer frames on a machine that can't do both at full speed. */}
+      <Sphere analyser={analyser} state={state === "off" ? "idle" : state} on={on} working={on && (busy || heard)} />
     </div>
   );
 }
