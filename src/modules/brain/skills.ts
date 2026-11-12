@@ -87,14 +87,17 @@ export const SKILLS: Skill[] = [
     async run(text) {
       // ARC 1 reads the city ("time in New York"); a zone named for it is the answer's zone. A named IANA zone
       // ("Asia/Tokyo") needs no model.
-      const named = /\b[A-Za-z]+\/[A-Za-z_]+/.test(text);
+      const named = text.match(/\b[A-Za-z]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/)?.[0];
       const city = !named && /\b(?:in|at|for)\s+\p{L}/iu.test(text) ? await cityIn(text) : null;
-      const zone = city ? zoneFor(city) : null;
+      const zone = named ?? (city ? zoneFor(city) : null);
       const now = tellTime(text, new Date(), zone);
-      const unknown = city && !zone ? ` I couldn't find a time zone for "${city}", so that's the time here.` : "";
+      // Full clock as separate facts; the system prompt / ONLY_ASKED tells SmolLM2 which one to speak.
+      const facts = [`The current time is ${now.time}.`, `Today's date is ${now.date}.`, `The time zone is ${now.zone}.`];
+      if (city && zone) facts.push(`The city asked about is ${city}.`);
+      if (city && !zone) facts.push(`No time zone found for "${city}"; the times above are local.`);
       return {
-        step: { label: "Read the clock", description: city ? `ARC 1 read the city: ${city}` : "Answered without the language model", results: [now.zone] },
-        reply: `It's ${now.text} (${now.zone}).${unknown}`,
+        step: { label: "Read the clock", description: city ? `ARC 1 read the city: ${city}` : "Facts for the language model", results: [now.zone] },
+        facts,
       };
     },
   },

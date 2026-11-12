@@ -18,6 +18,10 @@ export const identityBrief =
 /** How Arcanus must speak of itself. Said in the system prompt and again next to its facts, where a small model looks. */
 export const FIRST_PERSON = 'You are Arcanus: speak as yourself, with "I", "me" and "my". Never call yourself "Arcanus", "it" or "the assistant". "You" is the user.';
 
+/** How to use facts. Small models dump every fact they see unless told to pick only what answers the question. */
+export const ONLY_ASKED =
+  "Answer only what the user asked. Use the one fact that answers it; leave the rest unused. Do not add the date, time, place, timezone, or any other detail they did not ask for.";
+
 /** The answer to "who are you". Fixed, so a small model cannot invent a job or a team. (The boot greeting is written fresh.) */
 export const introduction = "I'm Arcanus, a curious mind Gianne Bacay built to live in this sphere. What shall we think about?";
 
@@ -280,7 +284,7 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
 
 export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
 
-export const LIVE_SYSTEM = `${FIRST_PERSON} You are talking out loud with the user. Answer in one or two short sentences, in plain words. No lists. Do not introduce yourself. If you do not know, say so.`;
+export const LIVE_SYSTEM = `${FIRST_PERSON} You are talking out loud with the user. Answer in one or two short sentences, in plain words. No lists. Do not introduce yourself. If you do not know, say so. ${ONLY_ASKED}`;
 
 const LIVE_BUDGET = 480; // characters of notes and facts a spoken turn may read
 const LIVE_TURN = 160; // characters of each earlier turn

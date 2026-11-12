@@ -33,4 +33,11 @@ assert.equal(zoneFor("Tokyo"), "Asia/Tokyo");
 assert.equal(zoneFor("narnia"), null);
 assert.equal(tellTime("what time is it", new Date(), "Europe/London").zone, "Europe/London");
 assert.notEqual(tellTime("time in Mars/Olympus").zone, "Mars/Olympus");
+// Clock facts stay separate so the language model can answer only what was asked (see ONLY_ASKED).
+const noon = new Date("2026-11-12T12:00:00Z");
+const clock = tellTime("what time is it", noon, "UTC");
+assert.equal(clock.zone, "UTC");
+assert.match(clock.time, /\d/);
+assert.match(clock.date, /November|2026/i);
+assert.match(clock.text, /November|2026/i);
 console.log("tools ok");

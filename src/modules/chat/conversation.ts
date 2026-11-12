@@ -2,7 +2,7 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
-import { asSelf, assemble, FIRST_PERSON, greetingPrompt, liveTurns, unsupported } from "@/modules/harness";
+import { asSelf, assemble, FIRST_PERSON, greetingPrompt, liveTurns, ONLY_ASKED, unsupported } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
@@ -26,7 +26,7 @@ const busy = () => live.state.reply !== null || !power.state.on;
 // The biography is not in here. Pasted in, a small model recites "I am Arcanus, a local AI assistant…" instead of answering.
 // Who it is stays in the about route, and only when the question is about that.
 const system = () =>
-  `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. Today is ${new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
+  `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. ${ONLY_ASKED}`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
 const VOICE_TOKENS = 48; // a sentence or two. The first clause is spoken as soon as it is written, so the cap only bounds the end.
 const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
@@ -81,11 +81,12 @@ const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !re
 async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Promise<Built> {
   const recalled = recallNotes(user.text, await memories().catch(() => []));
   const own = plan.facts?.length && !plan.source ? plan.facts : [];
+  const ownBlock = own.length ? `${own.map((f) => `- ${f}`).join("\n")}\n\n${ONLY_ASKED}` : "";
   const { turns, report, used, budget } = liveTurns(
     conversed(prior).map((m): Turn => ({ role: m.role, content: m.text })),
     user.text,
     [
-      { label: "What you know about yourself, in your own words", text: own.map((f) => `- ${f}`).join("\n"), priority: 0 },
+      { label: "Facts you may use", text: ownBlock, priority: 0 },
       { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 1 },
     ],
   );
@@ -119,12 +120,12 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     ? ""
     : plan.source
       ? `${listed}\n\nAnswer from this, and say which site it came from.`
-      : `${listed}\n\nAnswer the user's question in one or two sentences, from the one fact that answers it. Do not recite the other facts, and do not introduce yourself. Speak as "I" and "my". Do not add a job, a team, or a personal history.`;
+      : `${listed}\n\n${ONLY_ASKED} Speak as "I" and "my". Do not introduce yourself. Do not add a job, a team, or a personal history.`;
   const { sections, report, used } = assemble(
     [
       { label: STANDING, text: rules, priority: 1 },
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
-      { label: plan.source ?? "What you know about yourself, in your own words", text: facts, priority: 0 },
+      { label: plan.source ?? "Facts you may use", text: facts, priority: 0 },
       { label: `What the user is showing you: ${pinned?.label}`, text: pinned?.text ?? "", priority: 2 },
       {
         label: `From your user's books (${[...new Set(passages.map((p) => p.book))].join(", ")})`,
@@ -145,7 +146,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
   ]
     .filter(Boolean)
     .join("\n\n");
-  const asked = `${content}\n\nAnswer that directly. Do not introduce yourself.`;
+  const asked = `${content}\n\nAnswer that directly. Do not introduce yourself. ${ONLY_ASKED}`;
   const history = conversed(prior)
     .slice(-HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));

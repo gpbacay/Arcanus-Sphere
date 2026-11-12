@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, asSelf, assemble, callTool, featuresReply, greetingPrompt, identityBrief, introduction, liveTurns, LIVE_SYSTEM, matchTool, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
+import { argsFor, asSelf, assemble, callTool, featuresReply, greetingPrompt, identityBrief, introduction, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -66,6 +66,8 @@ for (let n = 1; n <= 40; n++) {
 assert.equal(jumps, 6);
 // Notes ride with the message, never in the system prompt, and a long turn is cut.
 const noted = liveTurns([{ role: "user", content: "a".repeat(400) }], "what is my name", [{ label: "Notes you remembered", text: "- My name is Sam.", priority: 1 }]);
+assert.match(ONLY_ASKED, /only what the user asked/i);
+assert.match(LIVE_SYSTEM, /only what the user asked/i);
 assert.equal(noted.turns[0].content, LIVE_SYSTEM);
 assert.equal(noted.turns[1].content.length, 161);
 assert.equal(noted.turns[2].content, "Notes you remembered:\n- My name is Sam.\n\nwhat is my name");

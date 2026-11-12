@@ -81,16 +81,21 @@ export function zoneFor(city: string): string | null {
   return Intl.supportedValuesOf("timeZone").find((zone) => zone.toLowerCase().split("/").at(-1) === want) ?? null;
 }
 
-/** The current date and time, in `zone`, an IANA zone named in `text` ("time in Asia/Tokyo"), or the device's own. */
-export function tellTime(text: string, now = new Date(), zone?: string | null): { zone: string; text: string } {
+/** The current clock, in `zone`, an IANA zone named in `text` ("time in Asia/Tokyo"), or the device's own.
+ *  Returns time, date and zone as separate facts so the language model can answer only what was asked. */
+export function tellTime(text: string, now = new Date(), zone?: string | null): { zone: string; text: string; time: string; date: string } {
   const named = zone ?? text.match(/\b[A-Za-z]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/)?.[0];
   for (const zone of [named, undefined]) {
     try {
-      const shown = now.toLocaleString(undefined, { dateStyle: "full", timeStyle: "short", timeZone: zone });
-      return { zone: zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, text: shown };
+      const opts = { timeZone: zone };
+      const time = now.toLocaleTimeString(undefined, { ...opts, timeStyle: "short" });
+      const date = now.toLocaleDateString(undefined, { ...opts, dateStyle: "full" });
+      const shown = now.toLocaleString(undefined, { ...opts, dateStyle: "full", timeStyle: "short" });
+      return { zone: zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, text: shown, time, date };
     } catch {
       /* unknown zone: fall back to the device's */
     }
   }
-  return { zone: "UTC", text: now.toISOString() };
+  const iso = now.toISOString();
+  return { zone: "UTC", text: iso, time: iso.slice(11, 16), date: iso.slice(0, 10) };
 }
