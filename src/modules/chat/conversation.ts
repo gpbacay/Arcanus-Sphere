@@ -6,7 +6,7 @@ import { asSelf, assemble, FIRST_PERSON, greetingPrompt, liveTurns, unsupported 
 import { listen } from "@/modules/listen";
 import { llm, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
-import { go, search } from "@/modules/web";
+import { go } from "@/modules/web";
 import { finishGreeting, isEcho, isIntroduction, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
@@ -458,7 +458,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       finish(plan.reply, trace);
       return;
     }
-    // A fact with nothing retrieved is not SmolLM2's to invent. Books first, then the web, then an honest miss.
+    // Fact lookup stays in the books you added. The web is only the web skill (search / look up / a link / go to).
     if (!skill && plan.route === "chat" && !plan.facts?.length && asksForFact(user.text)) {
       const earlier = prior.findLast((m) => m.role === "user" && m.text && !m.kind)?.text ?? "";
       const query = lookupQuery(user.text, earlier);
@@ -472,28 +472,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
         finish(line, [...trace, { label: "From your books", description: passages[0].book }]);
         return;
       }
-      try {
-        const found = await search(query);
-        if (stale()) return;
-        const raw = (found.brief && found.brief.length < 400 ? found.brief : "") || found.results[0]?.snippet || "";
-        const line = spokenLine(raw);
-        if (line) {
-          const url = found.results[0]?.url;
-          const said = thought("generate", line, { parents: [decision], detail: "the search result, not rewritten" });
-          sayAll(line);
-          voiced(said)();
-          finish(url ? `${line}\n${url}` : line, [
-            ...trace,
-            { label: `From ${found.engine || "the web"}`, description: query, results: found.results.slice(0, 3).map((r) => r.title) },
-          ]);
-          return;
-        }
-      } catch (err) {
-        finish(`I don't have that in your books, and I couldn't reach the web. ${errorText(err)}`, trace);
-        return;
-      }
-      finish("I don't have that in your books, and the web search found nothing I can quote.", trace);
-      return;
+      // Books missed: let the language model answer. Do not scrape the internet as a default knowledge base.
     }
     // A tool or a web result is spoken as it is. SmolLM2 rewrites those into something else, so it is not called.
     // A note about Arcanus, including who made it, is written by SmolLM2.

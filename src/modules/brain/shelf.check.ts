@@ -65,8 +65,12 @@ assert.ok(!fits("how are you today", "How are you today, reader?")); // no telli
 assert.ok(!fits("octopus recipes with garlic", "The octopus has three hearts.")); // one of three is not enough
 assert.equal(asksForFact("give me a quote of einstein"), true);
 assert.equal(asksForFact("what's his famous quote?"), true);
+assert.equal(asksForFact("what is the capital of france"), true);
 assert.equal(asksForFact("tell me a joke"), false);
 assert.equal(asksForFact("how are you today"), false);
+assert.equal(asksForFact("can you understand tagalog?"), false);
+assert.equal(asksForFact("do you speak french?"), false);
+assert.equal(asksForFact("are you online?"), false);
 assert.equal(lookupQuery("what's his famous quote?", "give me a quote of einstein"), "give me a quote of einstein what's his famous quote?");
 assert.equal(lookupQuery("what is the capital of france"), "what is the capital of france");
 
