@@ -130,20 +130,6 @@ export function Composer() {
           }}
         />
         <div className="composer-bar">
-          {micOk ? (
-            <button
-              type="button"
-              className="icon-btn"
-              data-recording={talking || undefined}
-              aria-pressed={talking}
-              aria-label={talking ? "End the voice conversation" : "Talk to Arcanus"}
-              title={talking ? "End the voice conversation" : "Talk to Arcanus, hands-free"}
-              disabled={!on}
-              onClick={talk}
-            >
-              <Icon name="live" />
-            </button>
-          ) : null}
           <button
             type="button"
             className="icon-btn"
@@ -157,13 +143,27 @@ export function Composer() {
           <span className="count" data-warn={draft.length > MAX - 200}>
             {draft.length > MAX * 0.8 ? `${draft.length}/${MAX}` : null}
           </span>
-          {busy ? (
+          {/* One button, three jobs: stop a reply, send what is typed, or (nothing typed) start or end live voice chat. */}
+          {draft.trim() ? (
+            <button type="submit" className="send" aria-label="Send" title="Send (Enter)">
+              <Icon name="send" />
+            </button>
+          ) : busy && !talking ? (
             <button type="button" className="send" data-stop aria-label="Stop" title="Stop" onClick={stop}>
               <Icon name="stop" />
             </button>
           ) : (
-            <button type="submit" className="send" aria-label="Send" title="Send (Enter)" disabled={!draft.trim()}>
-              <Icon name="send" />
+            <button
+              type="button"
+              className="send"
+              data-recording={talking || undefined}
+              aria-pressed={talking}
+              aria-label={talking ? "End the voice conversation" : "Talk to Arcanus"}
+              title={talking ? "End the voice conversation" : "Talk to Arcanus, hands-free"}
+              disabled={!on || !micOk}
+              onClick={talk}
+            >
+              <Icon name="live" />
             </button>
           )}
         </div>

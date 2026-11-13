@@ -7,6 +7,7 @@ import { pane, toggleMap, togglePane, TOP_ACTIONS } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
 import { modelSize, MODELS, setModelSize, type ModelSize } from "@/modules/llm";
+import { deviceSpecs, type Specs } from "@/modules/device";
 import { mind } from "@/modules/mind";
 import { voice } from "@/modules/voice";
 
@@ -91,6 +92,54 @@ function AppDialog({ title, onClose, children }: { title: string; onClose: () =>
   );
 }
 
+type Row = [label: string, value: string];
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+
+const deviceRows = (s: Specs): Row[] => [
+  ["Device", s.host],
+  ["System", `${s.os.name} (${s.os.arch})`],
+  ["Processor", `${s.cpu.model} · ${s.cpu.cores} threads`],
+  ["Memory", gb(s.memory.total)],
+  ...(s.gpu ? ([["Graphics", s.gpu]] as Row[]) : []),
+];
+
+/** What the browser alone says, when Arcanus's device service isn't running. It never gives the computer's name. */
+function browserRows(): Row[] {
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string }; deviceMemory?: number };
+  return [
+    ["System", nav.userAgentData?.platform || navigator.platform || "Unknown"],
+    ["Processor", `${navigator.hardwareConcurrency} threads`],
+    ...(nav.deviceMemory ? ([["Memory", `${nav.deviceMemory}+ GB`]] as Row[]) : []),
+  ];
+}
+
+/** The device this account lives on: its name and hardware, read from the operating system when the device service runs. */
+function DeviceDetails() {
+  const [found, setFound] = useState<{ rows: Row[]; full: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    deviceSpecs().then(
+      (s) => live && setFound({ rows: deviceRows(s), full: true }),
+      () => live && setFound({ rows: browserRows(), full: false }),
+    );
+    return () => void (live = false);
+  }, []);
+  return (
+    <div>
+      <span className="setting-label">This device</span>
+      <span className="setting-note">{found && !found.full ? "Arcanus's device service isn't running, so this is only what the browser says." : "This account is kept on this device."}</span>
+      <ul className="device-details" aria-busy={!found}>
+        {(found?.rows ?? [["Device", "Reading…"]]).map(([label, value]) => (
+          <li key={label}>
+            <span>{label}</span>
+            {value}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Who is signed in: the name Arcanus greets, the password, and the way out. */
 function AccountDialog({ onClose }: { onClose: () => void }) {
   const user = useStore(account, (s) => s.user);
@@ -117,6 +166,7 @@ function AccountDialog({ onClose }: { onClose: () => void }) {
       <p>
         Signed in as <strong>{user?.username}</strong>. This account&apos;s conversations, memory, skills and files are its own, and stay in this browser.
       </p>
+      <DeviceDetails />
       <form className="account-form" onSubmit={save}>
         <label>
           <span className="setting-label">Name</span>

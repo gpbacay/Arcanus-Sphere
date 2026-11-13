@@ -42,8 +42,14 @@ assert.equal(
 assert.equal(asSelf("I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens."), "I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens.");
 assert.equal(asSelf("Arcanus can search the web."), "I can search the web.");
 // The greeting: by the time of day, to whoever is signed in, by first name. Never "Good night", which is a goodbye.
-assert.equal(greeting({ when: "Friday evening", name: "Gianne Bacay" }), "Good evening, Gianne. I'm Arcanus. What shall we think about?");
-assert.equal(greeting({ when: "Friday night" }), "Hello. I'm Arcanus. What shall we think about?");
+// Words vary by boot (pick is fixed here); a week-old or absent topic means a plain introduction.
+assert.equal(greeting({ when: "Friday evening", name: "Gianne Bacay" }, () => 0), "Good evening, Gianne. I'm Arcanus. What shall we think about?");
+assert.equal(greeting({ when: "Friday night" }, () => 0), "Hello. I'm Arcanus. What shall we think about?");
+assert.equal(greeting({ when: "Friday morning" }, () => 0.99), "Hello, and good morning. I'm Arcanus. What shall we explore?");
+assert.equal(new Set(Array.from({ length: 50 }, () => greeting({ when: "Friday evening" }))).size > 1, true);
+const day = 24 * 3600_000;
+assert.equal(greeting({ when: "Monday morning", name: "Gianne", last: { title: "Black holes.", at: 0 }, now: day }, () => 0), 'Good morning, Gianne. Last time it was "Black holes". Shall we go on, or start something new?');
+assert.match(greeting({ when: "Monday morning", last: { title: "Black holes", at: 0 }, now: 8 * day }, () => 0), /I'm Arcanus/);
 
 // Live voice: each prompt is the last one plus the new turn, so SmolLM2's cache covers all but the new words.
 const talked = (n: number) => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? ("assistant" as const) : ("user" as const), content: `turn ${i}` }));

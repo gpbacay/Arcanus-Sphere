@@ -65,19 +65,34 @@ export const abilities = ["tell the time", "tell where we are, live, and show it
 export const featuresReply = `I can ${abilities.slice(0, -1).join(", ")}, and ${abilities.at(-1)}. Everything but the web runs on your device. What shall we try?`;
 
 // ------------------------------------------------------------------ greeting
-// The boot greeting is composed, not generated: the time of day and who is signed in are known, so nothing is left
-// for a model to decide, and Arcanus greets the moment it boots. Measured on the dev laptop: SmolLM2 took 11 s once
-// loaded (and on a first visit its whole 180 MB download before that, 5 to 10 minutes) to add "How can I help you?",
-// or words that were then thrown away as not a greeting.
+// The boot greeting is composed, not generated, and not a fixed sentence: each boot picks its words from what is
+// known (the time of day, who is signed in, what they last talked about), so nothing is left for a model to decide and
+// Arcanus greets the moment it boots. Measured on the dev laptop: SmolLM2 took 11 s once loaded (and on a first visit
+// its whole 180 MB download before that, 5 to 10 minutes) to add "How can I help you?", or words that were then
+// thrown away as not a greeting.
 
-/** This boot: when it is ("Friday morning"), and the signed-in account's name. */
-export type Moment = { when: string; name?: string };
+/** This boot: when it is ("Friday morning"), the signed-in account's name, and the last thing talked about, if anything. */
+export type Moment = { when: string; name?: string; last?: { title: string; at: number }; now?: number };
 
-export function greeting(m: Moment): string {
-  const part = m.when.split(" ").at(-1);
-  const hello = part === "night" ? "Hello" : `Good ${part}`; // "Good night" is a goodbye, so at night it says hello
+const HELLOS: Record<string, string[]> = {
+  morning: ["Good morning", "Morning", "Hello, and good morning"],
+  afternoon: ["Good afternoon", "Afternoon", "Hello"],
+  evening: ["Good evening", "Evening", "Hello"],
+  night: ["Hello", "Hi", "Still up"], // "Good night" is a goodbye, so at night it never says it
+};
+const ASKS = ["What shall we think about?", "What's on your mind?", "Where shall we begin?", "What are you curious about?", "What shall we explore?"];
+const WEEK = 7 * 24 * 3600_000;
+
+/** `pick`: a number in [0, 1), Math.random unless a test fixes it. */
+export function greeting(m: Moment, pick: () => number = Math.random): string {
+  const from = <T,>(list: T[]) => list[Math.floor(pick() * list.length)];
+  const hello = from(HELLOS[m.when.split(" ").at(-1)!] ?? HELLOS.evening);
   const first = m.name?.trim().split(/\s+/)[0];
-  return `${hello}${first ? `, ${first}` : ""}. I'm Arcanus. What shall we think about?`;
+  const title = m.last?.title.replace(/[\s.!?]+$/, "");
+  const back = title && (m.now ?? Date.now()) - m.last!.at < WEEK;
+  // Someone who has talked here before is not introduced to Arcanus again: it picks up where they left off.
+  const rest = back ? `Last time it was "${title}". Shall we go on, or start something new?` : `I'm Arcanus. ${from(ASKS)}`;
+  return `${hello}${first ? `, ${first}` : ""}. ${rest}`;
 }
 
 export interface Tool {

@@ -938,7 +938,8 @@ textarea.field {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
+  flex-shrink: 0;
+  width: 28px; /* the same size as .icon-btn, so the bar's buttons match */
   height: 28px;
   border-radius: var(--r-sm);
   background: var(--accent);
@@ -952,10 +953,14 @@ textarea.field {
 .send:disabled {
   opacity: 0.3;
 }
-.send[data-stop] {
+.send[data-stop],
+.send[data-recording] {
   background: var(--danger-soft);
   color: var(--danger);
   box-shadow: inset 0 0 0 1px rgba(255, 107, 129, 0.4);
+}
+.send[data-recording] {
+  animation: pulse 1.1s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -1720,7 +1725,7 @@ textarea.field {
 
 .app-dialog {
   width: min(380px, calc(100vw - 32px));
-  max-height: min(600px, calc(100dvh - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
   padding: 0;
 }
 .app-dialog[open] {
@@ -1756,6 +1761,19 @@ textarea.field {
 }
 .app-dialog p,
 .setting-note {
+  color: var(--text-muted);
+}
+.device-details {
+  margin-top: 6px;
+}
+.device-details li {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.device-details li span {
+  flex: 0 0 4.5rem;
   color: var(--text-muted);
 }
 .app-dialog ul {
@@ -2135,7 +2153,7 @@ textarea.field {
     height: 34px;
   }
   .send {
-    width: 38px;
+    width: 34px;
     height: 34px;
   }
 }
@@ -2234,6 +2252,47 @@ textarea.field {
     left: auto;
     right: var(--gap);
     width: var(--panel-w);
+  }
+}
+
+/* —— Wide screens: the window is three sections, side by side. The left (Graph of Thought, files or browser), the
+   center (the chat, over the orb) and the right (the world map) each fill the whole width of their section, from the
+   top bar's foot to the window's bottom, so the three share their edges. The orb stays behind them all, centered on
+   the middle section. A narrower screen keeps the panes floating over the orb. A Files pane open on its editor
+   spreads over the left and the center. —— */
+@media (min-width: 1100px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .app-stage,
+  .app-topbar {
+    grid-area: 1 / 1 / 2 / -1;
+  }
+  /* Every area names both its end lines: an absolutely placed item whose end is "auto" runs on to the window's edge. */
+  .side-pane {
+    grid-area: 1 / 1 / 2 / 2;
+    left: var(--gap);
+    right: var(--gap);
+    width: auto;
+  }
+  .side-pane.map-pane {
+    grid-area: 1 / 3 / 2 / 4;
+    left: var(--gap);
+    right: var(--gap);
+    width: auto;
+  }
+  .side-pane.files-pane[data-wide] {
+    grid-area: 1 / 1 / 2 / 3;
+    width: auto;
+  }
+  /* The chat's boxes carry an 8px inset of their own, so the panel is moved out by that much to line them up with the panes. */
+  .panel {
+    --chat-w: 100%;
+    grid-area: 1 / 2 / 2 / 3;
+    left: calc(var(--gap) - 8px);
+    right: calc(var(--gap) - 8px);
   }
 }
 .map-shell {

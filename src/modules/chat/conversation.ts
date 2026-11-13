@@ -322,7 +322,7 @@ export function greet(list = engines) {
   stopGreeting();
   const when = moment();
   const name = account.state.user?.name;
-  const line = greeting({ when, name });
+  const line = greeting({ when, name, last: lastTopic(chat.id) });
   const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: line, at: Date.now(), kind: "boot" };
   write(chat.id, (c) => ({ ...c, messages: [...(c.messages.at(-1)?.kind === "boot" ? c.messages.slice(0, -1) : c.messages), intro] }));
   watchBoot(chat.id, intro.id);
@@ -338,6 +338,16 @@ export function greet(list = engines) {
     watchGesture();
   }
   unstage = whenShown(speakGreeting);
+}
+
+/** The most recent other chat the user actually wrote in: its title, and when it last moved. */
+function lastTopic(exceptId: string) {
+  let best: { title: string; at: number } | undefined;
+  for (const c of chatStore.state.chats) {
+    const at = c.messages.at(-1)?.at ?? 0;
+    if (c.id !== exceptId && c.title !== "Untitled" && c.messages.some((m) => m.role === "user" && !m.kind) && at > (best?.at ?? 0)) best = { title: c.title, at };
+  }
+  return best;
 }
 
 /** "Friday evening": when this boot is, in words the greeting can use. */
