@@ -97,4 +97,9 @@ for (const text of ["launch spotify", "open the calculator app", "click Save in 
   assert.equal((await decide(routerMemory(), text)).route, "device", text);
 }
 assert.equal((await decide(routerMemory(), "open notepad")).route, "web");
+// Requests for its own source are claimed; questions about its code stay questions about Arcanus.
+for (const text of ["open your source code", "open page.tsx", "what branch are you on", "find the greeting in your code", "commit your changes saying fix the orb"]) {
+  assert.equal((await decide(routerMemory(), text)).route, "source", text);
+}
+assert.notEqual((await decide(routerMemory(), "who wrote your code")).route, "source");
 console.log("routing ok");

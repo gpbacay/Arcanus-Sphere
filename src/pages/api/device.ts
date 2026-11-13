@@ -17,14 +17,9 @@ import { createInterface } from "node:readline";
 import type { NextApiRequest, NextApiResponse } from "next";
 // eslint-disable-next-line no-restricted-imports -- the public API also carries the browser client; the server needs only this pure part
 import { matchApp, type App, type Specs } from "@/modules/device/command";
+import { fromThisMachine } from "@/shared/loopback";
 
-const LOOPBACK = /^(?:127\.|::1$|::ffff:127\.)/;
-const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
 const TOOLS = new Set(["list_apps", "get_app_state", "click", "perform_secondary_action", "scroll", "drag", "type_text", "press_key", "set_value"]);
-
-function fromThisMachine(req: NextApiRequest) {
-  return LOOPBACK.test(req.socket.remoteAddress ?? "") && LOCAL_HOST.test(req.headers.host ?? "") && req.headers["x-arcanus"] === "device";
-}
 
 // ------------------------------------------------------------------ specs
 
@@ -172,7 +167,7 @@ async function callComputer(tool: string, args: Record<string, unknown>) {
 // ------------------------------------------------------------------ the route
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (!fromThisMachine(req)) return res.status(403).json({ error: "Device control works only in Arcanus opened at localhost on this computer." });
+  if (!fromThisMachine(req, "device")) return res.status(403).json({ error: "Device control works only in Arcanus opened at localhost on this computer." });
   try {
     if (req.method === "GET") return res.json(specs());
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST." });

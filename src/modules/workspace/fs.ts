@@ -6,13 +6,17 @@
 //   .arcanus/memory/*.md         notes Arcanus remembers, recalled when a message is about them
 //   .arcanus/knowledge/*.md|txt  books and documents you add; Arcanus answers from their passages (brain/shelf.ts)
 //   .arcanus/artifacts/          what Arcanus saves: replies, web pages
+//   .arcanus/source/             Arcanus's own source code: the project it runs from, with its git history (source.ts)
 // The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
+// .arcanus/source is not in either: it is mounted from the server Arcanus runs from, at localhost only, so the same
+// list, read, write, rename and remove work on the code that is running.
 // ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Files pane.
 import { scopedHome, scopedKey } from "@/modules/account";
 import { parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
 import { kept } from "@/shared/idb";
 import { Store, errorText } from "@/shared/store";
+import { connectSource, source, sourceFs, sourceGit } from "./source";
 
 type Dir = FileSystemDirectoryHandle;
 type Permissioned = Dir & {
@@ -25,6 +29,8 @@ export type Entry = { name: string; kind: "file" | "directory" };
 export type Skill = SkillFile & { path: string };
 
 export const HOME = ".arcanus";
+/** Where Arcanus's own source code is mounted. */
+export const SOURCE = `${HOME}/source`;
 const MAX_READ = 2_000_000;
 
 export const workspace = new Store({
@@ -66,6 +72,7 @@ const folderKey = () => scopedKey("folder").replace(/^arcanus_folder$/, "folder"
 /** The root, set up on first use: the folder opened last time if access is still granted, otherwise Arcanus home. */
 export function ready(): Promise<Dir> {
   root ??= (async () => {
+    void connectSource().then(() => source.state.available && changed()); // the source appears in .arcanus/ once found
     const folder = await kept<Permissioned | undefined>("readonly", (s) => s.get(folderKey())).catch(() => undefined);
     if (folder && (await folder.queryPermission({ mode: "readwrite" }).catch(() => "denied")) === "granted") return mount(folder, "folder");
     if (folder) workspace.set({ reconnect: folder.name });
@@ -116,15 +123,32 @@ async function dirAt(names: string[], create: boolean) {
 
 const missing = (err: unknown) => err instanceof DOMException && (err.name === "NotFoundError" || err.name === "TypeMismatchError");
 
+const tidy = (path: string) => path.split("/").filter(Boolean).join("/");
+/** A path's place inside Arcanus's source ("" is its root) when the path is under .arcanus/source, otherwise null. */
+function inSource(path: string) {
+  const clean = tidy(path);
+  return clean === SOURCE ? "" : clean.startsWith(`${SOURCE}/`) ? clean.slice(SOURCE.length + 1) : null;
+}
+/** "source/src/app" is short for ".arcanus/source/src/app": what the chat's file commands accept. */
+export const expand = (path: string) => tidy(path).replace(/^source(?=\/|$)/, SOURCE);
+
 export async function list(path = ""): Promise<Entry[]> {
-  const dir = (await dirAt(parts(path), false)) as Permissioned;
+  const src = inSource(path);
   const entries: Entry[] = [];
-  for await (const handle of dir.values()) entries.push({ name: handle.name, kind: handle.kind });
+  if (src !== null) entries.push(...(await sourceFs.list(src)));
+  else {
+    const dir = (await dirAt(parts(path), false)) as Permissioned;
+    for await (const handle of dir.values()) entries.push({ name: handle.name, kind: handle.kind });
+    // The source is mounted here, not stored here: it shows beside Arcanus's other files.
+    if (source.state.available && tidy(path) === HOME && !entries.some((e) => e.name === "source")) entries.push({ name: "source", kind: "directory" });
+  }
   return entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
 }
 
 /** A file's text, or null when it isn't there. */
 export async function read(path: string): Promise<string | null> {
+  const src = inSource(path);
+  if (src !== null) return src ? sourceFs.read(src) : null;
   const names = parts(path);
   const name = names.pop();
   if (!name) return null;
@@ -139,27 +163,60 @@ export async function read(path: string): Promise<string | null> {
 }
 
 export async function write(path: string, text: string) {
-  const names = parts(path);
-  const name = names.pop();
-  if (!name) throw new Error("A file needs a name.");
-  const handle = await (await dirAt(names, true)).getFileHandle(name, { create: true });
-  const out = await handle.createWritable();
-  await out.write(text);
-  await out.close();
+  const src = inSource(path);
+  if (src !== null) await sourceFs.write(src, text);
+  else {
+    const names = parts(path);
+    const name = names.pop();
+    if (!name) throw new Error("A file needs a name.");
+    const handle = await (await dirAt(names, true)).getFileHandle(name, { create: true });
+    const out = await handle.createWritable();
+    await out.write(text);
+    await out.close();
+  }
   changed();
 }
 
 export async function makeFolder(path: string) {
-  await dirAt(parts(path), true);
+  const src = inSource(path);
+  if (src !== null) await sourceFs.makeFolder(src);
+  else await dirAt(parts(path), true);
   changed();
 }
 
 export async function remove(path: string) {
-  const names = parts(path);
-  const name = names.pop();
-  if (!name) throw new Error("The workspace root can't be deleted.");
-  await (await dirAt(names, false)).removeEntry(name, { recursive: true });
+  const src = inSource(path);
+  if (src !== null) await sourceFs.remove(src);
+  else {
+    const names = parts(path);
+    const name = names.pop();
+    if (!name) throw new Error("The workspace root can't be deleted.");
+    await (await dirAt(names, false)).removeEntry(name, { recursive: true });
+  }
   changed();
+}
+
+/** Rename or move. In the source, anything; in a browser folder, a text file. */
+export async function rename(from: string, to: string) {
+  const [a, b] = [inSource(from), inSource(to)];
+  if (a !== null && b !== null) await sourceFs.rename(a, b);
+  else {
+    // ponytail: a browser folder has no rename that every browser supports, so the file is copied as text and the
+    // old one removed. Folders and files that aren't text stay put; use handle.move() once it covers them everywhere.
+    const text = await read(from);
+    if (text === null) throw new Error(`${from} is a folder or isn't there. Outside my source, only a file can be renamed.`);
+    if ((await read(to)) !== null) throw new Error(`${to} is already there.`);
+    await write(to, text);
+    await remove(from);
+  }
+  changed();
+}
+
+/** One git command on Arcanus's source (see gitArgs in command.ts). Views of the files read them again after it. */
+export async function git(...args: string[]) {
+  const result = await sourceGit(args);
+  changed();
+  return result;
 }
 
 // ------------------------------------------------------------------ .arcanus: instructions, skills, memory, artifacts
@@ -184,6 +241,11 @@ description: Explain a topic simply, as if to a five-year-old
 Explain the topic in three short sentences a five-year-old would understand. Use one everyday comparison. No jargon.
 `;
 
+/** What self.md said about the source before it was in Arcanus's files, and what it says now. */
+const SELF_SOURCE_BEFORE = "I am a Next.js app. Open that project folder from this pane to read and edit the code that is running, then reload.";
+const SELF_SOURCE =
+  "I am a Next.js app, and my own source code is in my files at .arcanus/source/ whenever I am opened at localhost on the computer I run from. The editor in this pane opens it, saving a file changes the code that is running, and the Git view shows what changed and commits it. From the chat: /source, /open, /find, /replace and /git.";
+
 const SELF_MD = `# Arcanus
 
 I am Arcanus, a local assistant Gianne Bacay made in 2025. Gianne Bacay is a man: he and him, never she or her. I live in this browser as a gold 3D sphere. I am not a person, an employee, or part of a team.
@@ -202,12 +264,13 @@ This pane is my file manager and my editor. My own files live in .arcanus/:
 - memory/ — notes I recall
 - knowledge/ — books I answer from
 - artifacts/ — replies and pages I saved
+- source/ — my own source code, at localhost
 
 Ctrl+S saves the file that is open.
 
 ## My source
 
-I am a Next.js app. Open that project folder from this pane to read and edit the code that is running, then reload.
+${SELF_SOURCE}
 
 - src/app — the page
 - src/modules/brain — Hippocampus, skills, and what I know
@@ -227,6 +290,8 @@ async function setUp() {
   const self = await read(`${HOME}/self.md`);
   // The first seed omitted that Gianne is a man, and a small model then said she. Replace only that seed.
   if (self === null || self.startsWith("I am Arcanus, a local assistant Gianne Bacay made in 2025. I live in this browser")) await write(`${HOME}/self.md`, SELF_MD);
+  // A self.md from before the source was in these files still says to open the project folder. Only that sentence changes.
+  else if (self.includes(SELF_SOURCE_BEFORE)) await write(`${HOME}/self.md`, self.replace(SELF_SOURCE_BEFORE, SELF_SOURCE));
   for (const dir of ["memory", "artifacts", "knowledge"]) await makeFolder(`${HOME}/${dir}`);
   const skills = await list(`${HOME}/skills`).catch(() => null);
   if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);

@@ -45,11 +45,22 @@ Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.a
   skills/<name>/SKILL.md  a skill: frontmatter `name` and `description`, then instructions. Run it with /<name> <message>
   memory/*.md           notes; the ones a message is about are recalled into the reply's context
   artifacts/            what Arcanus saved: replies (/save) and web pages
+  source/               Arcanus's own source code: this project, mounted from the server it runs from (localhost only)
 ```
 
 By default the folder lives privately in the browser (the Origin Private File System). **Open a folder** in the Files pane (Chrome and Edge) and Arcanus works in that folder on your device instead, creating `<folder>/.arcanus/`; it asks for access again after a reload. You can open and edit any file there, and **Ask Arcanus** hands a file to the model to read with your messages.
 
-From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read, `/teach <route>` corrects where your last message was routed (kept in `.arcanus/routing.json`).
+From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read, `/teach <route>` corrects where your last message was routed (kept in `.arcanus/routing.json`). `/ls`, `/open`, `/read`, `/write`, `/replace`, `/mkdir`, `/mv` and `/rm` manage any file.
+
+### Its own source, editor and git
+
+Opened at `localhost` on the computer it runs from, Arcanus has its own source code in its files, at `.arcanus/source/` (the **Source** button in the Files pane). The browser can't reach the disk, so the files come through `/api/source`, a route that answers only this machine, never leaves the project folder, and never opens `.git`, `node_modules`, `.next` or a `.env` file. On a deployed copy the route refuses, and `source/` is not there.
+
+- **Editor.** Files open as tabs in a code editor (CodeMirror 6, bundled, so it works offline): line numbers, syntax colours for TypeScript, JavaScript, CSS, JSON, Markdown and HTML, undo, find with Ctrl+F, save with Ctrl+S. The expand button in the pane's head puts the folder beside the editor. With `npm run dev`, a saved source file is the running code a moment later.
+- **Git.** The branch button shows what changed, each change as a diff, **Commit all**, **Pull**, **Push**, discard, and the history. It is `git` on this computer, in this repository.
+- **From the chat.** `/source` says what state the source is in, `/find <words>` searches it, `/replace <path> <old> => <new>` changes it, `/git <command>` runs git (`/git status`, `/git commit -m "…"`). A path under `source/` is the source: `/open source/src/app/page.tsx`. In plain words, typed or spoken: "open your source code", "open page.tsx", "find the greeting in your code", "what branch are you on", "what was your last commit", "commit your changes saying fix the orb".
+
+Arcanus carries out one such request at a time, and only when you make it. SmolLM2 is too small to write working code, so the words of an edit are yours: Arcanus has the hands for its own code, not yet the authorship.
 
 ## Browser
 
@@ -111,7 +122,7 @@ src/
   modules/
     brain/        routing (routes.ts, measured by routing.check.ts), skills (skills.ts), ARC 1 arguments (arc1.ts), knowledge.ts, ARCANE in arcane/
     harness/      personality, tools, MCP, and context engineering (skill files, the context budget)
-    workspace/    Arcanus's own files: .arcanus/ in the browser's private storage or a folder you open, the Files pane
+    workspace/    Arcanus's own files: .arcanus/ in the browser's private storage or a folder you open, its source mounted at .arcanus/source (through src/pages/api/source.ts), the Files pane with its code editor and git
     web/          Arcanus's browser: history, reader view, the Browser pane (pages come through src/app/api/web)
     llm/          SmolLM2: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences

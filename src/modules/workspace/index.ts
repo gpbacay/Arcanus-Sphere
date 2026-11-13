@@ -1,5 +1,7 @@
-// Public API of the workspace module: Arcanus's own files (.arcanus/) and the Files pane.
+// Public API of the workspace module: Arcanus's own files (.arcanus/), its source code and git, and the Files pane.
 export { Files } from "./Files";
+export { FILE_COMMANDS, fileCommand, sourceAction } from "./terminal";
+export { sourceCommand } from "./command";
 export {
   HOME,
   addBooks,

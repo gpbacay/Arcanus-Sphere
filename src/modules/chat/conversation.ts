@@ -9,7 +9,7 @@ import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
-import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
+import { FILE_COMMANDS, HOME, createSkill, fileCommand, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
@@ -546,6 +546,7 @@ export const COMMANDS = [
   { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
   { name: "/save", hint: "Save the last reply to .arcanus/artifacts" },
   { name: "/context", hint: "Show what the last reply read" },
+  ...FILE_COMMANDS, // after the older commands, so /re still completes to /remember and /s to /shutdown
   { name: "/help", hint: "List these commands" },
 ];
 
@@ -585,6 +586,9 @@ function command(chatId: string, input: string) {
     openPane("files");
     return out(`Files are open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
   }
+  // Its own files, source and git (workspace/terminal.ts).
+  const file = fileCommand(name, arg);
+  if (file) return later(file);
   if (name === "/browse") {
     if (!arg) {
       openPane("browser");

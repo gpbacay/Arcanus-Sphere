@@ -17,6 +17,8 @@ import { Occipital } from "./arcane/occipital.mjs";
 import { findExpression, numerals, spoken } from "./tools.ts"; // with its extension, so Node runs routing.check.ts
 // eslint-disable-next-line no-restricted-imports -- Node runs routing.check.ts and can't resolve "@/"; command.ts is pure
 import { deviceCommand } from "../device/command.ts";
+// eslint-disable-next-line no-restricted-imports -- as above: workspace/command.ts is pure
+import { sourceCommand } from "../workspace/command.ts";
 
 export type Route = {
   route: string;
@@ -130,6 +132,18 @@ export const ROUTES: Route[] = [
     },
   },
   {
+    // Before device and web, so "open your source code" and "open page.tsx" are Arcanus's own files, not an app or a site.
+    route: "source",
+    description: "Asks Arcanus to open, search or commit its own source code, or for its git status or history",
+    // No seeds, and no vote, like device: sourceCommand() reads every request it can carry out. "Where is your source
+    // code" and "who wrote your code" are questions, and stay with about.
+    seeds: [],
+    claim(text) {
+      const command = sourceCommand(text);
+      return command ? `asked to ${command.kind === "open" ? "open" : command.kind === "find" ? "search" : command.kind === "commit" ? "commit" : "read the git " + command.kind + " of"} my source` : undefined;
+    },
+  },
+  {
     // Before web, so "launch spotify" and "open the calculator app" are apps. A plain "open X" stays with web, which
     // opens an installed app of exactly that name and a website otherwise.
     route: "device",
@@ -209,7 +223,7 @@ export async function decide(memory: Hippocampus, text: string, routes: Route[] 
   let route = claim?.route ?? (voted.label && voted.confidence >= SURE ? voted.label : "chat");
   // Seeds hold numbers ("what is 12 * 7"), so any "12" votes math. Math with nothing to compute is chat.
   if (route === "math" && !findExpression(text)) route = "chat";
-  if (route === "device" && !claim) route = "chat";
+  if ((route === "device" || route === "source") && !claim) route = "chat";
   const unmatched = !voted.neighbors.length;
   const aboutSelf = route === "chat" && TO_YOU.test(text) && (unmatched || (voted.distribution.about ?? 0) >= SELF_SHARE);
   return { route, claimed: claim?.why, label: voted.label, confidence: voted.confidence, aboutSelf, neighbors: voted.neighbors };

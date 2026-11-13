@@ -8,6 +8,7 @@ import { KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, featuresReply, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
 import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
 import { deviceCommand, openApp, operate } from "@/modules/device";
+import { sourceAction, sourceCommand } from "@/modules/workspace";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
 import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
@@ -111,6 +112,19 @@ export const SKILLS: Skill[] = [
         step: { label: "Calculated", description: "Answered without the language model", results: [`${expression} = ${result}`] },
         reply: result.startsWith("Error") ? result : `${expression} = ${result}`,
       };
+    },
+  },
+  {
+    ...route("source"),
+    async run(text) {
+      const command = sourceCommand(text);
+      if (!command) return null;
+      try {
+        const { label, reply, results } = await sourceAction(command);
+        return { step: { label, description: "My own source code, not the language model", results }, reply };
+      } catch (err) {
+        return { step: { label: "My source", description: errorText(err) }, reply: `I couldn't do that with my source: ${errorText(err)}` };
+      }
     },
   },
   {

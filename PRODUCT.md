@@ -30,6 +30,7 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 - Knowledge notes live in `src/modules/brain/knowledge.ts`; skills and their routing examples in `src/modules/brain/skills.ts`
 - Models are served by the app itself when `npm run models` has fetched them, otherwise downloaded from Hugging Face on first visit; either way the browser caches them
 - Local accounts (Argon2id, no server): each has its own conversations and `.arcanus/` files
+- Its own source: at localhost, the project is mounted at `.arcanus/source/`, edited in a bundled code editor (CodeMirror 6) and versioned with the machine's git, all through `/api/source`
 
 ## Capabilities and Constraints
 
