@@ -53,21 +53,26 @@ export function Sphere({ analyser, state, on = true, working = false }: { analys
   const [resetKey, setResetKey] = useState(0);
   const [edited, setEdited] = useState(false); // the orb was moved, rotated or resized: undo is offered
   const orb = <Stand state={state} off={!on} />;
-  if (!canDraw) return orb;
   return (
     <>
-      <Boundary fallback={orb}>
-        <Scene
-          analyser={analyser}
-          activityBoost={state === "thinking" ? 0.55 : 0}
-          cap={!working ? 0 : state === "speaking" ? TALK_FPS : WORK_FPS}
-          tool={tool}
-          on={on}
-          resetKey={resetKey}
-          onEdit={setEdited}
-        />
-      </Boundary>
+      {canDraw ? (
+        <Boundary fallback={orb}>
+          <Scene
+            analyser={analyser}
+            activityBoost={state === "thinking" ? 0.55 : 0}
+            cap={!working ? 0 : state === "speaking" ? TALK_FPS : WORK_FPS}
+            tool={tool}
+            on={on}
+            resetKey={resetKey}
+            onEdit={setEdited}
+          />
+        </Boundary>
+      ) : (
+        orb
+      )}
+      {/* The ⋮ holds the power switch too, so it stays when there is no WebGL (a phone's, often): then it offers only that. */}
       <SphereTools
+        canDraw={canDraw}
         tool={tool}
         onTool={setTool}
         edited={edited}

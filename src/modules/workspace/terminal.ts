@@ -6,7 +6,7 @@
 // The language model is not in here. SmolLM2 is far too small to write working code, so Arcanus edits its code with
 // exact text: yours in the editor, or /write and /replace. Add a model-written edit when a model that can code is on board.
 import { chatLine, pin } from "@/shared/pane";
-import { words, type SourceCommand } from "./command";
+import { redirect, resolve, words, type SourceCommand } from "./command";
 import { GUARDRAILS, HOME, SOURCE, expand, git, list, makeFolder, read, remove, rename, write } from "./fs";
 import { closeTab, ide, openDir, openFile } from "./ide";
 import { searchSource, source, sourceFiles, sourceGit } from "./source";
@@ -42,16 +42,16 @@ async function summary() {
 }
 
 /** Run a file command from the chat. Null when `name` isn't one. Resolves to the line Arcanus answers with. */
-export function fileCommand(name: string, arg: string): (() => Promise<string>) | null {
+export function fileCommand(name: string, arg: string, cwd = ""): (() => Promise<string>) | null {
   const [first = "", ...rest] = arg.split(/\s+/);
-  const path = expand(first);
+  const path = expand(resolve(cwd, first));
   const usage = (text: string) => async () => text;
   switch (name) {
     case "/source":
       return async () => {
         needSource();
         openDir(SOURCE);
-        return `${await summary()} It is open in Arcanus OS, at ${SOURCE}/.`;
+        return `${await summary()} It is open in the Operating System, at ${SOURCE}/.`;
       };
     case "/ls":
       return async () => (await list(path)).map((e) => (e.kind === "directory" ? `${e.name}/` : e.name)).join("\n") || "That folder is empty.";
@@ -94,7 +94,7 @@ export function fileCommand(name: string, arg: string): (() => Promise<string>) 
     case "/mv":
       if (!first || !rest[0]) return usage("/mv <from> <to> renames or moves a file.");
       return async () => {
-        const to = expand(rest[0]);
+        const to = expand(resolve(cwd, rest[0]));
         await rename(path, to);
         closeTab(path);
         return `Moved ${path} to ${to}.`;
@@ -127,16 +127,208 @@ export function fileCommand(name: string, arg: string): (() => Promise<string>) 
   }
 }
 
-/** A line typed in Arcanus OS's terminal. A file command ("ls", "/git status", "find word") runs here and its answer is
- *  returned; anything else (a skill, /remember, words) goes to the chat as if typed there. */
-export async function runLine(typed: string): Promise<string> {
+// ------------------------------------------------------------------ the terminal: a cmd-style shell on Arcanus's files
+
+/** What a line did: its output, and the folder it left the terminal in, or that the screen was cleared or the terminal closed. */
+export type Result = { out: string; cwd?: string; clear?: boolean; exit?: boolean };
+
+/** A folder as the prompt shows it: arcanus:\.arcanus\source> */
+export const promptOf = (cwd: string) => `arcanus:\\${cwd.replace(/\//g, "\\")}>`;
+const shown = (path: string) => promptOf(path).slice(0, -1);
+
+const HELP: [string, string][] = [
+  ["CD", "Shows the name of the current folder, or changes it."],
+  ["CLS", "Clears the screen."],
+  ["COPY", "Copies a file."],
+  ["DATE", "Shows the date."],
+  ["DEL", "Deletes a file."],
+  ["DIR", "Lists the files and folders in a folder. /B lists names only."],
+  ["ECHO", "Shows a message. Add > file or >> file to write it to a file."],
+  ["EXIT", "Closes this terminal."],
+  ["MD", "Makes a folder."],
+  ["MOVE", "Moves a file."],
+  ["RD", "Removes a folder. /S removes what is in it too."],
+  ["REN", "Renames a file."],
+  ["TIME", "Shows the time."],
+  ["TYPE", "Shows what is in a file."],
+  ["VER", "Shows what this is."],
+  ["OPEN", "Opens a file in my editor."],
+  ["READ", "Opens a file and reads it with your messages."],
+  ["WRITE", "Writes a file: write <path> <text>"],
+  ["REPLACE", "Changes text in a file: replace <path> <old> => <new>"],
+  ["FIND", "Searches my source code."],
+  ["GIT", "Runs git on my source."],
+  ["SOURCE", "Opens my source code, and says what state it is in."],
+];
+/** What the terminal runs: the builtins above, and my own programs, which are the file commands of the chat. */
+const PROGRAMS = ["open", "read", "write", "replace", "find", "git", "source"];
+const NAMES = HELP.map(([n]) => n.toLowerCase());
+const PROTECTED = [HOME, SOURCE, GUARDRAILS];
+const NO_FILE = "The system cannot find the file specified.";
+const NO_PATH = "The system cannot find the path specified.";
+
+const isFolder = (path: string) => list(path).then(() => true, () => false);
+const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
+const nameOf = (path: string) => path.split("/").pop() ?? path;
+const guarded = (path: string) => {
+  if (!path || PROTECTED.includes(path)) throw new Error("Access is denied.");
+};
+
+/** The commands cmd has, on Arcanus's files. Null when `name` isn't one of them. */
+async function builtin(name: string, arg: string, cwd: string): Promise<Result | null> {
+  const flags = new Set((arg.match(/(?:^|\s)\/[a-z](?=\s|$)/gi) ?? []).map((f) => f.trim().toLowerCase()));
+  const rest = arg.replace(/(?:^|\s)\/[a-z](?=\s|$)/gi, " ").trim();
+  const at = (p: string) => expand(resolve(cwd, p));
+  switch (name) {
+    case "cd":
+    case "chdir": {
+      if (!rest) return { out: shown(cwd) };
+      const to = at(rest);
+      if (!(await isFolder(to))) throw new Error(NO_PATH);
+      return { out: "", cwd: to };
+    }
+    case "cls":
+      return { out: "", clear: true };
+    case "exit":
+      return { out: "", exit: true };
+    case "ver":
+      return { out: "Arcanus Operating System" };
+    case "date":
+      return { out: `${flags.has("/t") ? "" : "The current date is: "}${new Date().toLocaleDateString()}` };
+    case "time":
+      return { out: `${flags.has("/t") ? "" : "The current time is: "}${new Date().toLocaleTimeString()}` };
+    case "help":
+      return { out: `For more on a command, see its line here.\n${HELP.map(([n, d]) => `${n.padEnd(8)} ${d}`).join("\n")}\nThe other commands of the chat start with /, like /remember: they go to the chat.` };
+    case "echo":
+      return { out: arg === "." ? "" : arg || "ECHO is on." }; // "echo." is the blank line
+    case "dir": {
+      const target = at(rest);
+      const entries = await list(target).catch(() => null);
+      if (!entries) {
+        if ((await read(target)) === null) throw new Error("File Not Found");
+        return { out: flags.has("/b") ? nameOf(target) : ` Directory of ${shown(dirOf(target))}\n\n         ${nameOf(target)}\n               1 File(s)` };
+      }
+      if (flags.has("/b")) return { out: entries.map((e) => e.name).join("\n") };
+      const dots = target ? [{ name: ".", kind: "directory" }, { name: "..", kind: "directory" }] : [];
+      const rows = [...dots, ...entries].map((e) => `${e.kind === "directory" ? "<DIR>" : ""}`.padEnd(9) + e.name);
+      const folders = entries.filter((e) => e.kind === "directory").length;
+      return { out: ` Directory of ${shown(target)}\n\n${rows.join("\n")}\n${String(entries.length - folders).padStart(15)} File(s)\n${String(folders + dots.length).padStart(15)} Dir(s)` };
+    }
+    case "type": {
+      if (!rest) throw new Error("The syntax of the command is incorrect.");
+      const text = await read(at(rest));
+      if (text === null) throw new Error(NO_FILE);
+      return { out: text.replace(/\s+$/, "") };
+    }
+    case "md":
+    case "mkdir": {
+      if (!rest) throw new Error("The syntax of the command is incorrect.");
+      const path = at(rest);
+      if ((await isFolder(path)) || (await read(path)) !== null) throw new Error(`A subdirectory or file ${rest} already exists.`);
+      await makeFolder(path);
+      return { out: "" };
+    }
+    case "rd":
+    case "rmdir": {
+      const path = at(rest);
+      guarded(path);
+      const entries = await list(path).catch(() => null);
+      if (!entries) throw new Error(NO_FILE);
+      if (entries.length && !flags.has("/s")) throw new Error("The directory is not empty.");
+      await remove(path);
+      return { out: "" };
+    }
+    case "del":
+    case "erase": {
+      if (!rest) throw new Error("The syntax of the command is incorrect.");
+      const path = at(rest);
+      guarded(path);
+      if ((await read(path)) === null) throw new Error(`Could Not Find ${shown(path)}`);
+      await remove(path);
+      closeTab(path);
+      return { out: "" };
+    }
+    case "ren":
+    case "rename": {
+      const [from, to] = words(rest);
+      if (!from || !to || /[\\/]/.test(to)) throw new Error("The syntax of the command is incorrect.");
+      const path = at(from);
+      guarded(path);
+      if (!(await isFolder(path)) && (await read(path)) === null) throw new Error(NO_FILE);
+      await rename(path, [dirOf(path), to].filter(Boolean).join("/"));
+      closeTab(path);
+      return { out: "" };
+    }
+    case "move":
+    case "copy": {
+      const [from, to] = words(rest);
+      if (!from || !to) throw new Error("The syntax of the command is incorrect.");
+      const path = at(from);
+      const text = await read(path);
+      if (text === null) throw new Error(NO_FILE);
+      const into = at(to);
+      const target = (await isFolder(into)) ? [into, nameOf(path)].filter(Boolean).join("/") : into;
+      if (target === path) throw new Error("The file cannot be copied onto itself.");
+      if (name === "copy") await write(target, text);
+      else {
+        guarded(path);
+        await rename(path, target);
+        closeTab(path);
+      }
+      return { out: `        1 file(s) ${name === "copy" ? "copied" : "moved"}.` };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * A line typed in the Operating System's terminal, run as cmd would on Arcanus's files, in the folder `cwd`. A line
+ * starting with / is the chat's: a file command like /ls runs here, anything else (a /skill, /remember) goes to the chat.
+ */
+export async function runLine(typed: string, cwd: string): Promise<Result> {
   const line = typed.trim();
-  const first = (line.match(/^\S+/)?.[0] ?? "").toLowerCase();
-  const name = first.startsWith("/") ? first : `/${first}`;
-  if (name === "/help") return `${FILE_COMMANDS.map((c) => `${c.name.slice(1).padEnd(8)} ${c.hint}`).join("\n")}\nAnything else (a /skill, /remember, words) goes to the chat.`;
-  const run = fileCommand(name, line.slice(first.length).trim());
-  if (run) return run();
-  return chatLine.send(line) ? "Sent to the chat." : "The chat didn't take it: it is still answering, or not open yet.";
+  if (line.startsWith("/")) {
+    const [first, ...rest] = line.split(/\s+/);
+    const run = fileCommand(first.toLowerCase(), rest.join(" "), cwd);
+    if (run) return { out: await run() };
+    return { out: chatLine.send(line) ? "Sent to the chat." : "The chat didn't take it: it is still answering, or not open yet." };
+  }
+  const { command, to, append } = redirect(line);
+  if (to === "") throw new Error("The syntax of the command is incorrect.");
+  // cmd splits the command from its argument at a space, a dot or a slash: "cd.." and "dir/b" are commands too.
+  const m = command.match(/^([^\s\\/.:"]+)(.*)$/s);
+  const name = m?.[1].toLowerCase() ?? "";
+  const arg = m?.[2].trim() ?? "";
+  let result = m ? await builtin(name, arg, cwd) : null;
+  if (!result && PROGRAMS.includes(name)) {
+    const run = fileCommand(`/${name}`, arg, cwd);
+    if (run) result = { out: await run() };
+  }
+  if (!result) throw new Error(`'${m?.[1] ?? command.split(/\s/)[0]}' is not recognized as an internal or external command,\noperable program or batch file.`);
+  if (to) {
+    const file = expand(resolve(cwd, to));
+    guarded(file);
+    const before = append ? ((await read(file)) ?? "") : "";
+    await write(file, result.out ? `${before}${result.out}\n` : before);
+    return { ...result, out: "" };
+  }
+  return result;
+}
+
+/** What Tab can finish the line to: command names for the first word, otherwise the files and folders that begin like the last. */
+export async function complete(line: string, cwd: string): Promise<string[]> {
+  const [, head, word] = line.match(/^(.*?)(\S*)$/s)!;
+  if (!head.trim()) return NAMES.filter((n) => n.startsWith(word.toLowerCase())).sort().map((n) => head + n);
+  const cut = Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\")) + 1;
+  const [dir, begin] = [word.slice(0, cut), word.slice(cut).toLowerCase()];
+  const entries = await list(expand(resolve(cwd, dir))).catch(() => []);
+  return entries
+    .filter((e) => e.name.toLowerCase().startsWith(begin))
+    .map((e) => {
+      const full = `${dir}${e.name}${e.kind === "directory" ? "\\" : ""}`;
+      return head + (full.includes(" ") ? `"${full}"` : full);
+    });
 }
 
 /** What Arcanus does, and says, when a message asks for its source in plain words. */
@@ -146,7 +338,7 @@ export async function sourceAction(command: SourceCommand): Promise<{ label: str
     case "open": {
       if (!command.path) {
         openDir(SOURCE);
-        return { label: "Opened my source", reply: `${await summary()} I opened it in Arcanus OS.` };
+        return { label: "Opened my source", reply: `${await summary()} I opened it in the Operating System.` };
       }
       // A path in my files as it is; otherwise the source file of that name, wherever it is.
       const wanted = command.path;

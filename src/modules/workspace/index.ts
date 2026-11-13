@@ -1,9 +1,10 @@
-// Public API of the workspace module: Arcanus's own files (.arcanus/), its source code and git, and the Arcanus OS pane.
-export { Files } from "./Files";
+// Public API of the workspace module: Arcanus's own files (.arcanus/), its source code and git, and the Operating System pane.
+export { OperatingSystem } from "./OperatingSystem";
 export { FILE_COMMANDS, fileCommand, sourceAction } from "./terminal";
 export { searchFiles, shortPath, type FileResults } from "./search";
 export type { FileHit, FindOptions, LineHit } from "./find";
 export { openFile } from "./ide";
+export { linkedNotes, openNote } from "./notes";
 export { sourceCommand } from "./command";
 export {
   GUARDRAILS,

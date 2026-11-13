@@ -74,3 +74,33 @@ export function sourceCommand(input: string): SourceCommand | null {
   if (m) return { kind: "open", path: m[1] };
   return OPEN.test(text) ? { kind: "open" } : null;
 }
+
+// ------------------------------------------------------------------ the terminal's command line
+
+/**
+ * A path as cmd reads it, from the folder it is typed in: "..\x", "/src", "a/b", "arcanus:\a". "" is the top of the
+ * workspace. A drive ("C:\", "arcanus:") means the top, as it does in cmd; ".." never climbs out of it.
+ */
+export function resolve(cwd: string, arg: string): string {
+  const drive = arg.match(/^[a-z][\w-]*:(.*)$/i);
+  const absolute = drive ? true : /^[\\/]/.test(arg);
+  const out = absolute ? [] : cwd.split("/").filter(Boolean);
+  for (const part of (drive ? drive[1] : arg).split(/[\\/]+/).filter(Boolean)) {
+    if (part === "..") out.pop();
+    else if (part !== ".") out.push(part);
+  }
+  return out.join("/");
+}
+
+/** "echo hi > a.txt" -> { command: "echo hi", to: "a.txt" }; ">>" appends. Only a ">" outside double quotes counts. */
+export function redirect(line: string): { command: string; to?: string; append?: boolean } {
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') quoted = !quoted;
+    else if (line[i] === ">" && !quoted) {
+      const append = line[i + 1] === ">";
+      return { command: line.slice(0, i).trim(), to: line.slice(i + (append ? 2 : 1)).trim().replace(/^"|"$/g, ""), append };
+    }
+  }
+  return { command: line.trim() };
+}

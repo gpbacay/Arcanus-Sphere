@@ -2,7 +2,8 @@
 // ponytail: a scanner, not a markdown library. Covers what a reply actually uses: links, emphasis,
 // code, headings, lists, quotes. Tables and raw HTML stay text.
 
-export type Inline = string | { b: Inline[] } | { i: Inline[] } | { c: string } | { a: string; v: Inline[] } | { br: 1 };
+/** `w`: a [[link]] to a note, by the name or path written in it (the workspace resolves it). */
+export type Inline = string | { b: Inline[] } | { i: Inline[] } | { c: string } | { a: string; v: Inline[] } | { w: string; v: Inline[] } | { br: 1 };
 
 export type Block = { p: Inline[] } | { h: 1 | 2 | 3; v: Inline[] } | { ul: Inline[][] } | { ol: Inline[][] } | { q: Inline[] } | { pre: string };
 
@@ -78,6 +79,14 @@ export function inlines(src: string): Inline[] {
       if (j > i + 1 && !src.slice(i + 1, j).includes("\n")) {
         out.push({ c: src.slice(i + 1, j) });
         i = j + 1;
+        continue;
+      }
+    }
+    if (src.startsWith("[[", i)) {
+      const wiki = /^\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/.exec(src.slice(i));
+      if (wiki) {
+        out.push({ w: wiki[1].trim(), v: [(wiki[2] ?? wiki[1]).trim()] });
+        i += wiki[0].length;
         continue;
       }
     }

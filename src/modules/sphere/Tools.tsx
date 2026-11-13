@@ -24,7 +24,7 @@ const TOOLS = [
  * The studio's toolbar, folded behind one ⋮ button at the right end of the top bar: switch Arcanus on or off, pick how a drag acts
  * on the orb, see it in AR, and, once the orb has been moved, rotated or resized, put it back.
  */
-export function SphereTools({ tool, onTool, edited, onReset }: { tool: Tool; onTool: (tool: Tool) => void; edited: boolean; onReset: () => void }) {
+export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDraw: boolean; tool: Tool; onTool: (tool: Tool) => void; edited: boolean; onReset: () => void }) {
   const mobile = useIsMobile();
   const menuId = useId();
   const [open, setOpen] = useState(false);
@@ -35,7 +35,12 @@ export function SphereTools({ tool, onTool, edited, onReset }: { tool: Tool; onT
 
   // Shown at the right end of the top bar (shell's TopBar leaves this slot for it), not over the stage.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => setSlot(document.getElementById(TOP_ACTIONS)), []);
+  // Looked for after every render, not once: the top bar's slot may mount after this, or be replaced by a new one.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- it sets only when the slot changed, so it cannot loop
+  useEffect(() => {
+    const found = document.getElementById(TOP_ACTIONS);
+    if (found !== slot) setSlot(found);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -71,31 +76,35 @@ export function SphereTools({ tool, onTool, edited, onReset }: { tool: Tool; onT
             <span>{on ? "Turn Arcanus off" : "Turn Arcanus on"}</span>
             <Power size={16} />
           </button>
-          <div className="menu-sep" />
-          {TOOLS.map(({ id, label, Icon }) => (
-            <button key={id} type="button" role="menuitemradio" aria-checked={tool === id} className="menu-item" onClick={pick(() => onTool(id))}>
-              <span>{label}</span>
-              <Icon size={16} />
-            </button>
-          ))}
-          {edited ? (
-            <button type="button" role="menuitem" className="menu-item" onClick={pick(onReset)}>
-              <span>Undo changes to the orb</span>
-              <RotateCcw size={16} />
-            </button>
+          {canDraw ? (
+            <>
+              <div className="menu-sep" />
+              {TOOLS.map(({ id, label, Icon }) => (
+                <button key={id} type="button" role="menuitemradio" aria-checked={tool === id} className="menu-item" onClick={pick(() => onTool(id))}>
+                  <span>{label}</span>
+                  <Icon size={16} />
+                </button>
+              ))}
+              {edited ? (
+                <button type="button" role="menuitem" className="menu-item" onClick={pick(onReset)}>
+                  <span>Undo changes to the orb</span>
+                  <RotateCcw size={16} />
+                </button>
+              ) : null}
+              <div className="menu-sep" />
+              {mobile ? (
+                <Link href="/ar" role="menuitem" className="menu-item">
+                  <span>View in AR</span>
+                  <View size={16} />
+                </Link>
+              ) : (
+                <button type="button" role="menuitem" className="menu-item" onClick={pick(() => setQr(true))}>
+                  <span>View in AR</span>
+                  <View size={16} />
+                </button>
+              )}
+            </>
           ) : null}
-          <div className="menu-sep" />
-          {mobile ? (
-            <Link href="/ar" role="menuitem" className="menu-item">
-              <span>View in AR</span>
-              <View size={16} />
-            </Link>
-          ) : (
-            <button type="button" role="menuitem" className="menu-item" onClick={pick(() => setQr(true))}>
-              <span>View in AR</span>
-              <View size={16} />
-            </button>
-          )}
         </div>
       ) : null}
       {qr && <ArDialog onClose={() => setQr(false)} />}

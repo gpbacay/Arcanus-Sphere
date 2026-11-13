@@ -1,4 +1,4 @@
-// Run: node src/modules/chat/markdown.check.ts
+// Run: node src/shared/markdown.check.ts
 import assert from "node:assert/strict";
 import { parseMarkdown } from "./markdown.ts";
 
@@ -24,5 +24,8 @@ assert.ok("ol" in list[1] && list[1].ol.length === 1);
 
 const snake = parseMarkdown("search_query stays whole");
 assert.deepEqual(snake, [{ p: ["search_query stays whole"] }]);
+
+const wiki = parseMarkdown("See [[ideas/Sky#Blue|the sky]] and [[Plan]].");
+assert.deepEqual(wiki, [{ p: ["See ", { w: "ideas/Sky#Blue", v: ["the sky"] }, " and ", { w: "Plan", v: ["Plan"] }, "."] }]);
 
 console.log("markdown ok");

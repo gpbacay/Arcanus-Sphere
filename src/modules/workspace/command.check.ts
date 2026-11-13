@@ -1,7 +1,7 @@
 // Run: node src/modules/workspace/command.check.ts   (Node 22.18+ strips the types)
 // The guard on Arcanus's source (paths, git arguments) and the messages that ask for the source.
 import assert from "node:assert/strict";
-import { gitArgs, hidden, sourceCommand, sourceParts, words } from "./command.ts";
+import { gitArgs, hidden, redirect, resolve, sourceCommand, sourceParts, words } from "./command.ts";
 
 // Paths stay inside the project and out of what is hidden.
 assert.deepEqual(sourceParts("src//app/page.tsx"), ["src", "app", "page.tsx"]);
@@ -38,3 +38,15 @@ for (const text of ["where is your source code", "who wrote your code", "can you
   assert.equal(sourceCommand(text), null, text);
 }
 console.log("source command ok");
+
+// The terminal's paths and redirection, as cmd reads them.
+assert.equal(resolve(".arcanus/source", "src\\app"), ".arcanus/source/src/app");
+assert.equal(resolve(".arcanus/source", ".."), ".arcanus");
+assert.equal(resolve("a", "..\\..\\.."), ""); // never climbs out
+assert.equal(resolve("a/b", "\\x"), "x");
+assert.equal(resolve("a/b", "arcanus:\\.arcanus"), ".arcanus");
+assert.equal(resolve("a", "arcanus:"), "");
+assert.equal(resolve("a", ""), "a");
+assert.deepEqual(redirect("echo hi > a.txt"), { command: "echo hi", to: "a.txt", append: false });
+assert.deepEqual(redirect('echo "a > b" >> "my file.txt"'), { command: 'echo "a > b"', to: "my file.txt", append: true });
+assert.deepEqual(redirect('echo "a > b"'), { command: 'echo "a > b"' });

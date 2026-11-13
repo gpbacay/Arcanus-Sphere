@@ -7,6 +7,9 @@
 //   POST /api/source { op: "files" }          -> { files }         (every file git tracks or would track)
 //   POST /api/source { op: "search", query, matchCase?, wholeWord?, regex?, limit? } -> { hits, more } (git grep)
 //   POST /api/source { op: "git", args }      -> { out, code }     (one git command, see gitArgs)
+//   POST /api/source { op: "github" }         -> { login, remote, stale? }   (who this computer's git is signed in to GitHub as)
+//   POST /api/source { op: "github-connect", token } -> { login }  (kept in git's credential store, never sent back)
+//   POST /api/source { op: "github-disconnect" } | { op: "github-repos" } -> { repos } | { op: "github-create", name, private }
 //
 // Like /api/device it is a pages/ route that answers only this machine (shared/loopback.ts). Paths never leave the
 // project and never enter .git, node_modules, .next or a .env file (workspace/command.ts). With `next dev`, a saved
@@ -48,6 +51,81 @@ function git(args: string[]) {
   );
 }
 
+/** `git credential <action>` for github.com, its key=value lines on stdin. It never prompts: there is no one at this terminal. */
+function credential(action: "fill" | "approve" | "reject", lines: string[] = []) {
+  return new Promise<Record<string, string> | null>((resolve) => {
+    const child = execFile(
+      "git",
+      ["credential", action],
+      { cwd: ROOT, windowsHide: true, timeout: 20_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" } },
+      (err, stdout) => resolve(err ? null : Object.fromEntries(stdout.split("\n").flatMap((l) => (l.includes("=") ? [[l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).trim()]] : [])))),
+    );
+    child.stdin?.end(["protocol=https", "host=github.com", ...lines, "", ""].join("\n"));
+  });
+}
+
+/** The GitHub token this computer's git already keeps (Git Credential Manager, or whatever helper it uses), or null. */
+const githubToken = async () => (await credential("fill"))?.password || null;
+
+/** A call to GitHub's API with `token`. Its error message, in GitHub's words, when it fails. */
+async function github<T>(token: string, route: string, init: { method?: string; body?: object } = {}): Promise<T> {
+  const res = await fetch(`https://api.github.com${route}`, {
+    method: init.method ?? "GET",
+    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "Arcanus", "content-type": "application/json" },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.errors?.[0]?.message ?? data.message ?? `GitHub answered ${res.status}.`), { status: res.status });
+  return data as T;
+}
+
+type Repo = { full_name: string; clone_url: string; html_url: string; private: boolean };
+const repo = (r: Repo) => ({ name: r.full_name, url: r.clone_url, page: r.html_url, private: r.private });
+
+/** GitHub, for the Operating System's source control: who this computer's git is signed in as, and its repositories. The
+ *  token stays on this computer, in git's credential store: it never goes back to the page. */
+async function githubOp(body: { op?: unknown; token?: unknown; name?: unknown; private?: unknown }) {
+  switch (body.op) {
+    case "github": {
+      const origin = await git(["remote", "get-url", "origin"]);
+      const remote = origin.code ? "" : origin.out;
+      const token = await githubToken();
+      if (!token) return { login: "", remote };
+      const user = await github<{ login: string }>(token, "/user").catch(() => null);
+      return { login: user?.login ?? "", remote, stale: !user };
+    }
+    case "github-connect": {
+      if (typeof body.token !== "string" || !/^[\w-]{20,255}$/.test(body.token.trim())) throw new Error("That doesn't look like a GitHub token.");
+      const token = body.token.trim();
+      const user = await github<{ login: string }>(token, "/user").catch(() => {
+        throw new Error("GitHub didn't accept that token. Check it was copied whole and hasn't expired.");
+      });
+      await credential("approve", [`username=${user.login}`, `password=${token}`]);
+      if ((await githubToken()) !== token)
+        throw new Error("GitHub accepted the token, but git on this computer has no credential helper to keep it. Run: git config --global credential.helper manager (Windows) or store, then connect again.");
+      return { login: user.login };
+    }
+    case "github-disconnect":
+      await credential("reject");
+      return { ok: true };
+    case "github-repos": {
+      const token = await githubToken();
+      if (!token) throw new Error("Connect GitHub first.");
+      const repos = await github<Repo[]>(token, "/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member");
+      return { repos: repos.map(repo) };
+    }
+    case "github-create": {
+      const token = await githubToken();
+      if (!token) throw new Error("Connect GitHub first.");
+      if (typeof body.name !== "string" || !/^[\w.-]{1,100}$/.test(body.name)) throw new Error("A repository name is letters, digits, dots, dashes and underscores.");
+      return { repo: repo(await github<Repo>(token, "/user/repos", { method: "POST", body: { name: body.name, private: body.private !== false } })) };
+    }
+    default:
+      return null;
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!fromThisMachine(req, "source")) return res.status(403).json({ error: "My source opens only in Arcanus at localhost, on the computer it runs on." });
   try {
@@ -56,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.json({ name: path.basename(ROOT), branch: branch.code ? "" : branch.out });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST." });
-    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; query?: unknown; args?: unknown; matchCase?: unknown; wholeWord?: unknown; regex?: unknown; limit?: unknown };
+    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; query?: unknown; args?: unknown; matchCase?: unknown; wholeWord?: unknown; regex?: unknown; limit?: unknown; token?: unknown; name?: unknown; private?: unknown };
     switch (body.op) {
       case "list": {
         const found = await fs.readdir(at(body.path ?? ""), { withFileTypes: true });
@@ -116,8 +194,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       case "git":
         return res.json(await git(gitArgs(body.args)));
-      default:
-        return res.status(400).json({ error: "Send { op } as list, read, write, mkdir, remove, rename, files, search or git." });
+      default: {
+        const answer = await githubOp(body);
+        if (answer) return res.json(answer);
+        return res.status(400).json({ error: "Send { op } as list, read, write, mkdir, remove, rename, files, search, git, or github, github-connect, github-disconnect, github-repos, github-create." });
+      }
     }
   } catch (err) {
     const missing = (err as NodeJS.ErrnoException)?.code === "ENOENT";

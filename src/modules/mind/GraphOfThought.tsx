@@ -1,22 +1,23 @@
 "use client";
 
-import { ChevronDown, ChevronUp, EllipsisVertical, Network, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, EllipsisVertical, Network, Trash2 } from "lucide-react";
 import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
-import { closePane, pane } from "@/shared/pane";
+import { usePlace, type Section } from "@/shared/pane";
 import { useStore } from "@/shared/store";
+import { PaneControls } from "@/shared/ui/pane-controls";
 import { processes, type Process, type Step } from "./layout";
 import { clearMind, mind, type Thought } from "./mind";
 
 /** The live Graph of Thought pane, beside the rail. Rendered only while open, so a closed pane costs nothing. */
 export function GraphOfThought() {
-  const open = useStore(pane, (s) => s.open === "mind");
-  return open ? <GraphPane /> : null;
+  const { home, at, wide } = usePlace("mind");
+  return home ? <GraphPane at={at} wide={wide} /> : null;
 }
 
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);
 
-function GraphPane() {
+function GraphPane({ at, wide }: { at: Section | null; wide: boolean }) {
   const thoughts = useStore(mind, (s) => s.thoughts);
   // The thought you picked: the thoughts it came from light up, which is how an edge that isn't a rail is read.
   const [picked, setPicked] = useState<string | null>(null);
@@ -49,7 +50,7 @@ function GraphPane() {
 
   const latest = thoughts.at(-1);
   return (
-    <section className="side-pane mind-pane" aria-label="Graph of Thought" data-min={min || undefined}>
+    <section className="side-pane mind-pane" aria-label="Graph of Thought" data-min={min || undefined} data-at={at ?? undefined} data-wide={wide || undefined} hidden={!at}>
       <header className="pane-head">
         <Network size={16} aria-hidden />
         <h2>Graph of Thought</h2>
@@ -60,9 +61,7 @@ function GraphPane() {
         <button type="button" className="icon-btn" aria-label={min ? "Expand Graph of Thought" : "Minimize Graph of Thought"} title={min ? "Expand" : "Minimize"} aria-expanded={!min} onClick={() => setMin((v) => !v)}>
           {min ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </button>
-        <button type="button" className="icon-btn" aria-label="Close Graph of Thought" title="Close" onClick={closePane}>
-          <X size={16} />
-        </button>
+        <PaneControls page="mind" title="Graph of Thought" />
       </header>
       <div
         ref={body}

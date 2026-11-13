@@ -6,7 +6,7 @@ import { useStore } from "@/shared/store";
 import { ChainOfThoughtTrace, type ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { booting, discard, live, resend, retry, speak, useBusy } from "./conversation";
-import { Markdown } from "./MarkdownView";
+import { Markdown } from "@/shared/ui/markdown";
 import { MAX, chatStore, selectCurrent, setEditing, setReplyTo, type Msg } from "./store";
 
 const clock = (at: number) =>

@@ -16,9 +16,9 @@ import { AppNav } from "@/modules/shell";
 import { Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
 import { SearchEngine } from "@/modules/search";
-import { Files, workspaceReady } from "@/modules/workspace";
+import { OperatingSystem, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
-import { closePane, toggleMap } from "@/shared/pane";
+import { closeAllPanes } from "@/shared/pane";
 import { power, restorePower } from "@/shared/power";
 import { bootInTurn, useStore } from "@/shared/store";
 
@@ -51,12 +51,11 @@ function Home() {
 
   useEffect(() => {
     void hydrateChats().then(() => setHydrated(true));
-    workspaceReady().catch(() => undefined); // .arcanus/: its error shows in Arcanus OS
+    workspaceReady().catch(() => undefined); // .arcanus/: its error shows in the Operating System
     void trackIfAllowed(); // live GPS if this site may already use it; otherwise asked when you ask where you are, or on the map
     // A phone opens on the sphere and the chat: there a pane takes the whole screen, so it waits to be asked for.
     if (window.matchMedia("(max-width: 767px)").matches) {
-      closePane();
-      toggleMap(false);
+      closeAllPanes();
     }
   }, []);
 
@@ -81,14 +80,14 @@ function Home() {
     };
   }, [on, hydrated]);
 
-  // Left: the nav and one side pane. Center: the chat, over the orb. Right: the world map.
+  // Left: the nav and one side pane. Center: the chat, over the orb. Right: the Operating System, or the world map.
   return (
     <main className="app-shell">
       <Stage />
       <AppNav />
       <Boundary fallback={null}>
         <GraphOfThought />
-        <Files />
+        <OperatingSystem />
         <SearchEngine />
         <MapPane />
       </Boundary>

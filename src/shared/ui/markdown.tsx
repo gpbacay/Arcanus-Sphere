@@ -1,5 +1,18 @@
-import type { ReactNode } from "react";
-import { type Block, type Inline, parseMarkdown } from "./markdown";
+import { createContext, useContext, type ReactNode } from "react";
+import { type Block, type Inline, parseMarkdown } from "@/shared/markdown";
+
+/** What opens a [[link]] to a note. Where nothing does (the chat), a link shows as its name. */
+export const WikiLinks = createContext<((target: string) => void) | null>(null);
+
+function WikiLink({ target, children }: { target: string; children: ReactNode }) {
+  const open = useContext(WikiLinks);
+  if (!open) return <span className="md-wiki">{children}</span>;
+  return (
+    <button type="button" className="md-wiki" title={`Open ${target}`} onClick={() => open(target)}>
+      {children}
+    </button>
+  );
+}
 
 function nodes(list: Inline[], key: string): ReactNode[] {
   return list.map((node, index) => {
@@ -9,6 +22,12 @@ function nodes(list: Inline[], key: string): ReactNode[] {
     if ("c" in node) return <code key={id}>{node.c}</code>;
     if ("b" in node) return <strong key={id}>{nodes(node.b, id)}</strong>;
     if ("i" in node) return <em key={id}>{nodes(node.i, id)}</em>;
+    if ("w" in node)
+      return (
+        <WikiLink key={id} target={node.w}>
+          {nodes(node.v, id)}
+        </WikiLink>
+      );
     return (
       <a key={id} href={node.a} target="_blank" rel="noopener noreferrer">
         {nodes(node.v, id)}
@@ -76,7 +95,7 @@ function block(item: Block, index: number, caret: boolean) {
   );
 }
 
-/** An assistant reply. `caret` is the streaming cursor, kept on the last line. */
+/** Markdown as text on the page: an assistant reply, or a file previewed. `caret` is the streaming cursor, kept on the last line. */
 export function Markdown({ text, caret = false }: { text: string; caret?: boolean }) {
   const blocks = parseMarkdown(text);
   if (!blocks.length) return caret ? <span className="caret" aria-hidden /> : null;

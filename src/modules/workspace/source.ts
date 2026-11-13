@@ -57,6 +57,17 @@ export const sourceFiles = async () => (await call<{ files: string[] }>({ op: "f
 export const searchSource = (query: string, options: { matchCase?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number } = {}) =>
   call<{ hits: Hit[]; more: boolean }>({ op: "search", query, ...options });
 
+export type Repo = { name: string; url: string; page: string; private: boolean };
+/** GitHub through this computer's git: who it is signed in as, the source's origin, and the repositories to pick from.
+ *  The token is handed over once and kept in git's credential store on this computer; it never comes back. */
+export const githubAccount = {
+  status: () => call<{ login: string; remote: string; stale?: boolean }>({ op: "github" }),
+  connect: (token: string) => call<{ login: string }>({ op: "github-connect", token }),
+  disconnect: () => call({ op: "github-disconnect" }),
+  repos: async () => (await call<{ repos: Repo[] }>({ op: "github-repos" })).repos,
+  create: async (name: string, isPrivate: boolean) => (await call<{ repo: Repo }>({ op: "github-create", name, private: isPrivate })).repo,
+};
+
 /** One git command on the source. `code` is git's exit code: 0 when it worked. */
 export async function sourceGit(args: string[]) {
   const result = await call<{ out: string; code: number }>({ op: "git", args });

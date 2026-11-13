@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, CaseSensitive, ChevronRight, ExternalLink, FileText, Globe, ListFilter, MessageSquareText, Regex, RotateCw, Save, Search, WholeWord, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CaseSensitive, ChevronRight, ExternalLink, FileText, Globe, ListFilter, MessageSquareText, Regex, RotateCw, Save, Search, WholeWord } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { browser, go, reload, step } from "@/modules/web";
 import { openFile, saveArtifact, shortPath, type FileHit, type FindOptions } from "@/modules/workspace";
 import { plainText, type Page } from "@/shared/html";
-import { closePane, pane, pin } from "@/shared/pane";
+import { pane, pin, usePlace, type Section } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
+import { PaneControls } from "@/shared/ui/pane-controls";
 import { engine, findFiles, runSearch, type Scope, type WebWhy } from "./engine";
 
 /**
@@ -15,8 +16,8 @@ import { engine, findFiles, runSearch, type Scope, type WebWhy } from "./engine"
  * and this page's cross-origin isolation (for multi-threaded WASM) blocks frames anyway.
  */
 export function SearchEngine() {
-  const open = useStore(pane, (s) => s.open === "search");
-  return open ? <SearchPane /> : null;
+  const { home, at, wide } = usePlace("search");
+  return home ? <SearchPane place={at} wide={wide} /> : null;
 }
 
 const SCOPES: { id: Scope; label: string }[] = [
@@ -34,7 +35,7 @@ const WHY: Record<WebWhy, string> = {
   "not needed": "ARC 1 read this as a search of my files · press Web to search the internet too",
 };
 
-function SearchPane() {
+function SearchPane({ place, wide }: { place: Section | null; wide: boolean }) {
   const query = useStore(engine, (s) => s.query);
   const options = useStore(engine, (s) => s.options);
   const scope = useStore(engine, (s) => s.scope);
@@ -64,14 +65,12 @@ function SearchPane() {
   const shownWeb = scope !== "files" && (view || loading || error);
 
   return (
-    <section className="side-pane search-pane" aria-label="Arcanus search engine">
+    <section className="side-pane search-pane" aria-label="Arcanus search engine" data-at={place ?? undefined} data-wide={wide || undefined} hidden={!place}>
       <header className="pane-head">
         <Search size={16} aria-hidden />
         <h2>Search engine</h2>
         <span className="pane-sub truncate">{view?.kind === "page" ? view.page.title : view?.kind === "results" ? `Web · ${view.engine}` : "Files first · ARC 1"}</span>
-        <button type="button" className="icon-btn" aria-label="Close the search engine" onClick={closePane}>
-          <X size={16} />
-        </button>
+        <PaneControls page="search" title="the search engine" />
       </header>
 
       <form

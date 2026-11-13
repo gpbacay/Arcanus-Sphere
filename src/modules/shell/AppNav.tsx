@@ -3,7 +3,7 @@
 import { FolderOpen, Info, MapPin, Network, Search, Settings, User, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { account, passwordError, saveAccount, signOut } from "@/modules/account";
-import { pane, toggleMap, togglePane, TOP_ACTIONS } from "@/shared/pane";
+import { pane, sectionOf, togglePane, TOP_ACTIONS, type PaneName } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
 import { modelSize, MODELS, setModelSize, type ModelSize } from "@/modules/llm";
@@ -14,13 +14,14 @@ import { voice } from "@/modules/voice";
 type DialogName = "about" | "settings" | "account";
 
 /**
- * The top bar: the mark, then Arcanus's Graph of Thought, files, search engine and world map (side panes), then Account, About
+ * The top bar: the mark, then Arcanus's Graph of Thought, Operating System, search engine and world map (side panes), then Account, About
  * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's ⋮ tools.
  */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
-  const side = useStore(pane, (s) => s.open);
-  const map = useStore(pane, (s) => s.map);
+  // Which pages are open, in whatever section: one string, so the selector returns a primitive.
+  const shown = useStore(pane, (s) => (["mind", "os", "search", "map"] as PaneName[]).filter((p) => sectionOf(s, p)).join(" "));
+  const isOpen = (page: PaneName) => shown.split(" ").includes(page);
   const thinking = useStore(mind, (s) => s.thoughts.some((t) => t.status === "active"));
   return (
     <nav className="app-topbar" aria-label="Arcanus">
@@ -33,19 +34,19 @@ export function AppNav() {
         className="app-nav-btn"
         aria-label="Graph of Thought"
         title="Graph of Thought: what Arcanus is thinking, live"
-        aria-expanded={side === "mind"}
+        aria-expanded={isOpen("mind")}
         data-live={thinking || undefined}
         onClick={() => togglePane("mind")}
       >
         <Network size={17} aria-hidden />
       </button>
-      <button type="button" className="app-nav-btn" aria-label="Arcanus OS" title="Arcanus OS: files, editor, git and terminal" aria-expanded={side === "files"} onClick={() => togglePane("files")}>
+      <button type="button" className="app-nav-btn" aria-label="Operating System" title="Operating System: files, editor, git and terminal" aria-expanded={isOpen("os")} onClick={() => togglePane("os")}>
         <FolderOpen size={17} aria-hidden />
       </button>
-      <button type="button" className="app-nav-btn" aria-label="Search engine" title="Search engine: my files first, the web when needed" aria-expanded={side === "search"} onClick={() => togglePane("search")}>
+      <button type="button" className="app-nav-btn" aria-label="Search engine" title="Search engine: my files first, the web when needed" aria-expanded={isOpen("search")} onClick={() => togglePane("search")}>
         <Search size={17} aria-hidden />
       </button>
-      <button type="button" className="app-nav-btn" aria-label="World map" title="World map: where you and Arcanus are, live" aria-expanded={map} onClick={() => toggleMap()}>
+      <button type="button" className="app-nav-btn" aria-label="World map" title="World map: where you and Arcanus are, live" aria-expanded={isOpen("map")} onClick={() => togglePane("map")}>
         <MapPin size={17} aria-hidden />
       </button>
       <div className="app-nav-gap" />

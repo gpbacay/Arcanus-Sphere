@@ -4,8 +4,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { llm } from "@/modules/llm";
 import { useOnline } from "@/modules/offline";
 import { voice } from "@/modules/voice";
+import { usePlace } from "@/shared/pane";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
+import { PaneControls } from "@/shared/ui/pane-controls";
 import { MessageSquare } from "lucide-react";
 import { COMPOSER_ID, Composer } from "./Composer";
 import { discard, useBusy } from "./conversation";
@@ -26,11 +28,13 @@ export function ChatPanel() {
   const on = useStore(power, (s) => s.on);
   const speaking = useStore(voice.state, (s) => s.speaking);
   const mood: Mood = !on ? "off" : busy ? "thinking" : speaking ? "speaking" : "ready";
+  // In any section, like every page. Behind another page while a side is expanded over its own: kept, not unmounted.
+  const { at, wide } = usePlace("chat");
 
   // The header stays at the top and the composer at the bottom; minimizing hides only the thread between them.
   // One tree for both states, so the composer (and what you were typing) stays mounted.
   return (
-    <aside className="panel" data-min={collapsed || undefined} aria-label="Arcanus chat">
+    <aside className="panel" data-min={collapsed || undefined} data-at={at ?? undefined} data-wide={wide || undefined} hidden={!at} aria-label="Arcanus chat">
       <Header mood={mood} collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       {collapsed ? null : <Thread />}
       {collapsed ? null : <UndoBar />}
@@ -206,6 +210,7 @@ function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?:
       >
         <Icon name={collapsed ? "down" : "up"} />
       </button>
+      <PaneControls page="chat" title="the chat" close={false} />
     </header>
   );
 }

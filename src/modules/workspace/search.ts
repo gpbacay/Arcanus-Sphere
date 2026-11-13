@@ -15,7 +15,7 @@ const TEXT = /\.(?:md|markdown|txt|json|jsonl|csv|tsv|ya?ml|toml|ini|log|html?|c
 const MAX_FILES = 3000;
 const SKIP = /^(?:node_modules|\.git|\.next|dist|build)$/;
 
-async function walk(dir: string, out: string[]) {
+export async function walk(dir: string, out: string[]) {
   for (const entry of await list(dir).catch(() => [])) {
     if (out.length >= MAX_FILES) return;
     const path = dir ? `${dir}/${entry.name}` : entry.name;
@@ -63,7 +63,7 @@ const results = (files: FileHit[], more: boolean): FileResults => {
 };
 
 /**
- * Search Arcanus's file system for `query`: its files in the browser (or the folder opened from the Files pane), and its
+ * Search Arcanus's file system for `query`: its files in the browser (or the folder opened from the Operating System), and its
  * own source code when it is reachable. Files whose name matches come first, then those with the most matching lines.
  * `onLocal` gets the browser's files as soon as they are read (milliseconds), before the source answers.
  */

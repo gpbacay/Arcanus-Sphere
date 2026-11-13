@@ -6,10 +6,11 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { getVersion, Map as MapLibre, Marker, NavigationControl, setWorkerUrl, type StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { MapPin, X } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { useOnline } from "@/modules/offline";
-import { toggleMap } from "@/shared/pane";
+import { usePlace } from "@/shared/pane";
 import { useStore } from "@/shared/store";
+import { PaneControls } from "@/shared/ui/pane-controls";
 import { ago, coordinates, placeName, type Near } from "./geo";
 import { askLocation, gps, nearPlace } from "./index";
 
@@ -50,6 +51,7 @@ export default function WorldMap() {
   const error = useStore(gps, (s) => s.error);
   const prompting = useStore(gps, (s) => s.prompting);
   const online = useOnline();
+  const { at, wide } = usePlace("map");
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -111,13 +113,11 @@ export default function WorldMap() {
             : `Last known · ${ago(now - fix.at)}`;
 
   return (
-    <section className="side-pane map-pane" aria-label="World map">
+    <section className="side-pane map-pane" aria-label="World map" data-at={at ?? undefined} data-wide={wide || undefined} hidden={!at}>
       <header className="pane-head">
         <MapPin size={16} aria-hidden />
         <h2>World map</h2>
-        <button type="button" className="icon-btn" aria-label="Close the world map" onClick={() => toggleMap(false)}>
-          <X size={16} />
-        </button>
+        <PaneControls page="map" title="the world map" />
       </header>
       <div className="map-shell">
       <div ref={box} className="map-view" />

@@ -539,34 +539,34 @@ textarea.field {
   color: #f4fbff;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.72);
 }
-.msg-bubble.md {
+.md {
   white-space: normal;
   display: flex;
   flex-direction: column;
   gap: 0.55em;
 }
-.msg-bubble.md :where(p, ul, ol, pre, blockquote, h1, h2, h3) {
+.md :where(p, ul, ol, pre, blockquote, h1, h2, h3) {
   margin: 0;
 }
-.msg-bubble.md :where(h1, h2, h3) {
+.md :where(h1, h2, h3) {
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.35;
 }
-.msg-bubble.md h1 { font-size: 15px; }
-.msg-bubble.md h2 { font-size: 14px; }
-.msg-bubble.md h3 { font-size: 13.5px; }
-.msg-bubble.md a {
+.md h1 { font-size: 15px; }
+.md h2 { font-size: 14px; }
+.md h3 { font-size: 13.5px; }
+.md a {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-color: rgba(111, 224, 255, 0.45);
 }
-.msg-bubble.md a:hover {
+.md a:hover {
   color: var(--accent-hot);
   text-decoration-color: var(--accent-hot);
 }
-.msg-bubble.md code {
+.md code {
   font-family: var(--font-mono);
   font-size: 0.92em;
   padding: 0 4px;
@@ -574,33 +574,33 @@ textarea.field {
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
-.msg-bubble.md pre {
+.md pre {
   padding: 8px 10px;
   overflow-x: auto;
   border-radius: var(--r-sm);
   background: rgba(2, 5, 9, 0.55);
   border: 1px solid var(--line);
 }
-.msg-bubble.md pre code {
+.md pre code {
   padding: 0;
   border: 0;
   background: none;
   font-size: 11.5px;
   line-height: 1.55;
 }
-.msg-bubble.md ul {
+.md ul {
   list-style: disc;
 }
-.msg-bubble.md ol {
+.md ol {
   list-style: decimal;
 }
-.msg-bubble.md :where(ul, ol) {
+.md :where(ul, ol) {
   padding-left: 1.15em;
 }
-.msg-bubble.md li + li {
+.md li + li {
   margin-top: 0.2em;
 }
-.msg-bubble.md blockquote {
+.md blockquote {
   padding-left: 8px;
   border-left: 1px solid var(--line-strong);
   color: var(--text-muted);
@@ -1367,6 +1367,7 @@ textarea.field {
   left: auto;
   right: 0;
   width: 230px;
+  background: var(--glass-sheen), #0a0f16; /* solid: inside the top bar's glass a second blur doesn't apply, and a pane's text showed through the list */
 }
 .tools-menu .menu-item {
   min-height: 34px;
@@ -1547,7 +1548,7 @@ textarea.field {
   display: flex;
   flex-direction: column;
 }
-/* Arcanus OS: a desktop menu bar under the title, and a status line at the foot. */
+/* Operating System: a desktop menu bar under the title, and a status line at the foot. */
 .os-menubar {
   display: flex;
   flex-wrap: wrap;
@@ -1583,7 +1584,34 @@ textarea.field {
 .os-menu .menu-item svg {
   color: var(--accent);
 }
-.os-menu kbd {
+/* A row's ⋮ list: a popover, so it is placed in the top layer from the button (RowMenu). */
+.pop-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 168px;
+  overflow: visible;
+  font-size: 12.5px;
+  background: var(--glass-sheen), #0a0f16; /* solid, as the menu bar's: a blur behind a blur doesn't apply */
+}
+.pop-menu .menu-item {
+  justify-content: flex-start;
+}
+.pop-menu .menu-item svg {
+  flex: none;
+  color: var(--accent);
+}
+.pop-menu .menu-item.danger svg {
+  color: var(--danger);
+}
+.pop-menu .menu-item span {
+  flex: 1;
+}
+.pop-menu:not(:popover-open) {
+  display: none;
+}
+.os-menu kbd,
+.pop-menu kbd {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
@@ -1619,25 +1647,188 @@ textarea.field {
   flex: 1;
   min-width: 0;
 }
-.terminal {
+/* The terminal: a panel along the foot of the pane, half its height to start and dragged by its top edge. A bar with
+   the buttons, the screen where the prompt sits right after the last answer (each answer closed by a tick and how long
+   it took), and, with several terminals open, a list of them down the right. */
+.os-main {
   display: flex;
-  flex-direction: column;
-}
-.terminal pre {
   flex: 1;
-  margin-top: 0;
+  flex-direction: column;
+  min-height: 0;
 }
-.terminal form {
-  margin: 0;
+.term-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  border-top: 1px solid var(--line-strong);
 }
-.terminal .field {
+.term-grip {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.term-grip:hover,
+.term-grip:focus-visible,
+.term-grip:active {
+  background: var(--accent);
+  box-shadow: none;
+  outline: none;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 12px;
+}
+.term-bar span {
+  margin-right: auto;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.term-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.term-screen {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 12px 10px;
+  overflow: auto;
+  background: rgba(2, 5, 9, 0.6);
   font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  cursor: text;
+  scrollbar-width: thin;
+}
+.term-in,
+.term-prompt {
+  display: flex;
+  gap: 8px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.term-in {
+  margin-top: 6px;
+}
+/* The prompt is the folder, as in cmd: it wraps when the path is long, and the command goes on after it. */
+.term-in {
+  gap: 0;
+}
+.term-prompt {
+  gap: 0;
+}
+.term-in span,
+.term-prompt span {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+}
+.term-out {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.term-out[data-err] {
+  color: var(--danger);
+}
+.term-out [data-tone="add"] {
+  color: var(--ok);
+}
+.term-out [data-tone="del"] {
+  color: var(--danger);
+}
+.term-out [data-tone="hunk"] {
+  color: var(--accent);
+}
+.term-prompt {
+  margin: 6px 0 0;
+}
+.term-prompt input {
+  flex: 1 1 8ch;
+  min-width: 8ch;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  caret-color: var(--accent);
+  caret-shape: block;
+  outline: none;
+  box-shadow: none;
+}
+.term-prompt input::placeholder {
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+.term-prompt[data-busy] {
+  opacity: 0.45;
+}
+/* The terminals open at once, as in an editor's panel: a row each, the one shown marked on its left edge. */
+.term-list {
+  flex: none;
+  width: 124px;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  list-style: none;
+}
+.term-list li {
+  display: flex;
+  align-items: center;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+}
+.term-list li:hover {
+  background: var(--surface-2);
+}
+.term-list li[data-active] {
+  border-left-color: var(--accent);
+  background: var(--surface-3);
+  color: var(--text);
+}
+.term-list li[data-busy] svg {
+  color: var(--think);
+  animation: term-pulse 0.9s ease-in-out infinite;
+}
+@keyframes term-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.term-list li > button:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 4px 4px 8px;
+  font-size: 12px;
+  text-align: left;
+}
+.term-list .icon-btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+.term-list li:hover .icon-btn,
+.term-list li[data-active] .icon-btn,
+.term-list .icon-btn:focus-visible {
+  opacity: 1;
 }
 
 /* The IDE: open files as tabs, the folder, and the code editor. Wide, the pane covers the stage and shows both. */
-.files-pane[data-wide] {
-  width: calc(100vw - var(--panel-w) - 3 * var(--gap));
-}
 .ide {
   display: flex;
   flex: 1;
@@ -1646,7 +1837,7 @@ textarea.field {
 .ide > .pane-body {
   min-width: 0;
 }
-.files-pane[data-wide] .ide > .explorer:not(:only-child) {
+.os-pane[data-split] .ide > .explorer:not(:only-child) {
   flex: none;
   width: 240px;
   border-right: 1px solid var(--line);
@@ -1701,38 +1892,247 @@ textarea.field {
   border-color: var(--accent);
 }
 
-/* Git: the source's changes, commit and history */
-.git-commit,
-.git-sync {
+/* Source control, as an editor lays it out: the branch and its sync, then sections that fold (Changes, Graph, GitHub). */
+.scm {
+  padding-top: 4px;
+}
+.scm-sync,
+.scm-account,
+.scm-remote {
   display: flex;
-  gap: 4px;
-}
-.git-commit .btn {
-  flex: none;
+  align-items: center;
   gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
-.git-title {
-  margin: 14px 0 4px;
+.scm-sync {
+  padding: 2px 0 6px;
+  font-family: var(--font-mono);
+}
+.scm-sync > svg {
+  flex: none;
+  color: var(--accent);
+}
+.scm-gap {
+  flex: 1;
+}
+.scm-section {
+  border-top: 1px solid var(--line);
+}
+.scm-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 0;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+.scm-section > summary::-webkit-details-marker {
+  display: none;
+}
+.scm-section > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-faint);
+  border-bottom: 1.5px solid var(--text-faint);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.scm-section[open] > summary::before {
+  transform: rotate(45deg);
+}
+.scm-section[open] {
+  padding-bottom: 10px;
+}
+.scm-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scm-commit textarea {
+  min-height: 34px;
+  resize: vertical;
+  font: inherit;
+}
+.scm-commit-btn {
+  display: flex;
+  gap: 1px;
+}
+.scm-commit-btn > .btn:first-child {
+  flex: 1;
+  justify-content: center;
+  gap: 6px;
+}
+.scm-commit-btn > .icon-btn {
+  width: 30px;
+  height: auto;
+  padding: 0;
+}
+.scm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.scm-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  text-align: center;
+  color: var(--accent);
+}
+.scm-changes li > button:first-child {
+  gap: 6px;
+  padding: 4px 6px;
+}
+.scm-dir {
+  flex: 1 1 0;
+  font-size: 11px;
   color: var(--text-faint);
 }
-.git-code {
+.scm-hover {
+  opacity: 0;
+}
+.scm-changes li:hover .scm-hover,
+.scm-hover:focus-visible {
+  opacity: 1;
+}
+.scm-letter {
   flex: none;
-  width: 12px;
+  width: 18px;
   font-family: var(--font-mono);
   font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
   color: var(--think);
 }
-.git-code[data-code="?"],
-.git-code[data-code="A"] {
+.scm-changes li[data-code="?"] .scm-letter,
+.scm-changes li[data-code="A"] .scm-letter {
   color: var(--ok);
 }
-.git-code[data-code="D"],
-.git-code[data-code="U"] {
+.scm-changes li:is([data-code="D"], [data-code="U"]) .scm-letter {
   color: var(--danger);
+}
+.scm-changes li[data-code="D"] > button:first-child > .truncate:first-child {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+/* The graph: a row per commit, the lanes drawn in SVG at its left edge, its branches as badges at its right. */
+.scm-graph {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scm-graph button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px 0 0;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text);
+}
+.scm-graph button:hover {
+  background: var(--surface-2);
+}
+.scm-graph button[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+.scm-graph .truncate {
+  flex: 1 1 auto;
+}
+.scm-lanes {
+  flex: none;
+  overflow: visible;
+}
+.scm-lanes path {
+  fill: none;
+  stroke-width: 1.5;
+}
+.scm-lanes circle {
+  stroke-width: 1.5;
+}
+.scm-ref {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  max-width: 110px;
+  padding: 0 6px;
+  border-radius: 9px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+.scm-ref[data-kind="remote"] {
+  background: #c58bff;
+}
+.scm-ref[data-kind="branch"],
+.scm-ref[data-kind="tag"] {
+  color: var(--text);
+  background: var(--surface-3);
+}
+/* GitHub: who is signed in, the origin, and the chooser for a repository. */
+.scm-github,
+.scm-choose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scm-github .pane-note {
+  margin: 0;
+}
+.scm-account a {
+  font-weight: 600;
+  color: var(--text);
+}
+.scm-remote .truncate {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.scm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.scm-choose .row {
+  display: flex;
+  gap: 6px;
+}
+.scm-choose .row .field {
+  flex: 1;
+  min-width: 0;
+}
+.scm-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .git-note,
 .diff {
@@ -1760,24 +2160,6 @@ textarea.field {
   color: var(--danger);
 }
 .diff [data-line="hunk"] {
-  color: var(--accent);
-}
-.git-log {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-muted);
-}
-.git-log li {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.git-log code {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
   color: var(--accent);
 }
 .editor .pane-actions {
@@ -2618,20 +3000,57 @@ textarea.field {
   pointer-events: none;
 }
 
-/* —— World map: a pane on the right, the device's live position on MapLibre, a card with what Arcanus knows of it —— */
+/* —— Sections. Every page (the chat too) shows in the section it was put in, data-at: left, center or right. A side
+   page expanded (data-wide) spreads over the center, and the center's page shows on the other side meanwhile; the page
+   it covers there is hidden, not closed. Wide screens give each section a column of its own; under 1100px the side
+   pages float over the orb at the window's edges and a center page lies across the middle. A phone has no sections:
+   its pages take the screen, so the move and expand buttons are not offered there. —— */
+.side-pane[hidden],
+.panel[hidden] {
+  display: none;
+}
+@media (max-width: 767px) {
+  .pane-move,
+  .pane-expand {
+    display: none;
+  }
+}
 @media (min-width: 768px) {
-  .side-pane.map-pane {
+  .side-pane[data-at="right"] {
     left: auto;
     right: var(--gap);
     width: var(--panel-w);
   }
+  .side-pane[data-at="center"] {
+    left: 50%;
+    width: min(620px, calc(100vw - 2 * var(--gap)));
+    transform: translateX(-50%);
+  }
+  .side-pane[data-wide] {
+    width: calc(100vw - var(--panel-w) - 3 * var(--gap));
+  }
+  /* The chat's boxes carry an 8px inset of their own, so a side chat is moved out by that much to line up with the panes. */
+  .panel[data-at="left"],
+  .panel[data-at="right"] {
+    --chat-w: 100%;
+    width: calc(var(--panel-w) + 16px);
+  }
+  .panel[data-at="left"] {
+    left: calc(var(--gap) - 8px);
+    right: auto;
+  }
+  .panel[data-at="right"] {
+    left: auto;
+    right: calc(var(--gap) - 8px);
+  }
+  .panel[data-wide] {
+    width: calc(100vw - var(--panel-w) - 3 * var(--gap) + 16px);
+  }
 }
 
-/* —— Wide screens: the window is three sections, side by side. The left (Graph of Thought, files or browser), the
-   center (the chat, over the orb) and the right (the world map) each fill the whole width of their section, from the
-   top bar's foot to the window's bottom, so the three share their edges. The orb stays behind them all, centered on
-   the middle section. A narrower screen keeps the panes floating over the orb. A Files pane open on its editor
-   spreads over the left and the center. —— */
+/* —— Wide screens: the window is three sections, side by side, each page filling the whole width of its section from
+   the top bar's foot to the window's bottom, so the three share their edges. The orb stays behind them all, centered
+   on the middle section. An expanded side page spans its own column and the center's. —— */
 @media (min-width: 1100px) {
   .app-shell {
     display: grid;
@@ -2645,26 +3064,38 @@ textarea.field {
   /* Every area names both its end lines: an absolutely placed item whose end is "auto" runs on to the window's edge. */
   .side-pane {
     grid-area: 1 / 1 / 2 / 2;
+  }
+  .side-pane,
+  .side-pane[data-at],
+  .side-pane[data-wide] {
     left: var(--gap);
     right: var(--gap);
     width: auto;
+    transform: none;
   }
-  .side-pane.map-pane {
-    grid-area: 1 / 3 / 2 / 4;
-    left: var(--gap);
-    right: var(--gap);
-    width: auto;
-  }
-  .side-pane.files-pane[data-wide] {
-    grid-area: 1 / 1 / 2 / 3;
-    width: auto;
-  }
-  /* The chat's boxes carry an 8px inset of their own, so the panel is moved out by that much to line them up with the panes. */
-  .panel {
+  .panel,
+  .panel[data-at],
+  .panel[data-wide] {
     --chat-w: 100%;
     grid-area: 1 / 2 / 2 / 3;
     left: calc(var(--gap) - 8px);
     right: calc(var(--gap) - 8px);
+    width: auto;
+  }
+  :is(.side-pane, .panel)[data-at="left"] {
+    grid-area: 1 / 1 / 2 / 2;
+  }
+  :is(.side-pane, .panel)[data-at="center"] {
+    grid-area: 1 / 2 / 2 / 3;
+  }
+  :is(.side-pane, .panel)[data-at="right"] {
+    grid-area: 1 / 3 / 2 / 4;
+  }
+  :is(.side-pane, .panel)[data-at="left"][data-wide] {
+    grid-area: 1 / 1 / 2 / 3;
+  }
+  :is(.side-pane, .panel)[data-at="right"][data-wide] {
+    grid-area: 1 / 2 / 2 / 4;
   }
 }
 .map-shell {
@@ -2875,4 +3306,220 @@ textarea.field {
 }
 .arc-input:focus {
   border-color: rgba(111, 224, 255, 0.6);
+}
+
+/* A [[link]] to a note: in a previewed file it opens the note; in the chat it is only its name. */
+.md-wiki {
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+button.md-wiki {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+button.md-wiki:hover {
+  color: var(--accent-hot);
+}
+
+/* The graph of notes: dots and lines on the pane's glass. Lit: the note open or pointed at, and the notes beside it. */
+.note-graph {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.note-graph svg {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.note-graph svg:active {
+  cursor: grabbing;
+}
+.note-graph-sum {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.note-graph line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.note-graph circle {
+  fill: var(--text-muted);
+  transition: fill 0.15s var(--ease);
+}
+.note-graph text {
+  fill: var(--text-muted);
+  font-size: 10px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.note-graph g {
+  cursor: pointer;
+  outline: none;
+}
+.note-graph g[data-missing] circle {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-dasharray: 2 2;
+}
+.note-graph svg[data-lit] g:not([data-near]),
+.note-graph svg[data-lit] line:not([data-near]) {
+  opacity: 0.3;
+}
+.note-graph line[data-near] {
+  stroke: var(--accent);
+}
+.note-graph g[data-near] circle {
+  fill: var(--accent);
+}
+.note-graph g[data-near] text {
+  fill: var(--text);
+}
+.note-graph g[data-current] circle,
+.note-graph g:focus-visible circle {
+  fill: var(--accent-hot);
+  filter: drop-shadow(0 0 4px var(--accent));
+}
+
+/* A markdown file previewed in the Operating System, in the editor's place: the chat's markdown, at the pane's size. */
+.md-preview {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 6px 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.md-preview > * + * {
+  margin-top: 0.7em;
+}
+.md-preview h1 {
+  font-size: 18px;
+}
+.md-preview h2 {
+  font-size: 15.5px;
+}
+.md-preview h3 {
+  font-size: 14px;
+}
+/* An HTML comment in a previewed file: shown as a quiet note, its own line breaks kept. */
+.md-note {
+  padding: 6px 10px;
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/* The explorer's tree, as an editor's: rows 24px tall, a chevron on each folder, a guide line per level, the picked row
+   marked on its left edge, and git's marks in state colour (amber changed, mint new, red deleted). */
+.tree {
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+.tree li {
+  display: flex;
+  align-items: center;
+}
+.tree li:hover {
+  background: var(--surface-2);
+}
+.tree li:has(> .tree-row[data-selected]) {
+  background: var(--surface-3);
+  box-shadow: inset 1px 0 var(--accent);
+}
+.tree-row {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  text-align: left;
+  color: var(--text);
+}
+.tree-row[aria-current="true"] .truncate {
+  color: var(--accent-hot);
+}
+.tree-guide {
+  flex: none;
+  align-self: stretch;
+  width: 12px;
+  background: linear-gradient(var(--line-strong), var(--line-strong)) 6px 0 / 1px 100% no-repeat;
+}
+.tree-chev {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.12s;
+}
+.tree-chev[data-open] {
+  transform: rotate(90deg);
+}
+.tree-icon {
+  flex: none;
+  margin: 0 6px 0 3px;
+  color: var(--accent);
+}
+.tree .truncate {
+  flex: 1;
+}
+.tree li[data-git] .truncate,
+.tree li[data-git] .tree-git {
+  color: var(--think);
+}
+.tree li:is([data-git="?"], [data-git="A"]) :is(.truncate, .tree-git) {
+  color: var(--ok);
+}
+.tree li:is([data-git="D"], [data-git="U"]) :is(.truncate, .tree-git) {
+  color: var(--danger);
+}
+.tree li[data-git="D"] .truncate {
+  text-decoration: line-through;
+}
+.tree-git {
+  flex: none;
+  width: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+.tree-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: var(--think);
+  opacity: 0.85;
+}
+.tree-more {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+.tree li:hover .tree-more,
+.tree-more:focus-visible {
+  opacity: 1;
 }

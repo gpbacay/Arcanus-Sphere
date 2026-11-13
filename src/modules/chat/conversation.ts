@@ -9,7 +9,7 @@ import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
-import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
+import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, linkedNotes, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { chatLine, openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
@@ -107,10 +107,14 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
   ]);
   const pinned = pane.state.pinned;
   const recalled = recallNotes(text, notes);
+  // What the notes being read link to ([[links]]), and what links to them: a subject split over small files is read whole.
+  const reading = [...(pinned && !pinned.href ? [pinned.label] : []), ...recalled.map((n) => `${HOME}/memory/${n.id}`)];
+  const linked = reading.length ? await linkedNotes(reading).catch(() => []) : [];
   const sources = [
     passages.length ? thought("retrieve", `Found ${passages.length} passages in your books`, { parents: [from], results: [...new Set(passages.map((p) => p.book))] }) : null,
     recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null,
     pinned ? thought("retrieve", "Reading what you're showing me", { parents: [from], results: [pinned.label] }) : null,
+    linked.length ? thought("retrieve", `Followed [[links]] to ${linked.length} notes`, { parents: [from], results: linked.map((n) => n.path) }) : null,
   ];
   const facts = factsBlock(plan.facts ?? [], plan.source);
   const { sections, report, used } = assemble(
@@ -126,6 +130,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
         priority: 2,
       },
       { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 3 },
+      { label: "Linked notes", text: linked.map((n) => `[${n.path.split("/").pop()}]\n${n.text.trim()}`).join("\n\n"), priority: 4 },
     ],
     BUDGET
   );
@@ -636,7 +641,7 @@ export const COMMANDS = [
   { name: "/shutdown", hint: "Switch Arcanus off" },
   { name: "/clear", hint: "Start a new conversation" },
   { name: "/browse", hint: "Open a page or search the web: /browse <address or words>" },
-  { name: "/files", hint: "Open Arcanus OS: its files (.arcanus), editor, git and terminal" },
+  { name: "/files", hint: "Open the Operating System: its files (.arcanus), editor, git and terminal" },
   { name: "/remember", hint: "Keep a note in .arcanus/memory: /remember <note>" },
   { name: "/teach", hint: "Teach Arcanus what your last message needed: /teach <route>" },
   { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
@@ -679,8 +684,8 @@ function command(chatId: string, input: string) {
     return out([...COMMANDS, ...skills].map((c) => `${c.name.padEnd(10)} ${c.hint}`).join("\n"));
   }
   if (name === "/files") {
-    openPane("files");
-    return out(`Arcanus OS is open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
+    openPane("os");
+    return out(`The Operating System is open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
   }
   // Its own files, source and git (workspace/terminal.ts).
   const file = fileCommand(name, arg);
@@ -717,7 +722,7 @@ function command(chatId: string, input: string) {
     if (!skillName || !words.length) return out("/skill <name> <instructions> makes a skill. Run it with /<name> <message>.");
     return later(async () => {
       const made = await createSkill(skillName, words.join(" "));
-      return `Made /${made.name}. Its instructions are in ${made.path}: edit them in Arcanus OS.`;
+      return `Made /${made.name}. Its instructions are in ${made.path}: edit them in the Operating System.`;
     });
   }
   if (name === "/save") {
@@ -773,7 +778,7 @@ export function send(text: string) {
   return true;
 }
 
-chatLine.send = send; // Arcanus OS's terminal and Run menu hand lines to the chat through this
+chatLine.send = send; // the Operating System's terminal and Run menu hand lines to the chat through this
 
 /** Replace a user message with `text` and answer it again; everything after it is dropped. */
 export function resend(id: string, text: string) {

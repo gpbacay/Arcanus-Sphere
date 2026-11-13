@@ -11,7 +11,7 @@
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
 // .arcanus/source is not in either: it is mounted from the server Arcanus runs from, at localhost only, so the same
 // list, read, write, rename and remove work on the code that is running.
-// ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in Arcanus OS.
+// ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Operating System.
 import { scopedHome, scopedKey } from "@/modules/account";
 import { BUILT_IN_GUARDRAILS, parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
 import { kept } from "@/shared/idb";
@@ -301,7 +301,7 @@ This pane is my file manager and my editor. My own files live in .arcanus/:
 - artifacts/ — replies and pages I saved
 - source/ — my own source code, at localhost
 
-Ctrl+S saves the file that is open.
+Ctrl+S saves the file that is open. Writing [[a note's name]] in a note links it to that note, so a subject can be split over small files; the graph button shows every note and its links, and when I read a note I read the notes it links to.
 
 ## My source
 
