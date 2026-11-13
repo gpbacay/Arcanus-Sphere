@@ -6,13 +6,14 @@
 // fix is kept per account so a later visit still knows it, and places are named from public/geo/places.json.
 import { scopedKey } from "@/modules/account";
 import { Store } from "@/shared/store";
-import { nearest, whereLine, type Fix, type Near, type Place } from "./geo";
+import { nearest, steady, whereLine, type Fix, type Near, type Place } from "./geo";
 
 export { coordinates, placeName, type Fix, type Near } from "./geo";
 
 /** off: not asked yet · asking: waiting for the first fix · live: fixes coming in · denied / unavailable: no fix. */
 export type GpsStatus = "off" | "asking" | "live" | "denied" | "unavailable";
-export const gps = new Store<{ fix: Fix | null; status: GpsStatus; error?: string }>({ fix: null, status: "off" });
+/** `prompting`: the browser's permission prompt is up, waiting for the user. */
+export const gps = new Store<{ fix: Fix | null; status: GpsStatus; error?: string; prompting?: boolean }>({ fix: null, status: "off" });
 
 const KEY = () => scopedKey("location_v1");
 let watchId: number | null = null;
@@ -38,8 +39,10 @@ export function track() {
   if (gps.state.status !== "live") gps.set({ status: "asking", error: undefined });
   watchId = navigator.geolocation.watchPosition(
     ({ coords, timestamp }) => {
-      const fix: Fix = { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy, at: timestamp, altitude: coords.altitude, heading: coords.heading, speed: coords.speed };
-      gps.set({ fix, status: "live", error: undefined });
+      const reading: Fix = { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy, at: timestamp, altitude: coords.altitude, heading: coords.heading, speed: coords.speed };
+      // A reading that only wobbles inside its accuracy keeps the position where it is (geo steady).
+      const fix = steady(gps.state.fix, reading);
+      gps.set({ fix, status: "live", error: undefined, prompting: false });
       try {
         localStorage.setItem(KEY(), JSON.stringify(fix));
       } catch {
@@ -47,7 +50,7 @@ export function track() {
       }
     },
     (err) => {
-      gps.set({ status: err.code === err.PERMISSION_DENIED ? "denied" : "unavailable", error: err.message });
+      gps.set({ status: err.code === err.PERMISSION_DENIED ? "denied" : "unavailable", error: err.message, prompting: false });
       if (err.code === err.PERMISSION_DENIED && watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
@@ -62,6 +65,19 @@ export async function trackIfAllowed() {
   restore();
   const permission = await navigator.permissions?.query({ name: "geolocation" }).catch(() => null);
   if (permission?.state === "granted") track();
+}
+
+/**
+ * Ask for this device's location now: the world map does this as it opens, so the browser's permission prompt comes
+ * first. Already blocked, it asks nothing and says so. Allowed later in the site settings, it starts following.
+ */
+export async function askLocation() {
+  restore();
+  const permission = await navigator.permissions?.query({ name: "geolocation" }).catch(() => null);
+  if (permission) permission.onchange = () => permission.state === "granted" && track();
+  if (permission?.state === "denied") return gps.set({ status: "denied", prompting: false });
+  gps.set({ prompting: permission?.state === "prompt" });
+  track();
 }
 
 /** The position now: the live fix, else the first one after asking (up to `wait` ms), else the last one kept. */

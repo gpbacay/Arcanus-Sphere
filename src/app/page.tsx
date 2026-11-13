@@ -15,7 +15,7 @@ import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
 import { Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
-import { Browser } from "@/modules/web";
+import { SearchEngine } from "@/modules/search";
 import { Files, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
 import { closePane, toggleMap } from "@/shared/pane";
@@ -51,7 +51,7 @@ function Home() {
 
   useEffect(() => {
     void hydrateChats().then(() => setHydrated(true));
-    workspaceReady().catch(() => undefined); // .arcanus/: its error shows in the Files pane
+    workspaceReady().catch(() => undefined); // .arcanus/: its error shows in Arcanus OS
     void trackIfAllowed(); // live GPS if this site may already use it; otherwise asked when you ask where you are, or on the map
     // A phone opens on the sphere and the chat: there a pane takes the whole screen, so it waits to be asked for.
     if (window.matchMedia("(max-width: 767px)").matches) {
@@ -89,7 +89,7 @@ function Home() {
       <Boundary fallback={null}>
         <GraphOfThought />
         <Files />
-        <Browser />
+        <SearchEngine />
         <MapPane />
       </Boundary>
       <Boundary fallback={<ChatFallback />}>

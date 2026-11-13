@@ -1,9 +1,9 @@
-// What sits around the chat: which side pane is open on the left over the stage (Arcanus's files, its browser or its
+// What sits around the chat: which side pane is open on the left over the stage (Arcanus's files, its search engine or its
 // Graph of Thought, one at a time, so the sphere stays in view), whether the world map is open on the right, and the
 // page or file Arcanus is reading along with every message.
 import { Store } from "./store";
 
-export type PaneName = "files" | "browser" | "mind";
+export type PaneName = "files" | "search" | "mind";
 /** A file or web page handed to Arcanus. It goes into the model's context with each message until removed. */
 export type Pinned = { label: string; text: string; href?: string };
 
@@ -18,3 +18,6 @@ export const togglePane = (name: PaneName) => pane.set({ open: pane.state.open =
 export const closePane = () => pane.set({ open: null });
 export const toggleMap = (map = !pane.state.map) => pane.set({ map });
 export const pin = (pinned: Pinned | null) => pane.set({ pinned });
+/** Send a line to the chat as if typed there; false when it wasn't taken. The chat module fills it in (conversation.ts),
+ *  so Arcanus OS can run a skill without importing the chat. */
+export const chatLine: { send: (line: string) => boolean } = { send: () => false };

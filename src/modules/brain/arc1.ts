@@ -69,6 +69,31 @@ export async function chooseTool(text: string, tools: ToolSpec[], prior?: Record
   }
 }
 
+/** What the search engine offers ARC 1: its own files first, the web for what isn't on this device. */
+const SEARCH_TOOLS: ToolSpec[] = [
+  {
+    name: "search_files",
+    description: "Find words, code, notes or a file by its name in Arcanus's own files, memory, books and source code on this device.",
+    parameters: [{ name: "query", type: "string", description: "The words, code or file name to find", required: true }],
+  },
+  {
+    name: "search_web",
+    description: "Search the internet for news, facts, people, places, prices, websites and anything that is not on this device.",
+    parameters: [{ name: "query", type: "string", description: "The words to search the internet for", required: true }],
+  },
+];
+
+/**
+ * Where a search belongs, by ARC 1: Arcanus's own files, or the web too. `query` is the words ARC 1 anchored (the
+ * whole text when it anchored none). Without ARC 1, files: they are always there, and the web may not be.
+ */
+export async function searchIntent(text: string): Promise<{ where: "files" | "web"; query: string; by: "ARC 1" | "default" }> {
+  const call = await chooseTool(text, SEARCH_TOOLS);
+  const anchored = typeof call?.arguments.query === "string" && call.arguments.query.trim() ? call.arguments.query.trim() : text.trim();
+  if (!call) return { where: "files", query: text.trim(), by: "default" };
+  return { where: call.name === "search_web" ? "web" : "files", query: anchored, by: "ARC 1" };
+}
+
 /**
  * An MCP tool's arguments read from `text` by its JSON Schema (simple-typed fields only), or {} when ARC 1 can't
  * anchor every required field or is unavailable. Measured on 8 tool requests it read 5 right where the old way (the

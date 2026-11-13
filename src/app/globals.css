@@ -880,8 +880,14 @@ textarea.field {
   color: var(--accent);
 }
 
+/* One row: the voice toggle, the message, the send button. A long message grows the field upward, the buttons stay
+   at its foot. */
 .composer-box {
   position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 5px;
   border: 1px solid rgba(150, 215, 245, 0.32);
   border-radius: var(--r);
   background: rgba(2, 6, 12, 0.58);
@@ -899,10 +905,12 @@ textarea.field {
 
 .composer textarea {
   display: block;
-  width: 100%;
-  min-height: 42px;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
   max-height: 160px;
-  padding: 8px 10px 2px;
+  padding: 4px 6px;
   resize: none;
   border: 0;
   outline: none;
@@ -915,16 +923,20 @@ textarea.field {
   color: #d5e6ef;
 }
 
+/* The bar's buttons join the box's row: the voice toggle before the field, the count and send after it. */
 .composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 2px 4px 4px;
+  display: contents;
+}
+.composer-bar > * {
+  order: 1;
+}
+.composer-bar > .icon-btn {
+  order: -1;
 }
 
 .count {
-  margin-left: auto;
-  margin-right: 6px;
+  align-self: center;
+  margin-right: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-faint);
@@ -1031,6 +1043,63 @@ textarea.field {
 }
 .mind-pane .pane-body .pane-note {
   margin: 10px 14px;
+}
+.mind-pane .pane-head .icon-btn {
+  margin-left: 0;
+}
+.got-tools {
+  position: relative;
+  margin-left: auto;
+}
+.got-menu {
+  left: auto;
+  right: 0;
+  width: 200px;
+}
+/* Minimized: the header and the newest thought, sized to them; the column below shows the stage. */
+.mind-pane[data-min] {
+  bottom: auto;
+  max-height: calc(100% - var(--top-h) - 3 * var(--gap));
+}
+.mind-pane[data-min] .pane-body {
+  padding-bottom: 0;
+}
+
+/* Beside the chat, the Graph of Thought is the chat's material, not a plate: a header box like the chat's, and below it
+   no background at all, the thoughts lying on the stage with the chat's text shadow. (A phone keeps the plate: there
+   the pane covers the chat.) */
+@media (min-width: 768px) {
+  .mind-pane {
+    border: none;
+    background: none;
+    box-shadow: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.65);
+  }
+  .mind-pane::before {
+    display: none;
+  }
+  .mind-pane > .pane-head {
+    padding: 8px 6px 8px 12px;
+    border: 1px solid rgba(150, 215, 245, 0.32);
+    border-radius: var(--r);
+    background: rgba(2, 6, 12, 0.58);
+    backdrop-filter: blur(12px) saturate(1.3);
+  }
+  .mind-pane .pane-body {
+    padding: 8px 0 4px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
+    mask-image: linear-gradient(to bottom, transparent, #000 14px);
+  }
+  .mind-pane[data-min] .pane-body {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .mind-pane .got-group > h3 {
+    padding: 12px 2px 6px;
+  }
+  .mind-pane .pane-body .pane-note {
+    margin: 10px 2px;
+  }
 }
 .got-group > h3 {
   display: flex;
@@ -1478,6 +1547,93 @@ textarea.field {
   display: flex;
   flex-direction: column;
 }
+/* Arcanus OS: a desktop menu bar under the title, and a status line at the foot. */
+.os-menubar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.os-menu {
+  position: relative;
+}
+.os-menu > button {
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.os-menu > button:hover,
+.os-menu > button[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.os-menu .menu {
+  top: calc(100% + 2px);
+  left: 0;
+  width: 230px;
+  font-size: 12.5px;
+  background: var(--glass-sheen), #0a0f16; /* inside the pane's glass a second blur doesn't apply: solid, or the list shows through */
+}
+.os-menu .menu-item:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.os-menu .menu-item svg {
+  color: var(--accent);
+}
+.os-menu kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+/* Back, Forward, Up and Refresh, then the folder's path as the address. */
+.os-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.os-nav > .icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.os-nav .crumbs {
+  flex: 1;
+  min-width: 0;
+  margin: 0 0 0 6px;
+}
+.os-status {
+  display: flex;
+  gap: 12px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.os-status span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.terminal {
+  display: flex;
+  flex-direction: column;
+}
+.terminal pre {
+  flex: 1;
+  margin-top: 0;
+}
+.terminal form {
+  margin: 0;
+}
+.terminal .field {
+  font-family: var(--font-mono);
+}
+
 /* The IDE: open files as tabs, the folder, and the code editor. Wide, the pane covers the stage and shows both. */
 .files-pane[data-wide] {
   width: calc(100vw - var(--panel-w) - 3 * var(--gap));
@@ -1675,6 +1831,218 @@ textarea.field {
 .reader a:hover {
   text-decoration-color: var(--accent);
 }
+/* —— Search engine: a code editor's search over Arcanus's files, with the web under it —— */
+.find-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The query field with its three toggles inside it, at its right end. */
+.find-box {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+.find-box .field {
+  width: 100%;
+  height: 32px;
+  padding-right: 84px;
+}
+.find-toggle {
+  position: absolute;
+  top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+}
+.find-toggle:nth-of-type(1) {
+  right: 56px;
+}
+.find-toggle:nth-of-type(2) {
+  right: 30px;
+}
+.find-toggle:nth-of-type(3) {
+  right: 4px;
+}
+.find-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.find-toggle[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.find-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.find-label .field {
+  height: 30px;
+}
+.find-scopes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.find-scope {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.find-scope:hover {
+  color: var(--text);
+}
+.find-scope[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.find-go {
+  height: 26px;
+  margin-left: auto;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.search-body {
+  padding-top: 6px;
+}
+.find-section + .find-section {
+  margin-top: 10px;
+}
+.find-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.find-count {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+}
+.find-nav {
+  display: flex;
+  margin-left: auto;
+}
+.find-nav .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+.find-why {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.find-files,
+.find-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.find-file,
+.find-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.find-file:hover,
+.find-line:hover {
+  background: var(--surface-2);
+}
+.find-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.15s;
+}
+.find-chevron[data-open] {
+  transform: rotate(90deg);
+}
+.find-name {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.find-name[data-named] {
+  color: var(--accent);
+}
+.find-dir {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.find-badge {
+  flex: none;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 10.5px;
+  line-height: 17px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.find-line {
+  align-items: baseline;
+  padding-left: 22px;
+}
+.find-ln {
+  flex: none;
+  min-width: 26px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--text-faint);
+}
+.find-text {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+.find-text mark {
+  border-radius: 2px;
+  background: rgba(255, 196, 92, 0.28);
+  color: var(--text);
+}
+
 .results {
   margin: 0;
   padding: 0;
@@ -2047,6 +2415,7 @@ textarea.field {
     margin: 8px 8px 0;
     padding: 0 2px 0 8px;
     gap: 0;
+    z-index: 45; /* above a side pane (40), which covers the screen under the strip: the ⋮ menu drops over it */
   }
   .app-nav-brand {
     margin-right: 2px;
@@ -2139,6 +2508,9 @@ textarea.field {
     padding-left: 10px;
   }
   .composer textarea {
+    height: 34px; /* level with the phone's 34px buttons */
+    min-height: 34px;
+    padding: 6px;
     font-size: 16px; /* stops iOS from zooming the page when the field is focused */
   }
   .msg {
@@ -2360,14 +2732,32 @@ textarea.field {
   margin-top: 6px;
 }
 /* This device on the map: a glowing dot that breathes. */
+/* The dot is a MapLibre marker: MapLibre places it with this element's own transform, so nothing here may animate
+   transform on it (an animated scale overwrote the position every frame, and the dot wandered). The pulse is a ring
+   drawn by ::after instead. */
 .map-me {
+  position: relative;
   width: 16px;
   height: 16px;
   border: 2px solid #fff;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 6px rgba(111, 224, 255, 0.25), 0 0 18px var(--accent);
-  animation: orb-breathe 2.4s ease-in-out infinite;
+  box-shadow: 0 0 18px var(--accent);
+}
+.map-me::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: rgba(111, 224, 255, 0.25);
+  animation: map-me-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes map-me-pulse {
+  50% {
+    transform: scale(1.35);
+    opacity: 0.4;
+  }
 }
 
 /* —— Chatting in AR: a mic button and a caption that never cover the middle of the screen —— */

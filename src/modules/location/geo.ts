@@ -15,6 +15,19 @@ export function distanceKm(aLat: number, aLon: number, bLat: number, bLon: numbe
   return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/**
+ * The position to show after a new reading. Readings wobble inside their accuracy circle even when the device is
+ * still (a desktop's Wi-Fi fix by hundreds of metres), and the dot wandered with them. So the dot stays put unless the
+ * device moved farther than either reading's accuracy (and 10 m), or the new reading is at least twice as sharp. Either
+ * way the kept fix carries the new reading's time, so it is still live.
+ */
+export function steady(prev: Fix | null, next: Fix): Fix {
+  if (!prev) return next;
+  const moved = distanceKm(prev.lat, prev.lon, next.lat, next.lon) * 1000;
+  if (next.accuracy * 2 <= prev.accuracy || moved > Math.max(10, prev.accuracy, next.accuracy)) return next;
+  return { ...prev, at: next.at };
+}
+
 /** The closest place to a position. ponytail: a linear scan of ~7,000 places, well under a millisecond. */
 export function nearest(places: Place[], lat: number, lon: number): Near | null {
   let best: Near | null = null;

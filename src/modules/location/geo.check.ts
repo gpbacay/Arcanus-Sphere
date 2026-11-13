@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ago, distanceKm, nearest, placeName, whereLine, type Place } from "./geo.ts";
+import { ago, distanceKm, nearest, placeName, steady, whereLine, type Place } from "./geo.ts";
 
 // London to Paris is about 344 km.
 assert.ok(Math.abs(distanceKm(51.5074, -0.1278, 48.8566, 2.3522) - 344) < 2);
@@ -27,5 +27,15 @@ assert.equal(
   "You're in or near Davao, Davao del Sur, Philippines. That's latitude 7.0731, longitude 125.6128, within about 12 metres (live from this device's location).",
 );
 assert.match(whereLine(fix, near, { self: true, live: false, now: 1000 + 120_000 }), /^I run on this device, so I'm where you are: in or near Davao.*\(last known position, 2 minutes ago\)\.$/);
+
+// The dot holds still through a reading's wobble, and moves when the device does or a sharper reading comes in.
+const here = { lat: 7.0731, lon: 125.6128, accuracy: 50, at: 1 };
+const wobble = { lat: 7.0733, lon: 125.6126, accuracy: 60, at: 2 }; // ~30 m off, inside the accuracy
+assert.deepEqual(steady(here, wobble), { ...here, at: 2 });
+const walked = { lat: 7.0761, lon: 125.6128, accuracy: 40, at: 3 }; // ~330 m north
+assert.deepEqual(steady(here, walked), walked);
+const sharper = { lat: 7.0732, lon: 125.6127, accuracy: 8, at: 4 };
+assert.deepEqual(steady(here, sharper), sharper);
+assert.deepEqual(steady(null, here), here);
 
 console.log("geo ok");

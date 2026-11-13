@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Globe, Info, MapPin, Network, Settings, User, X } from "lucide-react";
+import { FolderOpen, Info, MapPin, Network, Search, Settings, User, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { account, passwordError, saveAccount, signOut } from "@/modules/account";
 import { pane, toggleMap, togglePane, TOP_ACTIONS } from "@/shared/pane";
@@ -14,7 +14,7 @@ import { voice } from "@/modules/voice";
 type DialogName = "about" | "settings" | "account";
 
 /**
- * The top bar: the mark, then Arcanus's Graph of Thought, files, browser and world map (side panes), then Account, About
+ * The top bar: the mark, then Arcanus's Graph of Thought, files, search engine and world map (side panes), then Account, About
  * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's ⋮ tools.
  */
 export function AppNav() {
@@ -39,11 +39,11 @@ export function AppNav() {
       >
         <Network size={17} aria-hidden />
       </button>
-      <button type="button" className="app-nav-btn" aria-label="Files" title="Files" aria-expanded={side === "files"} onClick={() => togglePane("files")}>
+      <button type="button" className="app-nav-btn" aria-label="Arcanus OS" title="Arcanus OS: files, editor, git and terminal" aria-expanded={side === "files"} onClick={() => togglePane("files")}>
         <FolderOpen size={17} aria-hidden />
       </button>
-      <button type="button" className="app-nav-btn" aria-label="Browser" title="Browser" aria-expanded={side === "browser"} onClick={() => togglePane("browser")}>
-        <Globe size={17} aria-hidden />
+      <button type="button" className="app-nav-btn" aria-label="Search engine" title="Search engine: my files first, the web when needed" aria-expanded={side === "search"} onClick={() => togglePane("search")}>
+        <Search size={17} aria-hidden />
       </button>
       <button type="button" className="app-nav-btn" aria-label="World map" title="World map: where you and Arcanus are, live" aria-expanded={map} onClick={() => toggleMap()}>
         <MapPin size={17} aria-hidden />

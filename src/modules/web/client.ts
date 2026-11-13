@@ -60,7 +60,7 @@ export function go(input: string): Promise<View> {
   const target = toTarget(input);
   const { history, at } = browser.state;
   browser.set({ history: [...history.slice(0, at + 1), target], at: at + 1 });
-  openPane("browser");
+  openPane("search");
   return load(target);
 }
 
@@ -99,5 +99,5 @@ export async function openUserBrowser(url: string) {
     error: "",
     view: { kind: "page", page: { url, title: "Opened in your browser", text: `Opened in your browser.\n\n[${url}](${url})` } },
   });
-  openPane("browser");
+  openPane("search");
 }

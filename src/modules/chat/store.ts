@@ -14,6 +14,8 @@ export interface Msg {
   at: number;
   replyToId?: string;
   trace?: ThoughtStep[];
+  /** How long Arcanus thought before this reply was done, in ms ("Thought 17s"). */
+  ms?: number;
   /** "boot": Arcanus's introduction, its trace the boot log. "command": a terminal command or its output, kept out of the model's context. */
   kind?: "boot" | "command";
 }

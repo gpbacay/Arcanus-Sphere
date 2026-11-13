@@ -11,7 +11,7 @@ import { useOnline } from "@/modules/offline";
 import { toggleMap } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { ago, coordinates, placeName, type Near } from "./geo";
-import { gps, nearPlace, track, trackIfAllowed } from "./index";
+import { askLocation, gps, nearPlace } from "./index";
 
 // Served from public/maplibre/ (scripts/copy-maplibre.mjs): the bundler can't resolve MapLibre's own worker path.
 setWorkerUrl(`/maplibre/${getVersion()}/maplibre-gl-worker.mjs`);
@@ -48,12 +48,13 @@ export default function WorldMap() {
   const fix = useStore(gps, (s) => s.fix);
   const status = useStore(gps, (s) => s.status);
   const error = useStore(gps, (s) => s.error);
+  const prompting = useStore(gps, (s) => s.prompting);
   const online = useOnline();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    // Open from the start, so it asks for nothing: live if this site may already use the location, else "Use my location".
-    void trackIfAllowed();
+    // The map asks for the location as it opens: the browser's permission prompt first, then the live dot.
+    void askLocation();
     const el = document.createElement("div");
     el.className = "map-me";
     const m = new MapLibre({ container: box.current!, style: STYLE, center: [0, 15], zoom: 1.4, attributionControl: { compact: true } });
@@ -77,6 +78,9 @@ export default function WorldMap() {
     const m = map.current;
     if (!fix || !m || !me.current) return;
     const first = !me.current.getElement().isConnected;
+    // A reading that kept the position (geo steady) only refreshes its time: the dot and the view stay as they are.
+    const at = !first && me.current.getLngLat();
+    if (at && at.lng === fix.lon && at.lat === fix.lat) return;
     me.current.setLngLat([fix.lon, fix.lat]).addTo(m);
     if (first) m.jumpTo({ center: [fix.lon, fix.lat], zoom: 14 });
     else if (follow.current) m.easeTo({ center: [fix.lon, fix.lat], duration: 600 });
@@ -86,7 +90,7 @@ export default function WorldMap() {
   function centre() {
     follow.current = true;
     setFollowing(true);
-    track();
+    void askLocation();
     if (fix) map.current?.easeTo({ center: [fix.lon, fix.lat], zoom: Math.max(map.current.getZoom(), 14), duration: 800 });
   }
 
@@ -94,7 +98,9 @@ export default function WorldMap() {
   const state =
     status === "denied"
       ? "Location blocked · allow it in the browser's site settings"
-      : status === "asking" && !fix
+      : prompting
+        ? "Allow location access in your browser's prompt to show where you are"
+        : status === "asking" && !fix
         ? "Finding this device…"
         : !fix
           ? status === "unavailable"

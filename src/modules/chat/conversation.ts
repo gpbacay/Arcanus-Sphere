@@ -3,21 +3,21 @@
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { account } from "@/modules/account";
-import { asSelf, assemble, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED } from "@/modules/harness";
+import { addressed, answersCall, asSelf, assemble, keepPronouns, keepYears, CALL_TURNS, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
-import { FILE_COMMANDS, HOME, createSkill, fileCommand, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
-import { openPane, pane } from "@/shared/pane";
+import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
+import { chatLine, openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
 import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { MAX, chatStore, currentChat, newChat, push, remove, write, type Msg, type Removal } from "./store";
 
-export type Live = { chatId: string; trace: ThoughtStep[]; text: string };
+export type Live = { chatId: string; trace: ThoughtStep[]; text: string; /** When the reply began: "Thought 17s" is counted from here. */ begun?: number };
 
 /** The reply being written right now, if any. */
 export const live = new Store<{ reply: Live | null }>({ reply: null });
@@ -62,6 +62,7 @@ const recited = (m: Msg) =>
     /^I,\s/.test(m.text));
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
+const GUARD = "Guardrails you must never break (guardrails/rules.md)";
 
 /** The conversation itself: not commands, and not the boot greeting. A reply that only recited the biography is dropped too, or the next reply copies it. */
 const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !recited(m));
@@ -72,13 +73,15 @@ const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !re
  * that. Small, and laid out so SmolLM2 reads only the new turn. `from` is the thought the context is built for.
  */
 async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Promise<Built> {
-  const recalled = recallNotes(user.text, await memories().catch(() => []));
+  const [notes, guard] = await Promise.all([memories().catch(() => []), guardrails().catch(() => "")]);
+  const recalled = recallNotes(user.text, notes);
   const own = plan.facts?.length && !plan.source ? plan.facts : [];
   const ownBlock = own.length ? `${own.map((f) => `- ${f}`).join("\n")}\n\n${ONLY_ASKED}` : "";
   const { turns, report, used, budget } = liveTurns(
     conversed(prior).map((m): Turn => ({ role: m.role, content: m.text })),
     user.text,
     [
+      { label: GUARD, text: guard, priority: 0 }, // with the message, not the system prompt, so the KV cache holds
       { label: "Facts you may use", text: ownBlock, priority: 0 },
       { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 1 },
     ],
@@ -96,7 +99,8 @@ async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Pro
 async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | undefined, from: string): Promise<Built> {
   const text = ask(user, skill);
   // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
-  const [rules, notes, passages] = await Promise.all([
+  const [guard, rules, notes, passages] = await Promise.all([
+    guardrails().catch(() => ""),
     instructions().catch(() => ""),
     memories().catch(() => []),
     !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
@@ -111,6 +115,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
   const facts = factsBlock(plan.facts ?? [], plan.source);
   const { sections, report, used } = assemble(
     [
+      { label: GUARD, text: guard, priority: 0 },
       { label: STANDING, text: rules, priority: 1 },
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
       { label: plan.source ?? "Facts you may use", text: facts, priority: 0 },
@@ -125,10 +130,11 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     BUDGET
   );
   lastContext = { report, used, budget: BUDGET };
-  const standing = sections.find((s) => s.label === STANDING);
+  // Your guardrails, then ARCANUS.md, ride with the system prompt; the rest goes with the message.
+  const standing = sections.filter((s) => s.label === GUARD || s.label === STANDING);
   const quote = user.replyToId ? prior.find((m) => m.id === user.replyToId) : undefined;
   const content = [
-    ...sections.filter((s) => s !== standing).map((s) => `${s.label}:\n${s.text}`),
+    ...sections.filter((s) => !standing.includes(s)).map((s) => `${s.label}:\n${s.text}`),
     quote ? `About this earlier message: "${quote.text.slice(0, 300)}"` : "",
     text,
   ]
@@ -146,13 +152,15 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     results: report.map(reportLine),
   });
   const evidence = [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])];
-  return { turns: chatTurns(content, { history, standing: standing && `${standing.label}:\n${standing.text}`, grounded: sections.some((s) => s !== standing) || Boolean(quote) }), step, evidence, context };
+  return { turns: chatTurns(content, { history, standing: standing.map((s) => `${s.label}:\n${s.text}`).join("\n\n") || undefined, grounded: sections.some((s) => !standing.includes(s)) || Boolean(quote) }), step, evidence, context };
 }
 
 function reportLine(r: Report[number]) {
   const name =
     r.label === STANDING
       ? "ARCANUS.md"
+      : r.label === GUARD
+        ? "guardrails/rules.md"
       : r.label.startsWith("Notes")
         ? "memory"
         : r.label.startsWith("What the user")
@@ -364,10 +372,11 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   viaVoice = false;
   const mine = ++gen;
   const stale = () => mine !== gen;
-  const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });
+  const begun = Date.now();
+  const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text, begun } });
   const finish = (text: string, trace: ThoughtStep[]) => {
     if (stale()) return;
-    push(chatId, { id: crypto.randomUUID(), role: "assistant", text, at: Date.now(), trace });
+    push(chatId, { id: crypto.randomUUID(), role: "assistant", text, at: Date.now(), trace, ms: Date.now() - begun });
     live.set({ reply: null });
   };
   voice.cancel();
@@ -389,9 +398,22 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
 
   let trace: ThoughtStep[] = [];
   try {
+    // Called by name: "hey Arcanus" alone is answered as a call (answerCall); with more ("Arcanus, what time is it?")
+    // the name is taken off, so Hippocampus routes what was asked, not a question about Arcanus.
+    const call = skill ? null : addressed(user.text);
+    if (call?.called && !call.rest) {
+      const line = await answerCall(chatId, user, decision, stale);
+      if (stale()) return;
+      if (line) {
+        sayAll(line.text);
+        voiced(line.said)();
+        finish(line.text, line.trace);
+        return;
+      }
+    }
     const plan: Plan = skill
       ? { route: "skill", trace: [{ label: "Read the message", description: user.text }, { label: `Skill · /${skill.name}`, description: skill.path }] }
-      : await think(user.text);
+      : await think(call?.rest || user.text);
     trace = plan.trace;
     if (!skill) {
       const [, decided, ...rest] = plan.trace;
@@ -448,7 +470,13 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load",
     });
     // A reply grounded in its own notes is about itself, so it is said by itself (asSelf), whatever the model slipped into.
-    const own = plan.facts && !plan.source ? asSelf : (s: string) => s;
+    // Every reply with facts keeps their years and pronouns: "2015" and "she" from notes that say 2025 and he are put back.
+    const strict = Boolean(plan.facts?.length && !plan.source);
+    const own = (s: string) => keepPronouns(keepYears(strict ? asSelf(s) : s, built.evidence), built.evidence);
+    // About itself, a sentence after the first that its notes don't back is the model inventing a life ("I was trained
+    // for two years before she left"): it is not said, and the reply ends there.
+    let strayed = false;
+    const strays = (line: string) => strict && said.length > 0 && (strayed || grounding(line, built.evidence).unsupported.length > 0);
     let speaking: (() => void) | null = null;
     let shown = "";
     let unspoken = "";
@@ -459,18 +487,24 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       result = await llm.generate(
         built.turns,
         (piece) => {
-          if (stale()) return;
+          if (stale() || strayed) return;
           // Until the first words are spoken, a clause ending in a comma is enough to start: the voice begins sooner.
           shown += piece;
           const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
           unspoken = rest;
           spoke ||= sentences.length > 0;
           for (const s of sentences) {
-            said.push(own(s));
-            voice.say(own(s));
+            const line = own(s);
+            if (strays(line)) {
+              strayed = true;
+              llm.stop();
+              break;
+            }
+            said.push(line);
+            voice.say(line);
           }
           if (sentences.length) speaking ??= voiced(generating);
-          show([...trace, writing("Writing on this device")], own(shown));
+          show([...trace, writing("Writing on this device")], strayed ? said.join(" ") : own(shown));
         },
         { maxNewTokens: spoken ? VOICE_TOKENS : undefined }
       );
@@ -490,16 +524,21 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     if (stale()) return;
     // A spoken reply that hit its token cap ends mid-sentence: don't say, or keep, the broken end.
     const cutOff = spoken && result.tokens >= VOICE_TOKENS;
-    if (unspoken.trim() && !cutOff) {
-      said.push(own(unspoken));
-      voice.say(own(unspoken));
-      speaking ??= voiced(generating);
+    if (unspoken.trim() && !cutOff && !strayed) {
+      if (strays(own(unspoken))) strayed = true;
+      else {
+        said.push(own(unspoken));
+        voice.say(own(unspoken));
+        speaking ??= voiced(generating);
+      }
     }
     speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
     const written = own(result.text || shown.trim() || "…");
-    // Cut off at the cap: keep exactly what was spoken (a clause may have been said past the last full stop).
-    let text = cutOff ? said.join(" ") || wholeSentences(written) : written;
+    // Cut off at the cap, or where it strayed from its notes: keep exactly what was spoken (a clause may have been
+    // said past the last full stop).
+    // A reply cut after a clause ("I am online,") ends on a full stop, not the comma.
+    let text = cutOff || strayed ? said.join(" ").replace(/[\s,;:–—-]+$/, ".") || wholeSentences(written) : written;
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
@@ -527,6 +566,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       ...trace,
       wrote,
       ...(checked ? [checked] : []),
+      ...(strayed ? [{ label: "Stopped where it strayed", description: "The next sentence wasn't in my notes, so it wasn't said" }] : []),
       ...(voice.state.state.off ? [] : [{ label: "Paradee-8M spoke it", description: "Sentence by sentence, as it was written" }]),
     ]);
   } catch (err) {
@@ -535,6 +575,39 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     thought("execute", "Something failed", { parents: [root], detail: errorText(err) });
     finish("That didn't run. Try it once more.", [...trace, { label: "Something failed", description: errorText(err) }]);
   }
+}
+
+/**
+ * Answer a bare call of my name, in SmolLM2's own words: it is asked what the call means (harness CALL_TURNS), with
+ * sampling on so the answer isn't the same every time, and a draft that doesn't say I'm here is written again.
+ * Null (it fell through to an ordinary reply) when no draft answers the call, or the model can't write now.
+ */
+async function answerCall(chatId: string, user: Msg, decision: string, stale: () => boolean) {
+  settle(decision, { content: "Heard my name", detail: "a call for my attention, not a question" });
+  const trace: ThoughtStep[] = [
+    { label: "Read the message", description: user.text },
+    { label: "Called by name", description: 'A call for attention, read as "Are you there? Are you listening?"' },
+  ];
+  live.set({ reply: { ...live.state.reply, chatId, trace: [...trace, { label: "SmolLM2", description: "Writing on this device", status: "active" }], text: "" } });
+  const said = thought("generate", "Answering my name", { parents: [decision], active: true, detail: "SmolLM2, sampled" });
+  const drafts: string[] = [];
+  try {
+    // ponytail: up to 4 drafts. Measured: 12 of 12 calls were answered within 3.
+    for (let i = 0; i < 4; i++) {
+      const written = await llm.generate(CALL_TURNS, () => undefined, { maxNewTokens: 16, sample: true });
+      if (stale()) return null;
+      const text = answersCall(written.text);
+      if (text) {
+        settle(said, { content: "Answered my name", detail: drafts.length ? `${drafts.length + 1} drafts` : "first draft" });
+        return { text, said, trace: [...trace, { label: `${MODELS[modelSize()].label} wrote this`, description: `Sampled, so the words differ from call to call${drafts.length ? ` · ${drafts.length} drafts set aside` : ""}` }] };
+      }
+      drafts.push(written.text);
+    }
+  } catch (err) {
+    drafts.push(errorText(err));
+  }
+  settle(said, { failed: true, detail: "no draft said I'm here · answered as a message", results: drafts.slice(0, 3).map((d) => d.slice(0, 60)) });
+  return null;
 }
 
 export function stop() {
@@ -551,6 +624,7 @@ export function stop() {
     role: "assistant",
     text: partial ? `${partial} …` : "Stopped.",
     at: Date.now(),
+    ms: reply.begun ? Date.now() - reply.begun : undefined,
     trace: [...reply.trace.map((s) => ({ ...s, status: undefined })), { label: "Stopped", description: "You stopped Arcanus before it finished." }],
   });
 }
@@ -562,7 +636,7 @@ export const COMMANDS = [
   { name: "/shutdown", hint: "Switch Arcanus off" },
   { name: "/clear", hint: "Start a new conversation" },
   { name: "/browse", hint: "Open a page or search the web: /browse <address or words>" },
-  { name: "/files", hint: "Open Arcanus's files (.arcanus)" },
+  { name: "/files", hint: "Open Arcanus OS: its files (.arcanus), editor, git and terminal" },
   { name: "/remember", hint: "Keep a note in .arcanus/memory: /remember <note>" },
   { name: "/teach", hint: "Teach Arcanus what your last message needed: /teach <route>" },
   { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
@@ -606,15 +680,15 @@ function command(chatId: string, input: string) {
   }
   if (name === "/files") {
     openPane("files");
-    return out(`Files are open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
+    return out(`Arcanus OS is open. Arcanus keeps its own in ${HOME}/, in ${workspace.state.name || "its home"}.`);
   }
   // Its own files, source and git (workspace/terminal.ts).
   const file = fileCommand(name, arg);
   if (file) return later(file);
   if (name === "/browse") {
     if (!arg) {
-      openPane("browser");
-      return out("The browser is open. /browse <address or words> goes straight there.");
+      openPane("search");
+      return out("The search engine is open. /browse <address or words> goes straight to the web.");
     }
     return later(async () => {
       const view = await go(arg);
@@ -643,7 +717,7 @@ function command(chatId: string, input: string) {
     if (!skillName || !words.length) return out("/skill <name> <instructions> makes a skill. Run it with /<name> <message>.");
     return later(async () => {
       const made = await createSkill(skillName, words.join(" "));
-      return `Made /${made.name}. Its instructions are in ${made.path}: edit them in Files.`;
+      return `Made /${made.name}. Its instructions are in ${made.path}: edit them in Arcanus OS.`;
     });
   }
   if (name === "/save") {
@@ -698,6 +772,8 @@ export function send(text: string) {
   });
   return true;
 }
+
+chatLine.send = send; // Arcanus OS's terminal and Run menu hand lines to the chat through this
 
 /** Replace a user message with `text` and answer it again; everything after it is dropped. */
 export function resend(id: string, text: string) {

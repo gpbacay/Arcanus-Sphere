@@ -53,8 +53,9 @@ export const sourceFs = {
 /** Every file of the source that git tracks or would track. */
 export const sourceFiles = async () => (await call<{ files: string[] }>({ op: "files" })).files;
 
-/** Where `query` appears in the source, as written (not a pattern), whatever its case. */
-export const searchSource = (query: string) => call<{ hits: Hit[]; more: boolean }>({ op: "search", query });
+/** Where `query` appears in the source: as written and whatever its case, unless the options say otherwise. */
+export const searchSource = (query: string, options: { matchCase?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number } = {}) =>
+  call<{ hits: Hit[]; more: boolean }>({ op: "search", query, ...options });
 
 /** One git command on the source. `code` is git's exit code: 0 when it worked. */
 export async function sourceGit(args: string[]) {

@@ -2,7 +2,7 @@
 // Measures routing on held-out messages (none of them is a seed) and fails if it gets worse. Re-run it after changing
 // seeds, SURE or SELF_SHARE, or before putting a model back into the vote.
 import assert from "node:assert/strict";
-import { decide, routerMemory } from "./routes.ts";
+import { decide, fileSearch, routerMemory } from "./routes.ts";
 
 // Set 1 was written to judge routing; sets 2 and 3 separately, to check a change isn't just fitted to set 1.
 // "tool" messages need a registered tool to be claimed (skills.ts), so they aren't measured here.
@@ -109,4 +109,20 @@ for (const text of ["where am I", "where are you right now", "what's my current 
 for (const text of ["where are you from", "where are my notes kept", "where is paris"]) {
   assert.notEqual((await decide(routerMemory(), text)).route, "location", text);
 }
+// Its origin and name are claimed by about, however they are asked.
+for (const text of ["why you are named arcanus?", "why are you called arcanus", "where do you come from", "what does your name mean", "who created you", "what is arcane"]) {
+  assert.equal((await decide(routerMemory(), text)).route, "about", text);
+}
+// Whether we are online is claimed; what Arcanus can do offline stays a question about it.
+for (const text of ["are you online?", "are we offline", "do I have internet", "is the wifi down", "what's the connection status"]) {
+  assert.equal((await decide(routerMemory(), text)).route, "connection", text);
+}
+assert.equal((await decide(routerMemory(), "do you work offline")).route, "about");
+// Searching its own files is claimed, with the words to find; its code stays the source route.
+for (const [text, query] of [["search your files for lore", "lore"], ["find greeting in my notes", "greeting"], ["where is the eli5 skill in your files?", "the eli5 skill"], ["find the file named self.md", "self.md"], ["please look through your workspace for ARCANE", "ARCANE"]]) {
+  assert.equal((await decide(routerMemory(), text)).route, "files", text);
+  assert.equal(fileSearch(text), query, text);
+}
+assert.equal((await decide(routerMemory(), "find the greeting in your code")).route, "source");
+assert.equal(fileSearch("find me a good pizza place"), null);
 console.log("routing ok");

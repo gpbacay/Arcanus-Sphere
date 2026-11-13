@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDown, Network, Trash2, X } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, EllipsisVertical, Network, Trash2, X } from "lucide-react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { closePane, pane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { processes, type Process, type Step } from "./layout";
@@ -23,6 +23,7 @@ function GraphPane() {
   const pick = useCallback((id: string) => setPicked((was) => (was === id ? null : id)), []);
   // A process is open while it runs, and the newest one stays open; opening or closing one yourself overrides that.
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const [min, setMin] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true); // follow the newest thought unless you scrolled up to read
   const all = processes(thoughts);
@@ -46,18 +47,20 @@ function GraphPane() {
       </section>
     ) : null;
 
+  const latest = thoughts.at(-1);
   return (
-    <section className="side-pane mind-pane" aria-label="Graph of Thought">
+    <section className="side-pane mind-pane" aria-label="Graph of Thought" data-min={min || undefined}>
       <header className="pane-head">
         <Network size={16} aria-hidden />
         <h2>Graph of Thought</h2>
         <span className="pane-sub" aria-live="polite">
           {running ? `${running} running` : "idle"} · {thoughts.length} thoughts
         </span>
-        <button type="button" className="icon-btn" aria-label="Clear the graph" title="Clear" onClick={clearMind} style={{ marginLeft: "auto" }}>
-          <Trash2 size={15} />
+        <GraphMenu />
+        <button type="button" className="icon-btn" aria-label={min ? "Expand Graph of Thought" : "Minimize Graph of Thought"} title={min ? "Expand" : "Minimize"} aria-expanded={!min} onClick={() => setMin((v) => !v)}>
+          {min ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </button>
-        <button type="button" className="icon-btn" aria-label="Close Graph of Thought" onClick={closePane} style={{ marginLeft: 0 }}>
+        <button type="button" className="icon-btn" aria-label="Close Graph of Thought" title="Close" onClick={closePane}>
           <X size={16} />
         </button>
       </header>
@@ -69,7 +72,14 @@ function GraphPane() {
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        {thoughts.length ? (
+        {/* Minimized: the newest thought alone, on its node, under the header. */}
+        {min && latest ? (
+          <ol className="got-rail got-latest">
+            <li className="got-step" data-status={latest.status}>
+              <Row t={latest} joins="" picked={picked === latest.id} source={sources.includes(latest.id)} onPick={pick} />
+            </li>
+          </ol>
+        ) : thoughts.length ? (
           <>
             {group("Initialization", all.filter((p) => p.init))}
             {group("Conversation", all.filter((p) => !p.init))}
@@ -85,7 +95,43 @@ function GraphPane() {
   );
 }
 
-type Picking = { picked: string | null; sources: string[]; onPick: (id: string) => void };
+/** The pane's ⋮ menu: what changes the graph itself, kept out of the header so it isn't pressed by mistake. */
+function GraphMenu() {
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => !ref.current?.contains(event.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <div className="got-tools" ref={ref} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+      <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} aria-label="Graph of Thought options" title="Options" onClick={() => setOpen((v) => !v)}>
+        <EllipsisVertical size={16} />
+      </button>
+      {open ? (
+        <div id={menuId} role="menu" className="menu got-menu" aria-label="Graph of Thought options">
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item danger"
+            onClick={() => {
+              clearMind();
+              setOpen(false);
+            }}
+          >
+            <span>Clear the graph</span>
+            <Trash2 size={15} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type Picking ={ picked: string | null; sources: string[]; onPick: (id: string) => void };
 
 /** One process as an accordion: its root thought is the heading, and opening it shows every thought that grew from it, in full. */
 function ProcessView({ p, open, onToggle, ...picking }: { p: Process; open: boolean; onToggle: () => void } & Picking) {

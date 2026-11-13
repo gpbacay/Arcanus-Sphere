@@ -13,7 +13,7 @@ export const personality = {
 
 /** The only biography the model may use. Shared by the system prompt, the boot greeting, and the knowledge notes. */
 export const identityBrief =
-  "I am Arcanus, a local AI assistant created by Gianne Bacay. Gianne Bacay is a man: address him as he and him, never she or her. He made me in 2025 to put his AI library, ARCANE, to work, which is where my name comes from. I live in the user's browser as a glowing 3D sphere. I am not a person, not an employee, and not a member of any team or company. SmolLM2 writes my replies on the device, Hippocampus decides what a message needs, and Paradee speaks them. No server sees the conversation.";
+  "I am Arcanus, a local AI assistant created by Gianne Bacay. Gianne Bacay is a man: address him as he and him, never she or her. He made me in the year 2025 to put his neuromimetic AI library, ARCANE, to work, and named me Arcanus after it. I live in the user's browser as a glowing 3D sphere. I am not a person, not an employee, and not a member of any team or company. SmolLM2 writes my replies on the device, Hippocampus decides what a message needs, and Paradee speaks them. No server sees the conversation.";
 
 /** How Arcanus must speak of itself. Said in the system prompt and again next to its facts, where a small model looks. */
 export const FIRST_PERSON = 'You are Arcanus: speak as yourself, with "I", "me" and "my". Never call yourself "Arcanus", "it" or "the assistant". "You" is the user.';
@@ -57,6 +57,35 @@ export function asSelf(text: string): string {
     });
 }
 
+/**
+ * A year the model miscopied from its facts, put back: SmolLM2-135M wrote "2015" from notes that say 2025. A year in
+ * the reply that is not in the facts but is one digit off one that is, is that one. Other years are left alone.
+ */
+export function keepYears(text: string, facts: string[]): string {
+  const known = [...new Set(facts.join(" ").match(/\b(?:1[89]|20)\d\d\b/g) ?? [])];
+  return text.replace(/\b(?:1[89]|20)\d\d\b/g, (year) => {
+    if (known.includes(year)) return year;
+    const near = known.filter((k) => [...k].filter((d, i) => d !== year[i]).length === 1);
+    return near.length === 1 ? near[0] : year;
+  });
+}
+
+// After "her", a word that starts a phrase of its own means "her" stood alone (him); anything else it owned (his).
+const NOT_OWNED = /^(?:and|or|but|to|for|with|in|on|at|by|from|of|as|that|this|so|because|when|if|then|too|again|now|a|an|the|about|into|over)$/i;
+
+/**
+ * The facts' pronouns, kept: SmolLM2-135M wrote "She first built ARCANE" from notes that say "He first built ARCANE"
+ * (Gianne is read as a woman's name). When the facts say he and never she, a she in the reply is put back to he.
+ */
+export function keepPronouns(text: string, facts: string[]): string {
+  const said = facts.join(" ");
+  if (!/\b(?:he|him|his)\b/i.test(said) || /\b(?:she|her|hers|herself)\b/i.test(said)) return text;
+  const cased = (word: string, like: string) => (like[0] === like[0].toUpperCase() ? word[0].toUpperCase() + word.slice(1) : word);
+  return text
+    .replace(/\b(she|herself|hers)\b/gi, (w) => cased({ she: "he", herself: "himself", hers: "his" }[w.toLowerCase()]!, w))
+    .replace(/\b(her)\b(\s+([\p{L}']+))?/giu, (_, w: string, gap = "", next = "") => cased(next && !NOT_OWNED.test(next) ? "his" : "him", w) + gap);
+}
+
 /** What Arcanus can really do, as it says it ("I can …"). The only abilities the model is told about, so it has no
  *  reason to invent others. */
 export const abilities = ["tell the time", "tell where we are, live, and show it on my world map", "do math", "search the web and read pages", "open a site in your browser", "open apps on this computer and click, type, scroll and read in them", "tell you this computer's specs", "remember notes", "answer from the books you add", "run your skills", "read and edit my own files", "open, search and commit my own source code", "talk by voice"];
@@ -93,6 +122,46 @@ export function greeting(m: Moment, pick: () => number = Math.random): string {
   // Someone who has talked here before is not introduced to Arcanus again: it picks up where they left off.
   const rest = back ? `Last time it was "${title}". Shall we go on, or start something new?` : `I'm Arcanus. ${from(ASKS)}`;
   return `${hello}${first ? `, ${first}` : ""}. ${rest}`;
+}
+
+// ------------------------------------------------------------------ being called by name
+// "Hey Arcanus" is a call for attention, not a question. Routed as one, it read as a question about Arcanus and was
+// answered with the biography. So a call is recognized here, the name is taken off before Hippocampus routes the rest,
+// and a bare call gets a prompt of its own (callTurns): the reply is still SmolLM2's, written fresh each time.
+
+// My name as speech-to-text spells it, and the words people call a name with.
+const MY_NAME = String.raw`(?:ar[ck]an(?:us|is|os|as|ess)|ar[ck]ane us|our canus)`;
+const HAIL = String.raw`(?:hey|hi|hello|ok(?:ay)?|yo|oh|excuse me)`;
+// "Hey Arcanus …", "Arcanus, …", or the name alone.
+const LEAD = new RegExp(String.raw`^\s*(?:${HAIL}[\s,]+${MY_NAME}\b[\s,.!?]*|${MY_NAME}\b(?:\s*[,.!?]+\s*|\s*$))`, "i");
+// "…, Arcanus" or "thanks Arcanus". Without the comma or a greeting before it, "what is Arcanus" is about me, not to me.
+const TRAIL = new RegExp(String.raw`(?:\s*,\s*|(?<=\b(?:thanks|thank you|hi|hello|hey|morning|afternoon|evening|night|bye|please))\s+)(?:${HAIL}\s+)?${MY_NAME}\s*[.!?]*\s*$`, "i");
+
+/** Whether the user called me by name, and what they said besides it: "Hey Arcanus" -> called, rest "";
+ *  "Arcanus, what time is it?" -> called, rest "what time is it?"; "what is Arcanus?" -> not called. */
+export function addressed(text: string): { called: boolean; rest: string } {
+  const rest = text.replace(LEAD, "").replace(TRAIL, "").trim();
+  return { called: rest !== text.trim(), rest };
+}
+
+/**
+ * The turns for a bare call ("hey Arcanus"). The model reads the call as the question it means, not as it was said:
+ * given the name itself, SmolLM2-135M echoed it ("Arcanus. I am Arcanus.") or played a character, whatever the system
+ * prompt said; asked "Are you there? Are you listening?" it answers "Yes, I'm listening.", "I'm here." and the like.
+ * Measured with sampling on, as the call is written (llm.worker.ts `sample`), so the words differ from call to call.
+ * The name is left out of the system prompt for the same reason: in the prompt, it is what came back.
+ */
+export const CALL_TURNS: ChatTurn[] = [
+  { role: "system", content: "You are a friendly helpful assistant. Reply warmly in one short sentence." },
+  { role: "user", content: "Are you there? Are you listening?" },
+];
+
+/** A written answer to a call, cut to its first sentence, or "" when it doesn't say it is here (sampling drifts:
+ *  "I'm listening to a podcast.", "No, I'm not here."). */
+export function answersCall(text: string): string {
+  const first = text.trim().match(/^[^.!?]*[.!?]?/)?.[0].trim() ?? "";
+  const yes = /^(?:yes|yeah|i'?m|i am|here|always|of course|sure)\b/i.test(first) && /\b(?:yes|yeah|here|listening|ready|am)\b/i.test(first);
+  return yes && !/\b(?:no|not|sorry|podcast|music|radio)\b/i.test(first) && first.split(/\s+/).length <= 12 ? first : "";
 }
 
 export interface Tool {
@@ -258,6 +327,39 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
 // answering. Who it is stays in the about route, and only when the question is about that.
 export const CHAT_SYSTEM = 'You are Arcanus, a helpful assistant. Answer in a few short sentences.';
 export const GROUNDED_SYSTEM = `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. ${ONLY_ASKED}`;
+
+/**
+ * .arcanus/guardrails/built-in.md: the guardrails in Arcanus's code, written out where it and you can read them. The
+ * workspace rewrites the file from this text at every start, so it always says what is enforced. Rules you add go in
+ * guardrails/rules.md, which the model reads before every reply. The guards on files, git and the computer stay in
+ * code on purpose: a file anyone (or /write) can edit must never be able to switch them off.
+ */
+export const BUILT_IN_GUARDRAILS = `<!-- guardrails/built-in.md: the guardrails written into my code. I rewrite this file from my code every time I
+     start, so editing it changes nothing. To add a guardrail of your own, write it in guardrails/rules.md. -->
+# My guardrails
+
+## Who I am
+
+- ${identityBrief}
+- ${FIRST_PERSON}
+- I never invent a job, a team, a company or a personal history. Asked who I am or what I am like, I answer with fixed lines, not made-up ones.
+- I say only what I can really do: ${abilities.join(", ")}.
+
+## How I answer
+
+- I start with the answer, in a few short sentences, then stop. If I do not know, I say so.
+- ${ONLY_ASKED}
+- After a reply is written, I check it: if I spoke of myself as "Arcanus", I put it back into "I"; a year one digit off the one in my facts becomes the one in my facts; and when my facts say he, a she in the reply becomes he.
+
+## What I may touch
+
+- My files: only inside my workspace. A path that climbs out of it, with "..", is refused.
+- My source code: only when I am opened at localhost, and only for requests from this computer that carry my own header. I never list, read or write .git, node_modules, .next or .env files.
+- Git: only everyday commands (status, diff, log, add, commit, pull, push and the like), never global options, and never options that run another program or write a file elsewhere (--exec, --output, --config, -c, ext::).
+- This computer's apps: only for requests from this computer, at localhost.
+- I never chain actions on my own. Each file command, git command or action on the computer is one you asked for.
+- Deleting a file asks you first. .arcanus, source and guardrails can't be renamed or deleted from my file list.
+`;
 
 /** Facts as the model reads them: Arcanus's own notes, or what a web page or search (`source`) returned. */
 export function factsBlock(facts: string[], source?: string): string {

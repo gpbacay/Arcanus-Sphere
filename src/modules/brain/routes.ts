@@ -41,6 +41,25 @@ const NOW =
 /** A question about where the user or Arcanus is right now. "Where are you from" is about its origin, not this. */
 export const WHERE =
   /\bwhere (?:am i|are (?:you|we)(?! from)|is (?:this|here)|in the world are (?:you|we))\b|\b(?:my|your|our) (?:current |live |exact |gps )?(?:location|position|coordinates|whereabouts)\b|\bwhat (?:city|town|country|place) (?:am i|are (?:you|we)) in\b/i;
+/** Who made Arcanus, where it comes from, or why it has its name: answered from its lore (.arcanus/lore.md). */
+export const ORIGIN =
+  /\b(?:who (?:made|created|built|designed|programmed) you|your (?:creator|maker|origin|story|lore|backstory)|who(?:'s| is) (?:your )?(?:creator|maker|gianne)|where (?:do|did) you come from|where are you from|how (?:were|was) you (?:made|born|created)|why (?:are|were) you (?:named|called)|why (?:is )?your name|(?:your|arcanus'?s?) name (?:mean|come from)|what does (?:your name|arcanus) mean|named (?:you )?(?:after|arcanus)|what is arcane)\b/i;
+/** A question about whether Arcanus, or this device, is online right now. "Do you work offline" asks what it can do,
+ *  and stays with about. */
+export const CONNECTED =
+  /\b(?:are|am) (?:you|we|i) (?:online|offline|connected|on the internet)\b|\b(?:do|does) (?:you|we|i|this device) have (?:an? )?(?:internet|connection|wi-?fi|network)\b|\b(?:is|are) (?:the |my |your |this )?(?:internet|connection|wi-?fi|network)(?: connection)? (?:on|off|down|up|working|connected)\b|\b(?:internet|network|connection) status\b/i;
+const MY_FILES = String.raw`(?:(?:your|my|the|arcanus'?s?)\s+)?(?:own\s+)?(?:files|file system|filesystem|notes|workspace|\.arcanus(?: folder)?)`;
+const FILES_FOR = new RegExp(String.raw`^(?:search|look|find|grep)(?:\s+(?:through|in))?\s+${MY_FILES}\s+for\s+(.+)$`, "i");
+const IN_FILES = new RegExp(String.raw`^(?:find|search(?:\s+for)?|look\s+for|grep|where\s+is|where's|where\s+are)\s+(.+?)\s+in\s+${MY_FILES}$`, "i");
+const NAMED = /^(?:find|where\s+is|where's|look\s+for|search\s+for)\s+(?:the\s+|a\s+)?files?\s+(?:named|called)\s+(.+)$/i;
+
+/** What a message asks to find in Arcanus's files ("search your files for lore", "find greeting in my notes"), or null. */
+export function fileSearch(input: string): string | null {
+  const text = input.trim().replace(/[.!?]+$/, "").replace(/^(?:please|can you|could you|would you)\s+/i, "").trim();
+  const m = text.match(FILES_FOR) ?? text.match(IN_FILES) ?? text.match(NAMED);
+  return m ? m[1].trim().replace(/^["“']|["”']$/g, "") || null : null;
+}
+
 /** The words a sum is asked with. */
 const ASKING = /^(?:what|what's|whats|how|much|many|is|are|do|does|you|get|from|calculate|compute|solve|work|out|the|answer|result|to|of|equals?|please|tell|me|can|could)$/i;
 
@@ -109,6 +128,11 @@ export const ROUTES: Route[] = [
       "where is your source code",
       "can you edit your own files",
     ],
+    // Its origin and its name are always about it, however they are asked: "why are you named arcanus" shares few
+    // words with the seeds.
+    claim(text) {
+      return ORIGIN.test(text) ? "asked about my origin" : undefined;
+    },
   },
   {
     route: "time",
@@ -128,6 +152,15 @@ export const ROUTES: Route[] = [
     seeds: [],
     claim(text) {
       return WHERE.test(text) ? "asked where we are" : undefined;
+    },
+  },
+  {
+    route: "connection",
+    description: "Asks whether Arcanus or this device is online or offline right now",
+    // No seeds, like location: CONNECTED reads every such question, and the answer is the browser's live state.
+    seeds: [],
+    claim(text) {
+      return CONNECTED.test(text) ? "asked if we are online" : undefined;
     },
   },
   {
@@ -154,6 +187,16 @@ export const ROUTES: Route[] = [
     claim(text) {
       const command = sourceCommand(text);
       return command ? `asked to ${command.kind === "open" ? "open" : command.kind === "find" ? "search" : command.kind === "commit" ? "commit" : "read the git " + command.kind + " of"} my source` : undefined;
+    },
+  },
+  {
+    // The search engine, on Arcanus's own file system: "search your files for lore", "find the file named self.md".
+    // Before device and web, so "find X in my files" is never an app or a web search.
+    route: "files",
+    description: "Asks Arcanus to find words or a file in its own files, notes and source",
+    seeds: [],
+    claim(text) {
+      return fileSearch(text) ? "asked to search my files" : undefined;
     },
   },
   {
@@ -236,7 +279,7 @@ export async function decide(memory: Hippocampus, text: string, routes: Route[] 
   let route = claim?.route ?? (voted.label && voted.confidence >= SURE ? voted.label : "chat");
   // Seeds hold numbers ("what is 12 * 7"), so any "12" votes math. Math with nothing to compute is chat.
   if (route === "math" && !findExpression(text)) route = "chat";
-  if ((route === "device" || route === "source" || route === "location") && !claim) route = "chat";
+  if ((route === "device" || route === "source" || route === "location" || route === "connection" || route === "files") && !claim) route = "chat";
   const unmatched = !voted.neighbors.length;
   const aboutSelf = route === "chat" && TO_YOU.test(text) && (unmatched || (voted.distribution.about ?? 0) >= SELF_SHARE);
   return { route, claimed: claim?.why, label: voted.label, confidence: voted.confidence, aboutSelf, neighbors: voted.neighbors };

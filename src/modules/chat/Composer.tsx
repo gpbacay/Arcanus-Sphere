@@ -104,7 +104,7 @@ export function Composer() {
           ref={inputRef}
           value={draft}
           maxLength={MAX}
-          rows={2}
+          rows={1}
           placeholder={!on ? "Arcanus is off · type /run to start it" : !talking ? "Message Arcanus, or / for commands" : hearing ? partial || "Hearing you… I'll answer when you pause" : writing ? partial || "Writing down what you said…" : "Listening… just talk, or talk over Arcanus to interrupt"}
           aria-label="Message Arcanus or type a command"
           onChange={(e) => {

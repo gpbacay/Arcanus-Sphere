@@ -4,16 +4,16 @@
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { Hippocampus } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
-import { KNOWLEDGE } from "./knowledge";
+import { connectionNote, KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, featuresReply, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
 import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
 import { deviceCommand, openApp, operate } from "@/modules/device";
-import { sourceAction, sourceCommand } from "@/modules/workspace";
+import { lore, searchFiles, shortPath, sourceAction, sourceCommand } from "@/modules/workspace";
 import { coordinates, gps, noFixReason, whereabouts } from "@/modules/location";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
 import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
-import { ASK_WEB, ROUTES, type Route } from "./routes";
+import { ASK_WEB, fileSearch, ORIGIN, ROUTES, type Route } from "./routes";
 import { calculate, findExpression, tellTime, zoneFor } from "./tools";
 
 /**
@@ -48,6 +48,22 @@ export function selfNotes(text: string) {
 
 const route = (name: string) => ROUTES.find((r) => r.route === name)!;
 
+/** The search engine on my files, said as a reply: how many files hold it, and where. Composed from the results. */
+async function findInFiles(query: string, label: string): Promise<Outcome & { found: number }> {
+  try {
+    const { files, matches } = await searchFiles(query);
+    if (!files.length) return { found: 0, step: { label, description: query, results: ["nothing found"] }, reply: `"${query}" isn't anywhere in my files.` };
+    const top = files.slice(0, 3).map((f) => shortPath(f.path) + (f.lines[0] ? ` (line ${f.lines[0].line})` : ""));
+    return {
+      found: files.length,
+      step: { label, description: `the search engine · ${query}`, results: files.slice(0, 6).map((f) => `${shortPath(f.path)} · ${f.lines.length || "name"}`) },
+      reply: `"${query}" is in ${files.length} ${files.length === 1 ? "file" : "files"}${matches > files.length ? `, ${matches} matches` : ""}: ${top.join(", ")}${files.length > 3 ? ", and more" : ""}. The search engine pane shows them all.`,
+    };
+  } catch (err) {
+    return { found: 0, step: { label, description: errorText(err) }, reply: `I couldn't search my files: ${errorText(err)}` };
+  }
+}
+
 // "What can you do", "what are your features", "what can Arcanus do": answered from the harness's own list.
 const FEATURES = /\bwhat (?:can|could) (?:you|arcanus) do\b|\b(?:your|arcanus'?s?) (?:features|abilities|capabilities|skills)\b|\b(?:features|abilities|capabilities) of (?:you|arcanus)\b/i;
 
@@ -69,19 +85,34 @@ export const SKILLS: Skill[] = [
   },
   {
     ...route("about"),
-    run(text) {
+    async run(text) {
       if (FEATURES.test(text)) return { step: { label: "My abilities", description: "From the harness, not the language model" }, reply: featuresReply };
-      // Who made Arcanus is a fact for SmolLM2 to phrase. A fixed line here is what it used to say every time.
-      if (/\b(who (made|created|built|designed) you|your creator|who(?:'s| is) (?:your )?(?:creator|maker|gianne))\b/i.test(text)) {
+      // Who made Arcanus, where it comes from and why it is called Arcanus: facts for SmolLM2 to phrase, from lore.md
+      // in its own files (so editing that file changes the answer), or the built-in notes when the file is gone.
+      if (ORIGIN.test(text)) {
+        // One section, the one that answers: "why are you called Arcanus" reads "my name", anything else "my origin".
+        const sections = await lore().catch((): Record<string, string> => ({}));
+        const heading = /\b(?:name|named|called|mean|arcane)\b/i.test(text) ? "my name" : "my origin";
+        const told = sections[heading] ?? Object.values(sections)[0];
+        if (told) return { step: { label: "Recalled my lore", description: ".arcanus/lore.md", results: [heading in sections ? heading : "the first section"] }, facts: [told] };
         const about = KNOWLEDGE.filter((k) => k.id === "creator" || k.id === "origin");
         return { step: { label: "Recalled from memory", results: about.map((k) => k.title) }, facts: about.map((k) => k.content) };
       }
       const notes = selfNotes(text);
-      if (!notes.length) return null;
-      const step = { label: "Recalled from memory", results: notes.map((k) => k.title) };
+      // "Do you work offline": what it can do, and whether it is online now.
+      const live = /\b(?:online|offline|internet|connection|wi-?fi)\b/i.test(text) ? [connectionNote(navigator.onLine)] : [];
+      if (!notes.length && !live.length) return null;
+      const step = { label: "Recalled from memory", results: [...notes.map((k) => k.title), ...(live.length ? [navigator.onLine ? "online now" : "offline now"] : [])] };
       // Who it is stays a fixed introduction. Anything else, including who made it, is written by SmolLM2.
       if (/\b(who are you|what are you|introduce yourself)\b/i.test(text)) return { step, reply: introduction };
-      return { step, facts: notes.map((k) => k.content) };
+      return { step, facts: [...live, ...notes.map((k) => k.content)] };
+    },
+  },
+  {
+    ...route("connection"),
+    run() {
+      const online = navigator.onLine;
+      return { step: { label: online ? "Online" : "Offline", description: "This device's connection, from the browser, right now" }, facts: [connectionNote(online)] };
     },
   },
   {
@@ -143,6 +174,13 @@ export const SKILLS: Skill[] = [
     },
   },
   {
+    ...route("files"),
+    async run(text) {
+      const query = fileSearch(text);
+      return query ? findInFiles(query, "Searched my files") : null;
+    },
+  },
+  {
     ...route("device"),
     async run(text) {
       const command = deviceCommand(text);
@@ -164,6 +202,13 @@ export const SKILLS: Skill[] = [
       const arc = await chooseTool(text, offered, fallback ? { [fallback.name]: 1 } : undefined);
       const call = mergeCall(arc, fallback) ?? { name: "search_web" as const, arguments: { query: text.replace(ASK_WEB, "").trim() || text } };
       const by = arc?.name === call.name ? "ARC 1" : "the command";
+      // Offline, a web search becomes a search of my own files: the search engine's other half, always there.
+      if (call.name === "search_web" && !navigator.onLine) {
+        const query = call.arguments.query?.trim() || text;
+        const found = await findInFiles(query, "Offline, so I searched my files");
+        if (found.found) return { step: found.step, reply: `I'm offline, so I searched my files instead. ${found.reply}` };
+        return { step: found.step, facts: [connectionNote(false)] };
+      }
       try {
         if (call.name === "open_browser") {
           // "open notepad": an installed app of exactly that name comes before a website.
@@ -195,6 +240,8 @@ export const SKILLS: Skill[] = [
           source: `Web search results for "${query}"`,
         };
       } catch (err) {
+        // Offline, the reason is the connection, and Arcanus says so in its own words.
+        if (!navigator.onLine) return { step: { label: "Offline", description: `The web needs a connection · ${errorText(err)}` }, facts: [connectionNote(false)] };
         return { step: { label: "Web", description: errorText(err) }, reply: `I couldn't reach that: ${errorText(err)}` };
       }
     },

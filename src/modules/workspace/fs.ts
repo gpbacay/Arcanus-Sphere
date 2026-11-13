@@ -11,9 +11,9 @@
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
 // .arcanus/source is not in either: it is mounted from the server Arcanus runs from, at localhost only, so the same
 // list, read, write, rename and remove work on the code that is running.
-// ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Files pane.
+// ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in Arcanus OS.
 import { scopedHome, scopedKey } from "@/modules/account";
-import { parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
+import { BUILT_IN_GUARDRAILS, parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
 import { kept } from "@/shared/idb";
 import { Store, errorText } from "@/shared/store";
 import { connectSource, source, sourceFs, sourceGit } from "./source";
@@ -31,6 +31,8 @@ export type Skill = SkillFile & { path: string };
 export const HOME = ".arcanus";
 /** Where Arcanus's own source code is mounted. */
 export const SOURCE = `${HOME}/source`;
+/** Arcanus's guardrails: built-in.md (the ones in its code) and rules.md (yours, read before every reply). */
+export const GUARDRAILS = `${HOME}/guardrails`;
 const MAX_READ = 2_000_000;
 
 export const workspace = new Store({
@@ -233,6 +235,16 @@ const ARCANUS_MD = `<!-- ARCANUS.md: your standing instructions. Arcanus reads t
      Good lines say who you are, how you want answers to sound, and what to avoid. Keep the file short: the model
      is small, and every line you add slows each reply a little. Comments like this one are never sent. -->
 `;
+const RULES_MD = `<!-- guardrails/rules.md: guardrails you add. Arcanus reads them before every reply, typed or spoken, ahead of
+     ARCANUS.md, and must never break them. Write plain lines below this comment, one rule per line. For example:
+
+       Never give medical, legal or financial advice; suggest asking an expert.
+       Never repeat a password, a card number or an address back.
+       Keep every reply suitable for children.
+
+     The guardrails already in Arcanus's code are in built-in.md, beside this file. Keep this file short: the model is
+     small, and every line you add slows each reply a little. Comments like this one are never sent. -->
+`;
 const EXAMPLE_SKILL = `---
 name: eli5
 description: Explain a topic simply, as if to a five-year-old
@@ -240,6 +252,27 @@ description: Explain a topic simply, as if to a five-year-old
 <!-- A skill. Run it with /eli5 <topic>. The lines below are the model's instructions while it runs. -->
 Explain the topic in three short sentences a five-year-old would understand. Use one everyday comparison. No jargon.
 `;
+
+/** lore.md: where Arcanus comes from and why it is called Arcanus, in its own voice. Read when asked (brain, about):
+ *  only the section that answers the question, since a small model given all of it answered none of it. */
+const LORE_MD = `<!-- lore.md: my origin and my name, in my own words. I read the section that answers what you asked: "# My name"
+     for why I am called Arcanus, "# My origin" for who made me and why. Editing it changes what I say. Write as me
+     ("I", "my"), and put the answer in the first sentence of each section: a small model uses that one most.
+     Comments like this one are never read. -->
+# My name
+
+I am named Arcanus after ARCANE, the neuromimetic AI library Gianne Bacay built. He wanted an AI that puts ARCANE to work, so he made me and named me after it. Arcanus is ARCANE made live.
+
+# My origin
+
+Gianne Bacay created me in the year 2025. He first built ARCANE, his neuromimetic AI library, which works the way a brain does. He wanted an AI that puts ARCANE to work, so he made me, and every conversation with me tests it.
+
+# My form
+
+I live in your browser as a glowing gold sphere, and I run on your device. I talk with you voice to voice, in real time, and I was made to step into the real world through augmented, virtual and mixed reality.
+`;
+/** The lore.md seeded before sections were picked by the question: replaced, since its pronoun rule was read back. */
+const LORE_BEFORE = "Gianne Bacay created me in the year 2025. He is a man: he and him, never she or her.";
 
 /** What self.md said about the source before it was in Arcanus's files, and what it says now. */
 const SELF_SOURCE_BEFORE = "I am a Next.js app. Open that project folder from this pane to read and edit the code that is running, then reload.";
@@ -259,7 +292,9 @@ Hippocampus decides what a message needs. SmolLM2 writes the reply. Paradee spea
 This pane is my file manager and my editor. My own files live in .arcanus/:
 
 - ARCANUS.md — standing instructions, read before every reply
+- guardrails/ — my guardrails: built-in.md, the ones in my code, and rules.md, yours
 - self.md — this file
+- lore.md — my origin and my name, read when you ask about them
 - skills/ — run with /name
 - memory/ — notes I recall
 - knowledge/ — books I answer from
@@ -292,7 +327,12 @@ async function setUp() {
   if (self === null || self.startsWith("I am Arcanus, a local assistant Gianne Bacay made in 2025. I live in this browser")) await write(`${HOME}/self.md`, SELF_MD);
   // A self.md from before the source was in these files still says to open the project folder. Only that sentence changes.
   else if (self.includes(SELF_SOURCE_BEFORE)) await write(`${HOME}/self.md`, self.replace(SELF_SOURCE_BEFORE, SELF_SOURCE));
+  const told = await read(`${HOME}/lore.md`);
+  if (told === null || told.includes(LORE_BEFORE)) await write(`${HOME}/lore.md`, LORE_MD);
   for (const dir of ["memory", "artifacts", "knowledge"]) await makeFolder(`${HOME}/${dir}`);
+  if ((await read(`${GUARDRAILS}/rules.md`)) === null) await write(`${GUARDRAILS}/rules.md`, RULES_MD);
+  // built-in.md says what the code enforces, so it is rewritten whenever the code says something else.
+  if ((await read(`${GUARDRAILS}/built-in.md`)) !== BUILT_IN_GUARDRAILS) await write(`${GUARDRAILS}/built-in.md`, BUILT_IN_GUARDRAILS);
   const skills = await list(`${HOME}/skills`).catch(() => null);
   if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);
 }
@@ -316,6 +356,20 @@ function changed() {
 
 /** ARCANUS.md without its comments: empty when there are no instructions. */
 export const instructions = async () => stripComments((await read(`${HOME}/ARCANUS.md`).catch(() => null)) ?? "");
+/** guardrails/rules.md without its comments: empty when you have added none. */
+export const guardrails = async () => stripComments((await read(`${GUARDRAILS}/rules.md`).catch(() => null)) ?? "");
+
+/** lore.md's sections, by heading ("my name" -> its text, on one line). Empty when the file is missing or blank. */
+export async function lore(): Promise<Record<string, string>> {
+  const text = stripComments((await read(`${HOME}/lore.md`).catch(() => null)) ?? "");
+  const sections: Record<string, string> = {};
+  for (const part of text.split(/^#+\s*/m)) {
+    const [head, ...body] = part.split("\n");
+    const said = body.join(" ").replace(/\s+/g, " ").trim();
+    if (head.trim() && said) sections[head.trim().toLowerCase()] = said;
+  }
+  return sections;
+}
 
 /** Every note in .arcanus/memory. */
 export async function memories(): Promise<{ id: string; text: string }[]> {

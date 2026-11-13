@@ -5,9 +5,9 @@
 // is a single action you asked for; Arcanus never chains them on its own.
 // The language model is not in here. SmolLM2 is far too small to write working code, so Arcanus edits its code with
 // exact text: yours in the editor, or /write and /replace. Add a model-written edit when a model that can code is on board.
-import { pin } from "@/shared/pane";
+import { chatLine, pin } from "@/shared/pane";
 import { words, type SourceCommand } from "./command";
-import { HOME, SOURCE, expand, git, list, makeFolder, read, remove, rename, write } from "./fs";
+import { GUARDRAILS, HOME, SOURCE, expand, git, list, makeFolder, read, remove, rename, write } from "./fs";
 import { closeTab, ide, openDir, openFile } from "./ide";
 import { searchSource, source, sourceFiles, sourceGit } from "./source";
 
@@ -51,7 +51,7 @@ export function fileCommand(name: string, arg: string): (() => Promise<string>) 
       return async () => {
         needSource();
         openDir(SOURCE);
-        return `${await summary()} It is open in Files, at ${SOURCE}/.`;
+        return `${await summary()} It is open in Arcanus OS, at ${SOURCE}/.`;
       };
     case "/ls":
       return async () => (await list(path)).map((e) => (e.kind === "directory" ? `${e.name}/` : e.name)).join("\n") || "That folder is empty.";
@@ -102,7 +102,7 @@ export function fileCommand(name: string, arg: string): (() => Promise<string>) 
     case "/rm":
       if (!first) return usage("/rm <path> deletes a file or folder.");
       return async () => {
-        if (path === HOME || path === SOURCE) throw new Error(`${path} is where I live. I won't delete all of it.`);
+        if (path === HOME || path === SOURCE || path === GUARDRAILS) throw new Error(`${path} is part of me. I won't delete all of it.`);
         await remove(path);
         closeTab(path);
         return `Deleted ${path}.${path.startsWith(`${SOURCE}/`) ? " If git tracked it, /git restore brings it back." : ""}`;
@@ -127,6 +127,18 @@ export function fileCommand(name: string, arg: string): (() => Promise<string>) 
   }
 }
 
+/** A line typed in Arcanus OS's terminal. A file command ("ls", "/git status", "find word") runs here and its answer is
+ *  returned; anything else (a skill, /remember, words) goes to the chat as if typed there. */
+export async function runLine(typed: string): Promise<string> {
+  const line = typed.trim();
+  const first = (line.match(/^\S+/)?.[0] ?? "").toLowerCase();
+  const name = first.startsWith("/") ? first : `/${first}`;
+  if (name === "/help") return `${FILE_COMMANDS.map((c) => `${c.name.slice(1).padEnd(8)} ${c.hint}`).join("\n")}\nAnything else (a /skill, /remember, words) goes to the chat.`;
+  const run = fileCommand(name, line.slice(first.length).trim());
+  if (run) return run();
+  return chatLine.send(line) ? "Sent to the chat." : "The chat didn't take it: it is still answering, or not open yet.";
+}
+
 /** What Arcanus does, and says, when a message asks for its source in plain words. */
 export async function sourceAction(command: SourceCommand): Promise<{ label: string; reply: string; results?: string[] }> {
   if (!source.state.available) return { label: "My source isn't here", reply: NO_SOURCE };
@@ -134,7 +146,7 @@ export async function sourceAction(command: SourceCommand): Promise<{ label: str
     case "open": {
       if (!command.path) {
         openDir(SOURCE);
-        return { label: "Opened my source", reply: `${await summary()} I opened it in Files.` };
+        return { label: "Opened my source", reply: `${await summary()} I opened it in Arcanus OS.` };
       }
       // A path in my files as it is; otherwise the source file of that name, wherever it is.
       const wanted = command.path;

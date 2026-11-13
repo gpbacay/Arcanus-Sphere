@@ -3,4 +3,5 @@ export { brainEngine, recallNotes, routeNames, teach, think, type Plan } from ".
 export { recallPassages } from "./library";
 export { asksForFact, lookupQuery } from "./shelf";
 export { grounding } from "./ground";
+export { searchIntent } from "./arc1";
 export type { Outcome } from "./skills";

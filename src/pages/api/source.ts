@@ -5,7 +5,7 @@
 //   POST /api/source { op: "read", path }     -> { text }          (404 when it isn't there)
 //   POST /api/source { op: "write", path, text } | { op: "mkdir", path } | { op: "remove", path } | { op: "rename", path, to }
 //   POST /api/source { op: "files" }          -> { files }         (every file git tracks or would track)
-//   POST /api/source { op: "search", query }  -> { hits }          (git grep)
+//   POST /api/source { op: "search", query, matchCase?, wholeWord?, regex?, limit? } -> { hits, more } (git grep)
 //   POST /api/source { op: "git", args }      -> { out, code }     (one git command, see gitArgs)
 //
 // Like /api/device it is a pages/ route that answers only this machine (shared/loopback.ts). Paths never leave the
@@ -56,7 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.json({ name: path.basename(ROOT), branch: branch.code ? "" : branch.out });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST." });
-    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; query?: unknown; args?: unknown };
+    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; query?: unknown; args?: unknown; matchCase?: unknown; wholeWord?: unknown; regex?: unknown; limit?: unknown };
     switch (body.op) {
       case "list": {
         const found = await fs.readdir(at(body.path ?? ""), { withFileTypes: true });
@@ -100,15 +100,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       case "search": {
         if (typeof body.query !== "string" || !body.query.trim()) throw new Error("Words to search for are needed.");
-        // git grep: tracked and untracked files, never ignored ones; -I skips binaries, -F reads the words as they are.
-        const found = await git(["grep", "-n", "-I", "-i", "-F", "--untracked", "-e", body.query.trim()]);
+        // git grep: tracked and untracked files, never ignored ones; -I skips binaries. The search engine's options:
+        // -F reads the words as they are unless `regex` (then -P, Perl's patterns, like the browser's), -i unless
+        // `matchCase`, -w for `wholeWord`.
+        const flags = [body.matchCase ? "" : "-i", body.wholeWord ? "-w" : "", body.regex ? "-P" : "-F"].filter(Boolean);
+        const found = await git(["grep", "-n", "-I", ...flags, "--untracked", "-e", body.regex ? body.query : body.query.trim()]);
         if (found.code > 1) throw new Error(found.out);
+        const limit = Math.min(Math.max(Number(body.limit) || MAX_HITS, 1), 2000);
         // A file with Windows line endings keeps its \r in what git prints, and "." never matches one.
         const hits = found.out.split(/\r?\n/).flatMap((line) => {
           const m = line.match(/^(.+?):(\d+):(.*)$/);
           return m ? [{ path: m[1], line: Number(m[2]), text: m[3].trim().slice(0, 200) }] : [];
         });
-        return res.json({ hits: hits.slice(0, MAX_HITS), more: hits.length > MAX_HITS });
+        return res.json({ hits: hits.slice(0, limit), more: hits.length > limit });
       }
       case "git":
         return res.json(await git(gitArgs(body.args)));

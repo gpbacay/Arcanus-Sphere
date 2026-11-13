@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, asSelf, assemble, callTool, featuresReply, greeting, identityBrief, introduction, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
+import { addressed, answersCall, argsFor, asSelf, assemble, BUILT_IN_GUARDRAILS, callTool, stripComments, featuresReply, greeting, identityBrief, introduction, keepPronouns, keepYears, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -51,6 +51,31 @@ const day = 24 * 3600_000;
 assert.equal(greeting({ when: "Monday morning", name: "Gianne", last: { title: "Black holes.", at: 0 }, now: day }, () => 0), 'Good morning, Gianne. Last time it was "Black holes". Shall we go on, or start something new?');
 assert.match(greeting({ when: "Monday morning", last: { title: "Black holes", at: 0 }, now: 8 * day }, () => 0), /I'm Arcanus/);
 
+// A year miscopied from the facts is put back; a year the facts don't come near is left alone.
+const made = ["Gianne Bacay created me in the year 2025."];
+assert.equal(keepYears("I was created in 2015 by Gianne Bacay.", made), "I was created in 2025 by Gianne Bacay.");
+assert.equal(keepYears("I was made in 2025.", made), "I was made in 2025.");
+assert.equal(keepYears("The war ended in 1945.", made), "The war ended in 1945.");
+assert.equal(keepYears("Made in 2015.", []), "Made in 2015.");
+
+// The facts' "he" is kept when the model writes "she"; facts that say she, or no pronoun at all, change nothing.
+const his = ["Gianne Bacay created me. He first built ARCANE."];
+assert.equal(keepPronouns("She first built ARCANE, and her library works like a brain.", his), "He first built ARCANE, and his library works like a brain.");
+assert.equal(keepPronouns("I thank her for it. She made me herself.", his), "I thank him for it. He made me himself.");
+assert.equal(keepPronouns("She was kind.", ["Ada wrote it. She was first."]), "She was kind.");
+assert.equal(keepPronouns("She left.", ["The time is 3:42 PM."]), "She left.");
+
+// Called by name: a call alone, a call with a request (the name comes off), and talk about Arcanus (not a call).
+for (const call of ["hey arcanus", "Hey Arcanus!", "Arcanus?", "Okay Arcanus.", "arkanus", "excuse me, Arcanus"]) assert.deepEqual(addressed(call), { called: true, rest: "" }, call);
+assert.deepEqual(addressed("Hey Arcanus, what time is it?"), { called: true, rest: "what time is it?" });
+assert.deepEqual(addressed("what time is it, Arcanus?"), { called: true, rest: "what time is it" });
+assert.deepEqual(addressed("thanks arcanus"), { called: true, rest: "thanks" });
+for (const about of ["what is Arcanus", "who made arcanus", "Arcanus is cool", "tell me about the Arcanus Sphere"]) assert.equal(addressed(about).called, false, about);
+// What SmolLM2 wrote for a call (sampled, llm reply.eval-style run): kept when it says it is here, else written again.
+assert.equal(answersCall("Yes, I am listening. How can I help you today?"), "Yes, I am listening.");
+assert.equal(answersCall("I'm here."), "I'm here.");
+for (const drift of ["I'm listening to a podcast.", "No, I'm not here.", "I'm sorry for the misunderstanding.", "I'm glad you're not. I just wanted to say", "Yes, no"]) assert.equal(answersCall(drift), "", drift);
+
 // Live voice: each prompt is the last one plus the new turn, so SmolLM2's cache covers all but the new words.
 const talked = (n: number) => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? ("assistant" as const) : ("user" as const), content: `turn ${i}` }));
 const before = liveTurns(talked(4), "and then?").turns;
@@ -83,4 +108,7 @@ assert.equal(matchTool("please echo this")?.name, "echo");
 assert.equal(matchTool("what time is it"), undefined);
 assert.equal(await callTool("echo", "hello"), "HELLO");
 assert.match(await callTool("missing", "x"), /No tool/);
+// guardrails/built-in.md says what the code enforces: the identity and answer rules themselves, and its comment never reaches the model.
+assert.ok(BUILT_IN_GUARDRAILS.includes(identityBrief) && BUILT_IN_GUARDRAILS.includes(ONLY_ASKED));
+assert.ok(stripComments(BUILT_IN_GUARDRAILS).startsWith("# My guardrails"));
 console.log("harness ok");

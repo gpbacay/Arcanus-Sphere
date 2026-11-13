@@ -149,7 +149,7 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
         // The reasoning is its own block, apart from the response, and a screen reader skips it: only the response is read.
         <div className={message.kind === "command" ? "msg-trace" : "msg-trace msg-reasoning"} aria-live="off">
           <ChainOfThoughtTrace
-            label={message.kind === "command" ? `Models · ${modelCount(message.trace)}` : `Reasoning · ${message.trace.length} steps`}
+            label={message.kind === "command" ? `Models · ${modelCount(message.trace)}` : message.ms !== undefined ? `Thought ${thoughtFor(message.ms)}` : "Thought"}
             steps={message.trace}
           />
         </div>
@@ -207,6 +207,12 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
   );
 }
 
+/** "17s", "2m 5s": how long a reply took, as its reasoning's label says it. */
+const thoughtFor = (ms: number) => {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+};
+
 const modelCount = (steps: ThoughtStep[]) => {
   const ready = steps.filter((s) => s.results?.[0] === "ready" || s.results?.[0] === "WebGPU").length;
   const failed = steps.filter((s) => s.results?.[0] === "failed").length;
@@ -239,11 +245,10 @@ function BootTrace({ id, saved }: { id: string; saved?: ThoughtStep[] }) {
 function LiveReply({ chatId }: { chatId: string }) {
   const reply = useStore(live, (s) => s.reply);
   if (!reply || reply.chatId !== chatId) return null;
-  const doing = reply.trace.findLast((s) => s.status === "active");
   return (
     <article className="msg" data-role="assistant" aria-busy="true">
       <div className="msg-trace msg-reasoning" aria-live="off">
-        <ChainOfThoughtTrace label={`Reasoning${doing ? ` · ${doing.description ?? doing.label}` : ""}`} steps={reply.trace} thinking />
+        <ChainOfThoughtTrace label="Thinking" steps={reply.trace} thinking />
       </div>
       {reply.text ? (
         <div className="msg-bubble md">
