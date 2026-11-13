@@ -1,5 +1,8 @@
 // Arcanus's live Graph of Thought: what it perceives, recalls, decides, writes, checks and says, as it happens, across
 // the whole session. The chat's chain of thought explains one reply after the fact; this is the mind running.
+// This is the reasoning, and the reply is not in it: a thought says what was done ("Wrote the reply"), and the reply's
+// own words belong to the chat and the voice. So the reasoning and the response are two displays, and only the
+// response is read aloud.
 //
 // Thoughts follow ARCANE's Graph of Thought (gpbacay_arcane/got.py): each is a vertex with an id ("t12"), an
 // operation and its content, and its `parents` are its edges. ARCANE's operations are used where Arcanus really does

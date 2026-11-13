@@ -146,9 +146,10 @@ function Message({ message, quote, editing, busy, canRetry }: { message: Msg; qu
       {message.kind === "boot" ? (
         <BootTrace id={message.id} saved={message.trace} />
       ) : message.role === "assistant" && message.trace?.length ? (
-        <div className="msg-trace">
+        // The reasoning is its own block, apart from the response, and a screen reader skips it: only the response is read.
+        <div className={message.kind === "command" ? "msg-trace" : "msg-trace msg-reasoning"} aria-live="off">
           <ChainOfThoughtTrace
-            label={message.kind === "command" ? `Models · ${modelCount(message.trace)}` : `How Arcanus decided · ${message.trace.length} steps`}
+            label={message.kind === "command" ? `Models · ${modelCount(message.trace)}` : `Reasoning · ${message.trace.length} steps`}
             steps={message.trace}
           />
         </div>
@@ -220,7 +221,7 @@ function BootTrace({ id, saved }: { id: string; saved?: ThoughtStep[] }) {
   const loading = steps !== null;
   const done = shown.filter((s) => !s.status).length;
   return (
-    <div className="msg-trace">
+    <div className="msg-trace" aria-live="off">
       <ChainOfThoughtTrace
         label={loading ? `Initializing Arcanus · ${done}/${shown.length} models` : `Boot log · ${modelCount(shown)}`}
         steps={shown}
@@ -231,14 +232,18 @@ function BootTrace({ id, saved }: { id: string; saved?: ThoughtStep[] }) {
   );
 }
 
-/** The reply being written. The only part of the thread that re-renders per token. */
+/**
+ * The reply being written. The only part of the thread that re-renders per token. The reasoning so far is one line
+ * naming what Arcanus is doing, closed unless you open it, so it never pushes the response down as it is written.
+ */
 function LiveReply({ chatId }: { chatId: string }) {
   const reply = useStore(live, (s) => s.reply);
   if (!reply || reply.chatId !== chatId) return null;
+  const doing = reply.trace.findLast((s) => s.status === "active");
   return (
     <article className="msg" data-role="assistant" aria-busy="true">
-      <div className="msg-trace">
-        <ChainOfThoughtTrace label="Arcanus is thinking" steps={reply.trace} thinking open />
+      <div className="msg-trace msg-reasoning" aria-live="off">
+        <ChainOfThoughtTrace label={`Reasoning${doing ? ` · ${doing.description ?? doing.label}` : ""}`} steps={reply.trace} thinking />
       </div>
       {reply.text ? (
         <div className="msg-bubble md">

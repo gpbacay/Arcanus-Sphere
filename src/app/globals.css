@@ -639,6 +639,16 @@ textarea.field {
   border: 1px solid rgba(150, 215, 245, 0.14);
 }
 
+/* The reasoning behind a reply, apart from the response: a quiet note beside a rule, so the boxed text under it is the
+   response and nothing else. */
+.msg-trace.msg-reasoning {
+  margin-bottom: 6px;
+  padding: 1px 0 1px 9px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line-strong);
+}
+
 .msg-quote {
   margin: 0;
   padding-left: 8px;

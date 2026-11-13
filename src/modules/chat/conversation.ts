@@ -27,16 +27,12 @@ const busy = () => live.state.reply !== null || !power.state.on;
 
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
 const VOICE_TOKENS = 48; // a sentence or two. The first clause is spoken as soon as it is written, so the cap only bounds the end.
-const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
-const FILLERS = ["Let me think.", "Hmm, let me see.", "One moment."]; // two words or more, so isEcho can tell them from you
 const NO_MODEL =
   "My language model couldn't load on this device, so I can't write that reply right now. I can still tell the time, do math and answer questions about myself. Try again once SmolLM2 shows ready.";
 
 let gen = 0;
 /** Set by talk() around send(): the message about to be answered was spoken, not typed. */
 let viaVoice = false;
-/** The filler Arcanus last said while thinking, so its own echo isn't mistaken for you (see talk()). */
-let fillerLine = "";
 
 // ------------------------------------------------------------------ context
 // What the model reads besides the message, most important first, fitted into a character budget (harness assemble):
@@ -280,7 +276,7 @@ function speakGreeting() {
   if (!greeting || !power.state.on || voice.state.state.off || !stageShown() || !voice.state.state.analyser) return;
   silence();
   sayAll(greeting.line);
-  voiced(greeting.said, greeting.line)();
+  voiced(greeting.said, "Speaking the greeting")();
 }
 
 function onPointer() {
@@ -332,13 +328,13 @@ export function greet(list = engines) {
   watchBoot(chat.id, intro.id);
   // The Graph of Thought: what the greeting rests on, then the greeting, then the voice.
   const known = thought("retrieve", "Who you are, and when it is", { parents: [wakeId], detail: "what the greeting is made from", results: [...(name ? [name] : []), when] });
-  const said = thought("generate", line, { parents: [known], detail: "composed from those facts · no language model, so no wait" });
+  const said = thought("generate", "Composed the greeting", { parents: [known], detail: "from those facts · no language model, so no wait" });
   if (voice.state.state.off) return;
   pending = { line, said };
   warmAll(line); // written now, while the page loads, so it is spoken the moment the page appears
   // Without a tap the browser plays nothing: the greeting waits for one, and the Graph of Thought says so.
   if (!voice.state.state.analyser) {
-    thought("speak", line, { parents: [said], detail: "waiting for a tap to unlock audio" });
+    thought("speak", "Speaking the greeting", { parents: [said], detail: "waiting for a tap to unlock audio" });
     watchGesture();
   }
   unstage = whenShown(speakGreeting);
@@ -356,8 +352,6 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   interrupted(); // whatever was still running belonged to the reply this one replaces
   const spoken = viaVoice;
   viaVoice = false;
-  fillerLine = "";
-  let filler: ReturnType<typeof setTimeout> | undefined;
   const mine = ++gen;
   const stale = () => mine !== gen;
   const show = (trace: ThoughtStep[], text = "") => !stale() && live.set({ reply: { chatId, trace, text } });
@@ -396,7 +390,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     }
     if (stale()) return;
     if (plan.reply) {
-      const said = thought("generate", plan.reply, { parents: [decision], detail: "answered without the language model" });
+      const said = thought("generate", "Wrote the reply", { parents: [decision], detail: "answered without the language model" });
       sayAll(plan.reply);
       voiced(said)();
       finish(plan.reply, trace);
@@ -410,7 +404,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       if (stale()) return;
       if (passages[0]) {
         const line = `${spokenLine(passages[0].text)} (${passages[0].book})`;
-        const said = thought("generate", line, { parents: [decision], detail: "the passage that answers it" });
+        const said = thought("generate", "Quoted a passage from your books", { parents: [decision], detail: passages[0].book });
         sayAll(line);
         voiced(said)();
         finish(line, [...trace, { label: "From your books", description: passages[0].book }]);
@@ -422,7 +416,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     // A note about Arcanus, including who made it, is written by SmolLM2.
     if (!skill && plan.source && plan.facts?.length) {
       const line = spokenLine(plan.facts[0]);
-      const said = thought("generate", line, { parents: [decision], detail: "spoken from the result" });
+      const said = thought("generate", "Spoke the result as it is", { parents: [decision], detail: "not rewritten by the language model" });
       sayAll(line);
       voiced(said)();
       finish(line, [...trace, { label: plan.source ?? "ARC 1", description: plan.source ? "Answered from the result, not rewritten" : "Spoke the note that answers it" }]);
@@ -432,19 +426,13 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     // An open question in live voice is the only time SmolLM2 is called, and only for a sentence or two, from a
     // context built so it reads almost nothing new (buildLive).
     const liveCall = spoken && !skill;
-    if (spoken && !voice.state.state.off && voice.state.state.analyser)
-      filler = setTimeout(() => {
-        if (stale() || voice.state.state.speaking) return;
-        fillerLine = FILLERS[Math.floor(Math.random() * FILLERS.length)];
-        voice.say(fillerLine);
-      }, FILLER_MS);
     const built = liveCall ? await buildLive(prior, user, plan, decision) : await buildTurns(prior, user, plan, skill, decision);
     if (stale()) return;
     if (built.step) trace = [...trace, built.step];
     const writing = (description: string): ThoughtStep => ({ label: liveCall ? "SmolLM2 · spoken" : "SmolLM2", description, status: "active" });
     const ready = llm.state.state.status === "ready";
     show([...trace, writing(ready ? "Writing on this device" : "Waiting for the model to load on this device")]);
-    const generating = thought("generate", "", {
+    const generating = thought("generate", "Writing the reply", {
       parents: [built.context],
       active: true,
       detail: ready ? "SmolLM2 is writing" : "waiting for SmolLM2 to load",
@@ -466,16 +454,13 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
           unspoken = rest;
           spoke ||= sentences.length > 0;
-          if (spoke) clearTimeout(filler);
           sentences.forEach((s) => voice.say(own(s)));
           if (sentences.length) speaking ??= voiced(generating);
-          revise(generating, { content: own(shown), detail: "SmolLM2 is writing" });
           show([...trace, writing("Writing on this device")], own(shown));
         },
         { maxNewTokens: spoken ? VOICE_TOKENS : undefined }
       );
     } catch (err) {
-      clearTimeout(filler);
       settle(generating, { failed: true, detail: errorText(err) });
       // Without SmolLM2, recalled notes are still an answer; anything else gets an honest "not now".
       // Arcanus's own notes are short enough to read out; a web page or search results are not.
@@ -488,7 +473,6 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
       ]);
       return;
     }
-    clearTimeout(filler);
     if (stale()) return;
     // A spoken reply that hit its token cap ends mid-sentence: don't say, or keep, the broken end.
     const cutOff = spoken && result.tokens >= VOICE_TOKENS;
@@ -508,7 +492,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
         };
     const grounded = built.evidence.length ? grounding(text, built.evidence) : null;
     if (grounded && grounded.score < 0.5) text = spokenLine(built.evidence[0]);
-    settle(generating, { content: text, detail: result.cached ? "an earlier reply, recalled" : wrote.description });
+    settle(generating, { content: "Wrote the reply", detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     const checked = grounded
       ? {
           label: `Checked against its sources: ${Math.round(grounded.score * 100)}% grounded`,
@@ -526,7 +510,6 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
   } catch (err) {
     // Whatever broke, the reply ends here, so Arcanus is never left stuck thinking.
     interrupted();
-    clearTimeout(filler);
     thought("execute", "Something failed", { parents: [root], detail: errorText(err) });
     finish("That didn't run. Try it once more.", [...trace, { label: "Something failed", description: errorText(err) }]);
   }
@@ -735,7 +718,7 @@ export function talk() {
   let carried = ""; // the first half, when its words arrived while you were already saying the rest
   let sent: string | null = null; // the last spoken message's id
   let tail = false; // the last thing heard is that message, or led straight on from it
-  const said = () => `${live.state.reply?.text || lastAssistant()} ${fillerLine}`;
+  const said = () => live.state.reply?.text || lastAssistant();
   const interrupt = () => {
     cancelGreet();
     voice.cancel();
