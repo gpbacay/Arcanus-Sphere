@@ -1,31 +1,33 @@
 // Run: node src/modules/mind/layout.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
 import type { Thought } from "./mind.ts";
-import { graphs, type Graph } from "./layout.ts";
+import { processes, type Step } from "./layout.ts";
 
-const T = (id: string, ...parents: string[]): Thought => ({ id, operation: "execute", content: id, parents, status: "complete", at: 0 });
-/** A graph as text: its layers, each left to right. */
-const show = (g: Graph) =>
-  Array.from({ length: g.layers }, (_, at) => g.nodes.filter((n) => n.layer === at).sort((a, b) => a.x - b.x).map((n) => n.t.id).join(" ")).join(" / ");
-const edges = (g: Graph) => g.edges.map((e) => `${e.from}>${e.to}`).join(" ");
+const T = (id: string, ...parents: string[]): Thought => ({ id, operation: id === "w" ? "wake" : "execute", content: id, parents, status: "complete", at: 0 });
+/** A rail as text: its thoughts in order, a fork in brackets, joins after a plus. */
+const show = (steps: Step[]): string =>
+  steps.map((s) => s.t.id + (s.joins.length ? `+${s.joins.join("+")}` : "") + (s.branches.length ? `[${show(s.branches)}]` : "")).join(" ");
 
-// A message: two recalls beside a step, joined into the context; generate under it; refine joins generate and context.
-const [msg] = graphs([T("m"), T("d", "m"), T("x", "d"), T("r1", "d"), T("r2", "d"), T("ctx", "d", "r1", "r2"), T("g", "ctx"), T("sp", "g"), T("ref", "g", "ctx")]);
-assert.equal(show(msg), "m / d / x r1 r2 / ctx / g / sp ref");
-assert.equal(edges(msg), "m>d d>x d>r1 d>r2 d>ctx r1>ctx r2>ctx ctx>g g>sp g>ref ctx>ref");
-// A join sits under the middle of what it joins, and a lone thought spans the whole width.
-const ctx = msg.nodes.find((n) => n.t.id === "ctx")!;
-assert.deepEqual([ctx.x, ctx.span], [0.5, 1]);
+// A boot: the models load side by side, then the greeting's train runs on down the same rail. refine joins the facts.
+const [boot] = processes([T("w"), T("l1", "w"), T("l2", "w"), T("known", "w"), T("gen", "known"), T("ref", "gen", "known"), T("say", "ref")]);
+assert.equal(show(boot.steps), "l1 l2 known gen ref+known say");
+assert.deepEqual([boot.init, boot.count, boot.root.id], [true, 7, "w"]);
 
-// Children line up under their parents: b's child sits left of c's, whichever was thought first.
-const [fork] = graphs([T("a"), T("b", "a"), T("c", "a"), T("c1", "c"), T("b1", "b")]);
-assert.equal(show(fork), "a / b c / b1 c1");
+// A message: one rail from top to bottom; the context names the recalls it joins, the check the context it joins.
+const [msg] = processes([T("m"), T("d", "m"), T("r1", "d"), T("r2", "d"), T("ctx", "d", "r1", "r2"), T("g", "ctx"), T("sp", "g"), T("ref", "g", "ctx")]);
+assert.equal(show(msg.steps), "d r1 r2 ctx+r1+r2 g sp ref+ctx");
+assert.equal(msg.init, false);
 
-// Two roots are two graphs; a parent that fell off the log makes its child a root.
-assert.deepEqual(graphs([T("a"), T("b", "gone"), T("c", "a")]).map(show), ["a / c", "b"]);
+// A thought with later siblings keeps its own children under it, as a branch.
+const [fork] = processes([T("a"), T("b", "a"), T("b1", "b"), T("c", "a")]);
+assert.equal(show(fork.steps), "b[b1] c");
 
-// An edge into another graph is left out, and the thought stays in its first parent's graph.
-const [one, two] = graphs([T("a"), T("b"), T("c", "b", "a")]);
-assert.deepEqual([show(one), show(two), edges(two)], ["a", "b / c", "b>c"]);
+// Two roots are two processes; a parent that fell off the log makes its child a root; a join from another process is still named.
+const three = processes([T("a"), T("b", "gone"), T("c", "a"), T("d", "b", "a")]);
+assert.deepEqual(three.map((p) => `${p.root.id}: ${show(p.steps)}`), ["a: c", "b: d+a"]);
+
+// Running and failed thoughts are counted for the process's heading.
+const [busy] = processes([T("a"), { ...T("b", "a"), status: "active" }, { ...T("c", "a"), status: "failed" }]);
+assert.deepEqual([busy.active, busy.failed], [1, 1]);
 
 console.log("layout.check: ok");

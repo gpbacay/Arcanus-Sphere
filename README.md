@@ -8,7 +8,7 @@ A fully local AI assistant embodied as an audio-reactive 3D sphere. Every model 
 |---|---|---|---|
 | Decide | [Hippocampus](https://gpbacay-arcane.vercel.app/docs/hippocampus) + [Occipital](https://gpbacay-arcane.vercel.app/docs/occipital) | main thread, <1 ms | Routes each message (chat, about Arcanus, personality, time, math, web, tool) by remembered phrasings, typo-tolerant; learns from `/teach` and keeps it in `.arcanus/routing.json`. Also recalls Arcanus's knowledge notes |
 | Read arguments | [ARC 1](https://gpbacay-arcane.vercel.app/docs/arc-1) (1.3M params, 5.5 MB) | main thread, ~10 ms | Reads a skill's arguments from the message's own words: the city in "what time is it in New York" |
-| Write | [SmolLM2-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct): 360M q4f16 (~270 MB) on WebGPU, 135M q4 (~180 MB) on WASM | Web Worker | Writes replies (text only) |
+| Write | [SmolLM2-135M-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct), q4 (~180 MB), or [360M](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct), q4 (~390 MB), chosen in Settings | Web Worker, multi-threaded WASM | Writes replies (text only) |
 | Speak | [Paradee-8M](https://github.com/sahilmahendrakar/paradee) v1.2, int8 (8.5 MB), British male voice `bm_fable` | Web Worker, WASM, one thread | Speaks each sentence (or long clause) as soon as it is written |
 
 Time and math are answered without the language model. A question about Arcanus that routing misses is still answered from its knowledge notes, so the model doesn't invent a self. `npm run check` measures routing on held-out messages (`src/modules/brain/routing.check.ts`): ARC 1 was taken out of the routing vote because it routed 43% right alone and made Hippocampus worse when mixed in. Every reply carries a [Chain of Thought](https://gpbacay-arcane.vercel.app/docs/chain-of-thought) trace of what Arcanus did.
@@ -20,7 +20,20 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The first visit downloads about 490 MB of models from Hugging Face with WebGPU, or about 330 MB without, which the browser caches for later visits. Without WebGPU, the models run on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use every core.
+Open [http://localhost:3000](http://localhost:3000). A browser's first visit loads about 190 MB of models (SmolLM2 180 MB, Paradee 9 MB), and Moonshine's 51 MB the first time you talk; the browser caches them for later visits. The models run on multi-threaded WebAssembly: the app sends cross-origin isolation headers (`next.config.ts`) so ONNX Runtime can use several cores.
+
+```bash
+npm run models              # optional, once: fetch the models into public/models (~250 MB, git-ignored)
+npm run models -- --large   # the larger SmolLM2 too (~390 MB more)
+```
+
+With that folder in place Arcanus serves the models itself, so a first visit loads them from your own server (at once on localhost) and needs no outside service. Without it each browser downloads them from Hugging Face. The ONNX runtime is always served by Arcanus: `npm install` copies it into `public/ort/`.
+
+## Accounts
+
+Arcanus opens on a sign-in form. Accounts are local to the browser, in the style of OpenTill's offline accounts: there is no server, signing in and signing up work with no connection, and a password is kept only as an Argon2id hash (19 MiB, 2 passes, `hash-wasm`). Each account has its own conversations and its own `.arcanus/` files, so its instructions, memory, skills, books and what Hippocampus learned shape its own Arcanus. The models are shared and start loading behind the form. The account icon on the rail changes the name Arcanus greets you by and the password, and signs out.
+
+Accounts keep people on a shared device apart. They do not encrypt anything: someone with the browser's developer tools can read every account's data.
 
 ## Files: `.arcanus/`
 
@@ -79,9 +92,9 @@ The phone's camera needs HTTPS. To try it on a phone, run `npm run dev:https` an
 
 ## Offline
 
-Arcanus is an offline-first PWA, so you can install it from the browser's address bar. After one online visit it works with no network at all.
+Arcanus is an offline-first PWA, so you can install it from the browser's address bar. After one visit it works with no network at all, and with `npm run models` even that first visit needs nothing but this server.
 
-- `public/sw.js` serves the page from cache, and refreshes it in the background when online. It also caches the app's code, the ARC 1 weights and the ONNX Runtime files.
+- `public/sw.js` serves the page from cache, and refreshes it in the background when online. It also caches the app's code, the ARC 1 weights and the ONNX Runtime files (served from `/ort/`, not a CDN).
 - Transformers.js and the voice worker keep SmolLM2 and Paradee in their own Cache Storage, which they read before the network. The service worker leaves them alone, so nothing is stored twice.
 - The engines start only after the service worker controls the page, so everything they download is kept. Paradee speaks one silent sentence at load to warm up.
 - The app asks the browser for persistent storage, so the models aren't evicted.
@@ -115,7 +128,11 @@ src/
 - **Adding an engine.** Export an `Engine` from its module and append it to `ENGINES` in `src/app/page.tsx`: it boots on its own and gets a status pill.
 - **Graceful degradation.** Engines load independently. Routing needs no model; without ARC 1, a time question answers with this device's time; without SmolLM2, Arcanus still answers time, math and questions about itself (from recalled notes); without Paradee or Web Audio, replies are text only; without WebGL, or if the scene crashes, a CSS orb stands in for the sphere; if the chat crashes, an error boundary keeps the sphere alive.
 - **Loading.** The page is prerendered with skeletons: the conversation skeleton until saved chats are read, the orb until the three.js chunk arrives. Each part of the chat reads only its own slice of state, so a streamed token re-renders the reply being written and nothing else.
-- **Caching.** The service worker caches the app, ARC 1 and the ONNX runtime; Transformers.js and the voice worker cache the model weights. In memory, a text prompt seen before is answered from the reply cache (decoding is greedy, so the model would write the same words), and a sentence spoken before replays without running Paradee. Chats are saved to `localStorage` in the background, batched, and flushed when the tab closes.
+- **Caching.** The service worker caches the app, ARC 1 and the ONNX runtime; Transformers.js and the voice worker cache the model weights. In memory, a text prompt seen before is answered from the reply cache (decoding is greedy, so the model would write the same words), and a sentence spoken before replays without running Paradee. Chats are saved to IndexedDB in the background, batched, and flushed when the tab is hidden or closed.
 - **Optimistic updates.** Your message and a "thinking" reply appear the moment you send, even while models still load. Deletes apply at once and can be undone for six seconds instead of asking first.
 
-Check the pure logic with `npm run check`.
+Three checks, from fast to whole:
+
+- `npm run check` runs the pure logic in Node: routing on held-out messages, retrieval, text handling, accounts.
+- `npm run eval` scores what SmolLM2 writes for a fixed set of messages, built into the same prompts the app sends (needs `npm run models`). A prompt or model change has to beat its count; `npm run eval -- HuggingFaceTB/SmolLM2-360M-Instruct` scores the larger model.
+- `npm run build && npm run e2e` boots the built app in Chrome and checks signing up, the greeting, the models loading, a sum, a written reply and a reload. Add `-- --offline` to prove a boot with every outside host blocked.

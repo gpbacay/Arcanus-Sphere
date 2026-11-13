@@ -3,10 +3,13 @@
 // to look something up; your chats never come here.
 //   GET /api/web?url=https://…  -> Page   (title + readable text with links)
 //   GET /api/web?q=…            -> { results, engine, brief? }   (free-search, else DuckDuckGo, else Wikipedia)
-//   GET /api/web?open=https://… -> { opened, url }   (the machine's browser)
-// ponytail: DNS is checked before each hop, not pinned for the connection (rebinding can slip through). No rate limit:
-// add one before deploying this somewhere public.
-import { spawn } from "node:child_process";
+// Opening a page in the machine's own browser is not here: that acts on the computer, so it is /api/device's, which
+// only this machine can call. This route also serves a phone on the same network (the AR page), so it can only be
+// kept to Arcanus's own page: a request must carry the x-arcanus header, which another site in someone's browser
+// can't send without a preflight this route never answers.
+// ponytail: that header is no secret. Anyone who can reach the port can read public pages through the relay, so keep
+// `npm run dev:https` to networks you trust, and add real authentication and a rate limit before putting it online.
+// DNS is checked before each hop, not pinned for the connection (rebinding can slip through).
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { readBrief, readDuckDuckGo, readHtml, readWikipedia, type Page, type Result } from "@/shared/html";
@@ -70,14 +73,6 @@ async function body(res: Response) {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-/** Open `url` in the machine's browser. The address is one argument, never a shell string. */
-function launch(url: string) {
-  const child = process.platform === "win32"
-    ? spawn("rundll32", ["url.dll,FileProtocolHandler", url], { detached: true, stdio: "ignore", windowsHide: true })
-    : spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" });
-  child.unref();
-}
-
 async function search(q: string): Promise<{ results: Result[]; engine: string; brief?: string }> {
   try {
     const brief = (await freeSearch().research(q)).slice(0, 3500);
@@ -107,20 +102,13 @@ const reply = (data: unknown, status = 200) => Response.json(data, { status, hea
 export async function GET(request: Request) {
   // Only Arcanus's own page may use the relay, so other sites can't borrow it from a visitor's browser.
   const site = request.headers.get("sec-fetch-site");
-  if (site && site !== "same-origin") return reply({ error: "Not available to other sites." }, 403);
+  if ((site && site !== "same-origin") || request.headers.get("x-arcanus") !== "web") return reply({ error: "Not available to other sites." }, 403);
   const params = new URL(request.url).searchParams;
   const q = params.get("q")?.trim().slice(0, 300);
-  const open = params.get("open")?.trim();
   const target = params.get("url")?.trim();
   try {
-    if (open) {
-      const url = new URL(open);
-      await checkTarget(url);
-      launch(url.href);
-      return reply({ opened: true, url: url.href });
-    }
     if (q) return reply(await search(q));
-    if (!target) return reply({ error: "Pass ?url=, ?q=, or ?open=." }, 400);
+    if (!target) return reply({ error: "Pass ?url= or ?q=." }, 400);
     try {
       const markdown = await freeSearch().fetch(target);
       if (markdown.trim()) return reply(pageFromMarkdown(target, markdown));

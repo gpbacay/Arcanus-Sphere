@@ -199,7 +199,7 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
         const pace = new Pace();
         const render = (now = 0) => {
           frame = requestAnimationFrame(render);
-          if (!pace.draw(now, capRef.current)) return; // a model is working and this machine can't do both: skip the frame
+          if (!pace.draw(now, capRef.current)) return; // a model is working: skip the frame, and the machine goes to the model
           controls.update();
           grid.position.x = camera.position.x;
           grid.position.z = camera.position.z;

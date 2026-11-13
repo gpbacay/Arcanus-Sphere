@@ -10,6 +10,32 @@ export type Turn = { role: "system" | "user" | "assistant"; content: string };
 export type Written = { text: string; tokens: number; firstMs: number; perSecond: number; prompted?: number; reused?: number; cached?: boolean };
 type Pending = { onToken: (text: string) => void; resolve: (r: Written) => void; reject: (e: Error) => void };
 
+// The two sizes of SmolLM2. Scored by `npm run eval` on the same 26 messages: 135M passed 19 and 360M passed 24,
+// the difference being the user's own files (ARCANUS.md, a book's passage) and follow-up questions, which 135M
+// gets wrong. In the browser on the dev laptop (i5-1240P) 135M wrote about 5 tokens a second and 360M 1.3, and 360M
+// is twice the download. So 135M is what loads unless the larger one is chosen in Settings.
+export const MODELS = {
+  small: { id: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2-135M", detail: "135M Q4 · on the CPU (~180 MB)" },
+  large: { id: "HuggingFaceTB/SmolLM2-360M-Instruct", label: "SmolLM2-360M", detail: "360M Q4 · on the CPU (~390 MB)" },
+};
+export type ModelSize = keyof typeof MODELS;
+const MODEL_KEY = "arcanus_model_v1";
+
+/** The size chosen in Settings: a choice for this device, like the voice. */
+export function modelSize(): ModelSize {
+  try {
+    return localStorage.getItem(MODEL_KEY) === "large" ? "large" : "small";
+  } catch {
+    return "small"; // storage blocked, or no browser yet
+  }
+}
+
+/** Choose a size. The page loads again: the model in memory is the one the worker was started with. */
+export function setModelSize(size: ModelSize) {
+  localStorage.setItem(MODEL_KEY, size);
+  location.reload();
+}
+
 class Llm {
   state = new Store<LoadState>(IDLE);
   private worker: Promise<Worker> | null = null;
@@ -24,7 +50,7 @@ class Llm {
 
   start() {
     // Its own worker, started with the sphere, not after it. The render loop never waits on this download.
-    this.worker ??= startWorker(this.state, () => new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" }), (data) => {
+    this.worker ??= startWorker(this.state, () => new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module", name: MODELS[modelSize()].id }), (data) => {
       const job = this.pending.get(data.id as number);
       if (!job) return;
       if (data.type === "token") job.onToken(data.text as string);
@@ -76,7 +102,9 @@ export const llm = new Llm();
 
 export const llmEngine: Engine = {
   name: "SmolLM2",
-  detail: "135M Q4 · on the CPU (~180 MB)",
+  get detail() {
+    return MODELS[modelSize()].detail;
+  },
   state: llm.state,
   start: () => void llm.start().catch(() => undefined),
 };

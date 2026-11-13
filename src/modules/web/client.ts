@@ -29,7 +29,7 @@ export function toTarget(input: string): string {
 async function relay<T>(params: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api/web?${params}`);
+    res = await fetch(`/api/web?${params}`, { headers: { "x-arcanus": "web" } });
   } catch {
     throw new Error("No connection to the internet.");
   }
@@ -86,10 +86,10 @@ export async function search(query: string) {
   return view.kind === "results" ? view : { results: [] as Result[], engine: "", query, brief: undefined as string | undefined };
 }
 
-/** Open an address in the user's browser. A popup blocker falls through to the app's relay, which launches it. */
+/** Open an address in the user's browser. A popup blocker falls through to the device service, which launches it on this computer. */
 export async function openUserBrowser(url: string) {
   const popped = window.open(url, "_blank", "noopener,noreferrer");
-  if (!popped) await fetch(`/api/web?open=${encodeURIComponent(url)}`).catch(() => undefined);
+  if (!popped) await fetch("/api/device", { method: "POST", headers: { "x-arcanus": "device", "content-type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => undefined);
   const { history, at } = browser.state;
   const next = [...history.slice(0, at + 1), url];
   browser.set({

@@ -1,14 +1,16 @@
 "use client";
 
-import { FolderOpen, Globe, Info, Network, Settings, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { FolderOpen, Globe, Info, Network, Settings, User, X } from "lucide-react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { account, passwordError, saveAccount, signOut } from "@/modules/account";
 import { pane, togglePane } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
+import { modelSize, MODELS, setModelSize, type ModelSize } from "@/modules/llm";
 import { mind } from "@/modules/mind";
 import { voice } from "@/modules/voice";
 
-type DialogName = "about" | "settings";
+type DialogName = "about" | "settings" | "account";
 
 /** Left rail: the mark, Arcanus's Graph of Thought, files and browser (side panes), then About and Settings (dialogs). */
 export function AppNav() {
@@ -38,6 +40,9 @@ export function AppNav() {
         <Globe size={17} aria-hidden />
       </button>
       <div className="app-nav-gap" />
+      <button type="button" className="app-nav-btn" aria-label="Account" title="Account" aria-expanded={open === "account"} aria-haspopup="dialog" onClick={() => setOpen("account")}>
+        <User size={17} aria-hidden />
+      </button>
       <button type="button" className="app-nav-btn" aria-label="About" title="About" aria-expanded={open === "about"} aria-haspopup="dialog" onClick={() => setOpen("about")}>
         <Info size={17} aria-hidden />
       </button>
@@ -46,6 +51,7 @@ export function AppNav() {
       </button>
       {open === "about" ? <AboutDialog onClose={() => setOpen(null)} /> : null}
       {open === "settings" ? <SettingsDialog onClose={() => setOpen(null)} /> : null}
+      {open === "account" ? <AccountDialog onClose={() => setOpen(null)} /> : null}
     </nav>
   );
 }
@@ -76,6 +82,65 @@ function AppDialog({ title, onClose, children }: { title: string; onClose: () =>
   );
 }
 
+/** Who is signed in: the name Arcanus greets, the password, and the way out. */
+function AccountDialog({ onClose }: { onClose: () => void }) {
+  const user = useStore(account, (s) => s.user);
+  const [name, setName] = useState(user?.name ?? "");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
+  const [pending, setPending] = useState(false);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    const bad = next ? passwordError(next) : "";
+    if (bad) return setNote({ text: bad, bad: true });
+    setPending(true);
+    const error = await saveAccount({ name, current, next: next || undefined }).catch(() => "This browser could not save the change.");
+    setPending(false);
+    setNote(error ? { text: error, bad: true } : { text: next ? "Saved. The new password works from now on." : "Saved." });
+    if (!error) {
+      setCurrent("");
+      setNext("");
+    }
+  }
+  return (
+    <AppDialog title="Account" onClose={onClose}>
+      <p>
+        Signed in as <strong>{user?.username}</strong>. This account&apos;s conversations, memory, skills and files are its own, and stay in this browser.
+      </p>
+      <form className="account-form" onSubmit={save}>
+        <label>
+          <span className="setting-label">Name</span>
+          <span className="setting-note">Arcanus greets you by its first word.</span>
+          <input className="field" value={name} maxLength={60} autoComplete="name" onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          <span className="setting-label">Current password</span>
+          <input className="field" type="password" value={current} autoComplete="current-password" onChange={(e) => setCurrent(e.target.value)} />
+        </label>
+        <label>
+          <span className="setting-label">New password</span>
+          <span className="setting-note">Leave both empty to keep the one you have.</span>
+          <input className="field" type="password" value={next} autoComplete="new-password" onChange={(e) => setNext(e.target.value)} />
+        </label>
+        {note ? (
+          <p role={note.bad ? "alert" : "status"} data-bad={note.bad || undefined}>
+            {note.text}
+          </p>
+        ) : null}
+        <div className="row">
+          <button type="button" className="btn" onClick={signOut}>
+            Sign out
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={pending}>
+            Save
+          </button>
+        </div>
+      </form>
+    </AppDialog>
+  );
+}
+
 function AboutDialog({ onClose }: { onClose: () => void }) {
   return (
     <AppDialog title="About Arcanus" onClose={onClose}>
@@ -103,6 +168,14 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           <span className="setting-note">Paradee reads each answer aloud.</span>
         </span>
         <input type="checkbox" checked={speak} onChange={(event) => voice.setEnabled(event.target.checked)} />
+      </label>
+      <label className="model-row">
+        <span className="setting-label">Language model</span>
+        <span className="setting-note">The larger one follows your instructions, your books and the conversation far better, and writes about four times slower. Changing it reloads Arcanus.</span>
+        <select className="field" value={modelSize()} onChange={(event) => setModelSize(event.target.value as ModelSize)}>
+          <option value="small">{MODELS.small.label} · faster · 180 MB</option>
+          <option value="large">{MODELS.large.label} · better answers · 390 MB</option>
+        </select>
       </label>
     </AppDialog>
   );

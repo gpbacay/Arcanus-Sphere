@@ -3,6 +3,7 @@
 // Linux). Nothing here touches the network.
 //   GET  /api/device                      -> Specs
 //   POST /api/device { open, exact? }     -> { opened }       (an installed app, by name)
+//   POST /api/device { url }              -> { opened }       (an http(s) address, in this machine's browser)
 //   POST /api/device { tool, args }       -> { text, error? } (one open computer use tool call)
 //
 // A pages/ API route, not app/: it is the router that hands over the real socket, and only a request from this
@@ -175,7 +176,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     if (req.method === "GET") return res.json(specs());
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST." });
-    const body = (req.body ?? {}) as { open?: unknown; exact?: unknown; tool?: unknown; args?: unknown };
+    const body = (req.body ?? {}) as { open?: unknown; exact?: unknown; url?: unknown; tool?: unknown; args?: unknown };
+    if (typeof body.url === "string") {
+      const url = new URL(body.url);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return res.status(400).json({ error: "Only http and https addresses open." });
+      // The address is one argument, never a shell string.
+      const child = process.platform === "win32"
+        ? spawn("rundll32", ["url.dll,FileProtocolHandler", url.href], { detached: true, stdio: "ignore", windowsHide: true })
+        : spawn(process.platform === "darwin" ? "open" : "xdg-open", [url.href], { detached: true, stdio: "ignore" });
+      child.unref();
+      return res.json({ opened: url.href });
+    }
     if (typeof body.open === "string" && body.open.trim()) {
       const app = matchApp(await installedApps(), body.open, body.exact === true);
       if (!app) return res.status(404).json({ error: `No installed app called "${body.open}".` });

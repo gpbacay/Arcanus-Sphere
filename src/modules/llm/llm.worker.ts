@@ -1,5 +1,6 @@
-// SmolLM2-135M-Instruct Q4 (Hugging Face, Apache-2.0) on ONNX Runtime Web, off the main thread so the sphere keeps its
-// frame rate. Text only, always this build (~180 MB on the CPU). q4, not int8: int8 wrote at about half the speed.
+// SmolLM2-Instruct Q4 (Hugging Face, Apache-2.0) on ONNX Runtime Web, off the main thread so the sphere keeps its
+// frame rate. Text only, on the CPU: 135M (~180 MB), or 360M (~390 MB) when chosen in Settings; client.ts names the
+// one to load as this worker's name. q4, not int8: int8 wrote at about half the speed.
 import {
   AutoModelForCausalLM,
   AutoTokenizer,
@@ -10,6 +11,7 @@ import {
   type PreTrainedTokenizer,
   type Tensor,
 } from "@huggingface/transformers";
+import { MODELS_PATH, ORT_PATH } from "@/shared/served";
 import { crop, earlier, onCpu, ReplyPenalty, shared, type Past } from "./kv";
 
 const post = (message: unknown) => self.postMessage(message);
@@ -27,10 +29,14 @@ function load() {
     const cores = navigator.hardwareConcurrency || 2;
     // This worker loads and runs the model on several threads at once. Two cores stay out of that pool: one for the
     // sphere's render loop, one for the voice worker, so those keep going while the weights come in.
-    const wasm = (env.backends.onnx as { wasm?: { numThreads?: number } }).wasm;
-    if (wasm) wasm.numThreads = Math.max(1, Math.min(4, cores - 2));
+    // The runtime and, when `npm run models` fetched them, the model files come from Arcanus's own server.
+    const onnx = env.backends.onnx as { wasm?: { numThreads?: number; wasmPaths?: string } };
+    if (onnx.wasm) onnx.wasm.wasmPaths = ORT_PATH;
+    env.allowLocalModels = true;
+    env.localModelPath = MODELS_PATH;
+    if (onnx.wasm) onnx.wasm.numThreads = Math.max(1, Math.min(4, cores - 2));
     const device = "wasm";
-    const name = "HuggingFaceTB/SmolLM2-135M-Instruct";
+    const name = self.name || "HuggingFaceTB/SmolLM2-135M-Instruct";
     const files = new Map<string, { loaded: number; total: number }>();
     const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status !== "progress" || !p.file) return;

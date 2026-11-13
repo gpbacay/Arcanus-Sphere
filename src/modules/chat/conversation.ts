@@ -2,12 +2,13 @@
 // The user's message and a "thinking" reply appear the moment they send (optimistic); tokens stream into a store of
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
-import { asSelf, assemble, FIRST_PERSON, greetingPrompt, liveTurns, ONLY_ASKED, unsupported } from "@/modules/harness";
+import { account } from "@/modules/account";
+import { asSelf, assemble, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED } from "@/modules/harness";
 import { listen } from "@/modules/listen";
-import { llm, type Turn } from "@/modules/llm";
+import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
-import { finishGreeting, isEcho, isIntroduction, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
+import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
@@ -23,10 +24,6 @@ export const useBusy = () => useStore(live, (s) => s.reply !== null);
 // While Arcanus is switched off it takes nothing in: the same "no" as while a reply is being written.
 const busy = () => live.state.reply !== null || !power.state.on;
 
-// The biography is not in here. Pasted in, a small model recites "I am Arcanus, a local AI assistant…" instead of answering.
-// Who it is stays in the about route, and only when the question is about that.
-const system = () =>
-  `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. ${ONLY_ASKED}`;
 // Spoken turns (talk()) are kept short and light: every token the model reads or writes is time before and between words.
 const VOICE_TOKENS = 48; // a sentence or two. The first clause is spoken as soon as it is written, so the cap only bounds the end.
 const FILLER_MS = 700; // silence this long before the first word, and Arcanus says it's thinking
@@ -69,8 +66,7 @@ const recited = (m: Msg) =>
 
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 
-/** The conversation itself: not commands, and not the boot greeting, which a tiny model wrote about itself and which
- *  would otherwise be read back as fact. A reply that only recited the biography is dropped too, or the next reply copies it. */
+/** The conversation itself: not commands, and not the boot greeting. A reply that only recited the biography is dropped too, or the next reply copies it. */
 const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !recited(m));
 
 /**
@@ -115,12 +111,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null,
     pinned ? thought("retrieve", "Reading what you're showing me", { parents: [from], results: [pinned.label] }) : null,
   ];
-  const listed = plan.facts?.map((f) => `- ${f}`).join("\n") ?? "";
-  const facts = !listed
-    ? ""
-    : plan.source
-      ? `${listed}\n\nAnswer from this, and say which site it came from.`
-      : `${listed}\n\n${ONLY_ASKED} Speak as "I" and "my". Do not introduce yourself. Do not add a job, a team, or a personal history.`;
+  const facts = factsBlock(plan.facts ?? [], plan.source);
   const { sections, report, used } = assemble(
     [
       { label: STANDING, text: rules, priority: 1 },
@@ -146,11 +137,9 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
   ]
     .filter(Boolean)
     .join("\n\n");
-  const asked = `${content}\n\nAnswer that directly. Do not introduce yourself. ${ONLY_ASKED}`;
   const history = conversed(prior)
     .slice(-HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
-  const prompt = standing ? `${system()}\n\n${standing.label}:\n${standing.text}` : system();
   const step: ThoughtStep | null = report.length
     ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
     : null;
@@ -160,7 +149,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     results: report.map(reportLine),
   });
   const evidence = [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])];
-  return { turns: [{ role: "system", content: prompt }, ...history, { role: "user", content: asked }], step, evidence, context };
+  return { turns: chatTurns(content, { history, standing: standing && `${standing.label}:\n${standing.text}`, grounded: sections.some((s) => s !== standing) || Boolean(quote) }), step, evidence, context };
 }
 
 function reportLine(r: Report[number]) {
@@ -255,8 +244,11 @@ function voiced(parent: string | null, text = "Speaking the reply") {
   }
   const id = thought("speak", text, { parents: [parent], active: true, detail: "Paradee-8M" });
   let ended = false;
+  let started = false; // the first sentence takes a moment to synthesize: quiet before it is not the end
   const check = () => {
-    if (!ended || voice.state.state.speaking) return;
+    const { speaking, status } = voice.state.state;
+    started ||= speaking || status === "error";
+    if (!ended || speaking || !started) return;
     off();
     settle(id);
   };
@@ -271,10 +263,8 @@ function voiced(parent: string | null, text = "Speaking the reply") {
 const operationOf = (label: string): Operation => (/recall|search|read a web|grounded|notes/i.test(label) ? "retrieve" : "execute");
 
 let listening = false;
-/** This boot's greeting, once SmolLM2 has written it. */
+/** This boot's greeting. */
 let bootLine = "";
-let greetGen = 0;
-let composing = false;
 
 function onPointer() {
   voice.unlock();
@@ -296,14 +286,10 @@ function silence() {
   window.removeEventListener("pointerdown", onPointer);
 }
 
-/** Stop the greeting: not written, or not waiting to be spoken. */
-function stopGreeting() {
-  silence();
-  greetGen++;
-  if (composing) llm.stop();
-}
+/** Stop the greeting waiting to be spoken. */
+const stopGreeting = silence;
 
-/** Stop a boot in progress: its log is written as it stands, and the greeting is no longer written or spoken. */
+/** Stop a boot in progress: its log is written as it stands, and the greeting is no longer waiting to be spoken. */
 export function cancelGreet() {
   stopGreeting();
   unwatch?.();
@@ -311,8 +297,8 @@ export function cancelGreet() {
 
 /**
  * Boot: post Arcanus's boot message, its trace the models loading, live until they settle. A boot right after another
- * replaces it, so reloads don't stack them. Once SmolLM2 is ready it writes the greeting in its own words, and the
- * greeting is spoken when the voice is ready, or on the next tap. Without the model, the boot log is the whole message.
+ * replaces it, so reloads don't stack them. The greeting is there at once: it waits for no model. It is spoken as
+ * soon as the voice has loaded, or on the next tap when the browser hasn't let audio play yet.
  */
 export function greet(list = engines) {
   engines = list;
@@ -320,26 +306,20 @@ export function greet(list = engines) {
   if (!power.state.on || !chat) return;
   unwatch?.();
   stopGreeting();
-  bootLine = "";
-  const mine = ++greetGen;
-  const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: "", at: Date.now(), kind: "boot" };
+  const when = moment();
+  const name = account.state.user?.name;
+  const line = (bootLine = greeting({ when, name }));
+  const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: line, at: Date.now(), kind: "boot" };
   write(chat.id, (c) => ({ ...c, messages: [...(c.messages.at(-1)?.kind === "boot" ? c.messages.slice(0, -1) : c.messages), intro] }));
   watchBoot(chat.id, intro.id);
-  void compose(chat.id, intro.id, mine).catch(() => undefined);
-}
-
-/** Resolves true once SmolLM2 is ready, false if it failed or is switched off. */
-function llmReady() {
-  return new Promise<boolean>((resolve) => {
-    const check = () => {
-      const s = llm.state.state;
-      if (s.status !== "ready" && s.status !== "error" && !s.off) return;
-      off();
-      resolve(s.status === "ready");
-    };
-    const off = llm.state.subscribe(check);
-    check();
-  });
+  // The Graph of Thought: what the greeting rests on, then the greeting, then the voice.
+  const known = thought("retrieve", "Who you are, and when it is", { parents: [wakeId], detail: "what the greeting is made from", results: [...(name ? [name] : []), when] });
+  const said = thought("generate", line, { parents: [known], detail: "composed from those facts · no language model, so no wait" });
+  if (voice.state.state.off) return;
+  // Without a tap the browser plays nothing: the greeting waits for one, and the Graph of Thought says so.
+  if (voice.state.state.analyser) sayAll(line);
+  else watchGesture();
+  voiced(said, line)();
 }
 
 /** "Friday evening": when this boot is, in words the greeting can use. */
@@ -347,65 +327,6 @@ function moment() {
   const now = new Date();
   const hour = now.getHours();
   return `${now.toLocaleDateString([], { weekday: "long" })} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
-}
-
-/** The title of the last conversation the user had, if it has one. */
-function lastTopic() {
-  const asked = (c: { messages: Msg[] }) => c.messages.findLast((m) => m.role === "user" && !m.kind)?.at ?? 0;
-  const last = [...chatStore.state.chats].sort((a, b) => asked(b) - asked(a))[0];
-  return last && asked(last) && last.title !== "Untitled" ? last.title : undefined;
-}
-
-const MAX_WORDS = 25;
-const MAX_UNSUPPORTED = 2;
-
-/**
- * Have SmolLM2 write this boot's greeting, once, and use it. Its reasoning shows in the Graph of Thought: what it
- * knows (who it is, when it is, and the user's own ARCANUS.md, last topic and notes), then the greeting, then the
- * check of it. The reply already starts "Good morning, I'm Arcanus" (the harness's opening), so it greets and names
- * itself whatever the small model does; SmolLM2 only finishes the line. If what it added isn't a greeting, runs
- * long, or brings in words of its own (unsupported), it is cut back to the opening: never a second try.
- */
-async function compose(chatId: string, id: string, mine: number) {
-  // The user's files are read while SmolLM2 is still loading, not after.
-  const [ready, rules, notes] = await Promise.all([llmReady(), instructions().catch(() => ""), memories().catch(() => [])]);
-  if (!ready || mine !== greetGen || !power.state.on) return;
-  const when = moment();
-  const topic = lastTopic();
-  const about = recallNotes("my name call me greet greeting hello prefer", notes).map((n) => n.text);
-  const { turns, facts, opening } = greetingPrompt({ when, rules, lastTopic: topic, notes: about });
-  const known = thought("retrieve", "Who I am, and when it is", {
-    parents: [wakeId],
-    detail: "the facts the greeting may use",
-    results: ["I'm Arcanus", "made by Gianne Bacay", when, ...(rules ? ["ARCANUS.md"] : []), ...(topic ? [`last: ${topic}`] : []), ...(about.length ? [`${about.length} notes about you`] : [])],
-  });
-  const writing = thought("generate", `${opening}…`, { parents: [known], active: true, detail: "SmolLM2 is finishing my opening" });
-  composing = true;
-  let rest = "";
-  const written = await llm
-    .generate(turns, (piece) => revise(writing, { content: opening + (rest += piece) }), { maxNewTokens: 40, sample: true, prefix: opening })
-    .catch((err: unknown) => (settle(writing, { failed: true, detail: errorText(err) }), { text: "" }))
-    .finally(() => (composing = false));
-  if (mine !== greetGen || !power.state.on) return settle(writing, { detail: "stopped" });
-  const said = finishGreeting(opening, written.text);
-  settle(writing, { content: said, detail: "written once" });
-  // The check: does it greet and name itself, is it short, and is every word backed by the facts it was given?
-  const invented = unsupported(said, facts);
-  const words = said.split(/\s+/).length;
-  const why = !isIntroduction(said) ? "not a greeting" : words > MAX_WORDS ? "too long" : invented.length > MAX_UNSUPPORTED ? "made things up" : "";
-  const line = why ? `${opening}. How can I help?` : said;
-  const checked = thought("refine", why ? `Cut back to my opening: ${why}` : "Checked: it greets, names me, and sticks to the facts", {
-    parents: [writing, known],
-    detail: `${words} words · ${invented.length ? `${invented.length} not in the facts` : "every word backed"}`,
-    results: invented.length ? invented : undefined,
-  });
-  bootLine = line;
-  write(chatId, (chat) => ({ ...chat, messages: chat.messages.map((m) => (m.id === id ? { ...m, text: line } : m)) }));
-  if (voice.state.state.off) return;
-  if (voice.state.state.analyser) {
-    sayAll(line);
-    voiced(checked, line)();
-  } else watchGesture();
 }
 
 async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
@@ -560,7 +481,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
-          label: "SmolLM2-135M wrote this",
+          label: `${MODELS[modelSize()].label} wrote this`,
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
     const grounded = built.evidence.length ? grounding(text, built.evidence) : null;

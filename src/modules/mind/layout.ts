@@ -1,47 +1,45 @@
-// The Graph of Thought laid out as a graph: one per root (a wake, a message), drawn top to bottom. A thought sits one
-// layer under its deepest parent, so thoughts that ran side by side (models loading, recalls) share a layer, and a
-// thought that joins several (aggregate, refine) sits under all of them. Within a layer, thoughts line up under their
-// parents. Pure, so layout.check.ts runs it in Node.
+// The Graph of Thought laid out as processes: one per root (a wake, a message, a command), each a tree drawn with
+// rails. A thought hangs under its first parent; the other thoughts it came from (an aggregate, a refine) are its
+// `joins`, named on its row, not drawn: lines that only ever run down one rail and across to one row can't cross or
+// cover each other. What grows from the last thought on a rail stays on that rail (retrieve, then generate, then
+// refine), so a long train reads top to bottom without marching off to the right. Pure, so layout.check.ts runs it in Node.
 import type { Thought } from "./mind";
 
-/** A thought's place: its layer (0 = the root), and `x`, its centre across the graph, 0 to 1. `span` is its layer's share of the width. */
-export type Placed = { t: Thought; layer: number; x: number; span: number };
-export type Edge = { from: string; to: string };
-export type Graph = { nodes: Placed[]; edges: Edge[]; layers: number };
+/** A thought on its rail. `joins`: its parents besides the one it hangs under. `branches`: the thoughts that fork off it. */
+export type Step = { t: Thought; joins: string[]; branches: Step[] };
+/** One root and everything that grew from it. `init`: a boot (its root is a wake), kept apart from the conversation. */
+export type Process = { root: Thought; steps: Step[]; count: number; active: number; failed: number; init: boolean };
 
-export function graphs(thoughts: Thought[]): Graph[] {
-  const known = new Set(thoughts.map((t) => t.id));
-  const root = new Map<string, string>(); // each thought's graph: the root it grew from
-  const layer = new Map<string, number>();
-  const out = new Map<string, { rows: Thought[][]; edges: Edge[] }>();
-  // Thoughts arrive in order, so a thought's parents are already placed.
+export function processes(thoughts: Thought[]): Process[] {
+  const kids = new Map<string, Thought[]>(thoughts.map((t) => [t.id, []]));
+  const roots: Thought[] = [];
+  // Thoughts arrive in order, so a thought's parents are already known. A parent may have fallen off the end of the log.
+  const under = (t: Thought) => t.parents.find((p) => kids.has(p));
   for (const t of thoughts) {
-    const parents = t.parents.filter((p) => known.has(p)); // a parent may have fallen off the end of the log
-    const at = parents.length ? Math.max(...parents.map((p) => layer.get(p)!)) + 1 : 0;
-    const home = parents.length ? root.get(parents[0])! : t.id;
-    layer.set(t.id, at);
-    root.set(t.id, home);
-    const graph = out.get(home) ?? { rows: [], edges: [] };
-    out.set(home, graph);
-    (graph.rows[at] ??= []).push(t);
-    // An edge from another graph (a reply's voice under the boot's wake) would cross graphs: it is left out.
-    for (const p of parents) if (root.get(p) === home) graph.edges.push({ from: p, to: t.id });
+    const parent = under(t);
+    if (parent) kids.get(parent)!.push(t);
+    else roots.push(t);
   }
-  return [...out.values()].map(({ rows, edges }) => {
-    const x = new Map<string, number>();
-    const nodes: Placed[] = [];
-    rows.forEach((row, at) => {
-      // Under its parents: ordered by where they sit, on average; thoughts with the same parents keep their order.
-      const under = (t: Thought) => {
-        const xs = t.parents.map((p) => x.get(p)).filter((v): v is number => v !== undefined);
-        return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0.5;
-      };
-      const sorted = row.map((t, i) => ({ t, i, u: under(t) })).sort((a, b) => a.u - b.u || a.i - b.i);
-      sorted.forEach(({ t }, i) => {
-        x.set(t.id, (i + 0.5) / row.length);
-        nodes.push({ t, layer: at, x: (i + 0.5) / row.length, span: 1 / row.length });
-      });
-    });
-    return { nodes, edges, layers: rows.length };
+  /** The rail under `t`: its children, then on down the same rail whatever grew from the last of them. Only a child
+   *  with later siblings forks: its own children branch off it. */
+  const rail = (t: Thought): Step[] => {
+    const own = kids.get(t.id)!;
+    const last = own.at(-1);
+    const steps = own.map((k): Step => ({ t: k, joins: k.parents.filter((p) => p !== under(k) && kids.has(p)), branches: k === last ? [] : rail(k) }));
+    return last ? [...steps, ...rail(last)] : steps;
+  };
+  return roots.map((root) => {
+    const steps = rail(root);
+    const all = [root, ...flat(steps)];
+    return {
+      root,
+      steps,
+      count: all.length,
+      active: all.filter((t) => t.status === "active").length,
+      failed: all.filter((t) => t.status === "failed").length,
+      init: root.operation === "wake",
+    };
   });
 }
+
+const flat = (steps: Step[]): Thought[] => steps.flatMap((s) => [s.t, ...flat(s.branches)]);

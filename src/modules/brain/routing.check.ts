@@ -33,10 +33,21 @@ const SETS: Record<string, Record<string, string[]>> = {
     math: ["what is 7 plus 8", "how much is 50 divided by 5", "12 squared", "what's 99 minus 33", "calculate 15% of 200"],
     web: ["look up the weather in cebu", "search the internet for used cars", "find recipes for adobo online", "google the meaning of serendipity", "open https://www.bbc.com"],
   },
+  // Written before the time and math claims of routes.ts were widened (year, month, "how much is 9 times 8"), to
+  // check those rules on phrasings they were not written from. Sets 1 to 3 had shown the misses, so they no longer
+  // judge that change.
+  "set 4": {
+    chat: ["what's the best way to learn guitar", "write a two-line poem about coffee", "why do cats purr", "any ideas for a birthday gift", "how do I boil an egg", "tell me about the roman empire", "i had a rough day", "what's the opposite of generous", "what year did the war end", "the score was 3 - 1"],
+    personality: ["are you a cheerful sort", "what's your sense of humor like", "do you get bored", "are you patient"],
+    about: ["who is behind you", "what's your purpose", "can you hear me", "where are my notes kept", "which model writes your answers", "do you learn from me", "can you work without wifi", "what's inside the sphere"],
+    time: ["what month are we in", "what year are we in", "is it the weekend", "what's the time right now", "what's today"],
+    math: ["how much is 14 times 3", "what's 250 divided by 5", "what is 9 squared", "how much is 18 plus 24", "what do you get from 7 * 6"],
+    web: ["search for cheap flights to cebu", "look up who invented the telephone", "open https://example.org", "google best ramen in manila"],
+  },
 };
 
 // The floor each set must stay at or above. Measured when this check was written; raise it when routing improves.
-const FLOOR = { "set 1": 0.75, "set 2": 0.6, "set 3": 0.65 };
+const FLOOR = { "set 1": 0.8, "set 2": 0.65, "set 3": 0.7, "set 4": 0.65 };
 // Questions about Arcanus (about and personality) answered from its own notes or the harness (routed there, or chat
 // marked aboutSelf), and chat messages wrongly grounded in them.
 const GROUNDED_FLOOR = 0.9;

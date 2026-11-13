@@ -24,32 +24,6 @@ export function forSpeech(text: string): string {
     .trim();
 }
 
-// ponytail: phrase lists, not a classifier. Add a phrase when a boot line is the wrong kind of sentence.
-const OPENING = /\b(hello|hi|hey|good (?:morning|afternoon|evening|day)|welcome|i(?:'m| am)\b|my name is)\b/i;
-// A boot line that invents a job is not an introduction. The model has no workplace.
-const INVENTED = /\b(team|employee|colleague|coworker|company|hired|joined|member of)\b/i;
-const SIGN_OFF =
-  /\b(thank(?:s| you)|goodbye|bye|farewell|see you|take care|you(?:'re| are) welcome|hope to hear|hear from you|glad to\b[^.]{0,40}\bhelp|have a (?:good|nice|great)|until next|talk soon)\b/i;
-
-// Arcanus names itself: "I'm Arcanus", not "Arcanus good morning", which reads as if it were greeting someone else.
-const NAMES_ITSELF = /\b(?:i'm|i am|my name is|this is) arcanus\b|\barcanus here\b/i;
-
-/** A boot line that opens the meeting: a greeting or a self-introduction in which Arcanus names itself, never a sign-off. */
-export function isIntroduction(line: string): boolean {
-  const text = line.trim();
-  return text.split(/\s+/).length >= 3 && OPENING.test(text) && NAMES_ITSELF.test(text) && !SIGN_OFF.test(text) && !INVENTED.test(text);
-}
-
-/**
- * The boot greeting: the opening Arcanus started its reply with, then the model's words up to the end of the
- * greeting's second sentence. Stage directions and quotes are dropped, and so is a reply that wanders on.
- */
-export function finishGreeting(opening: string, rest: string): string {
-  const text = `${opening}${rest.replace(/\*[^*]*\*|\([^)]*\)|["“”]/g, " ")}`.replace(/\s+/g, " ").replace(/\s+([,.!?])/g, "$1").trim();
-  const sentences = text.match(/[^.!?]+[.!?]+/g);
-  return sentences ? sentences.slice(0, 2).join("").trim() : `${text}.`;
-}
-
 /**
  * Split streamed text into finished sentences and the unfinished rest, so speech can start before the reply ends.
  * A sentence still being written past `long` characters is cut at its last comma, semicolon or colon, so a long

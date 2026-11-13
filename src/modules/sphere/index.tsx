@@ -36,7 +36,7 @@ function hasWebGL() {
 }
 const never = () => () => undefined;
 
-/** `working`: a model is running right now (listening, thinking, writing), so the sphere may have to draw less (pace.ts). */
+/** `working`: a model is running right now (loading, listening, thinking, writing), so the sphere draws less (pace.ts). */
 export function Sphere({ analyser, state, on = true, working = false }: { analyser: AnalyserNode | null; state: SphereState; on?: boolean; working?: boolean }) {
   const canDraw = useSyncExternalStore(never, hasWebGL, () => true);
   const [tool, setTool] = useState<Tool>("view");

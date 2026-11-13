@@ -65,63 +65,19 @@ export const abilities = ["tell the time", "do math", "search the web and read p
 export const featuresReply = `I can ${abilities.slice(0, -1).join(", ")}, and ${abilities.at(-1)}. Everything but the web runs on your device. What shall we try?`;
 
 // ------------------------------------------------------------------ greeting
-// The boot greeting is written by a very small model, so its context is engineered tightly: a short list of true
-// facts about Arcanus and this moment, and nothing else to draw on. What it writes is then checked against those
-// facts (unsupported), and a line that brings in more than a word or two of its own is thrown away.
+// The boot greeting is composed, not generated: the time of day and who is signed in are known, so nothing is left
+// for a model to decide, and Arcanus greets the moment it boots. Measured on the dev laptop: SmolLM2 took 11 s once
+// loaded (and on a first visit its whole 180 MB download before that, 5 to 10 minutes) to add "How can I help you?",
+// or words that were then thrown away as not a greeting.
 
-type Turn = { role: "system" | "user"; content: string };
+/** This boot: when it is ("Friday morning"), and the signed-in account's name. */
+export type Moment = { when: string; name?: string };
 
-/** This boot: when it is, plus what the user's own files say, when there is any. */
-export type Moment = { when: string; rules?: string; notes?: string[]; lastTopic?: string };
-
-const GREETING_BUDGET = 600; // characters of the user's context; a tiny model loses the instruction under more
-
-/** The greeting prompt, the facts the greeting may use (for unsupported()), and its opening: the words the reply
- *  starts with ("Good morning, I'm Arcanus"), so it always greets and names itself. SmolLM2 only finishes it. */
-export function greetingPrompt(m: Moment): { turns: Turn[]; facts: string; opening: string } {
-  const { sections } = assemble(
-    [
-      { label: "Your user's standing instructions", text: m.rules ?? "", priority: 1 },
-      { label: "Last time you talked about", text: m.lastTopic ? `"${m.lastTopic}"` : "", priority: 2 },
-      { label: "Notes you remember", text: (m.notes ?? []).map((n) => `- ${n}`).join("\n"), priority: 3 },
-    ],
-    GREETING_BUDGET,
-  );
-  const facts = [
-    "- Your name is Arcanus. Gianne Bacay created you.",
-    "- You are an AI assistant that lives in the user's web browser as a glowing sphere.",
-    `- In your own words: I can ${abilities.join(", ")}.`,
-    `- It is ${m.when}.`,
-    ...sections.map((s) => `- ${s.label}: ${s.text}`),
-  ].join("\n");
-  // Measured on SmolLM2: an instruction that says what to write (hello, name, offer help) beats a list of what not to
-  // write, which put jobs and places in its head; "introduce yourself" invited a made-up biography. Without the facts
-  // at all, it invents names and whole scenes.
-  // "Good night" is a goodbye, so at night it says hello instead.
+export function greeting(m: Moment): string {
   const part = m.when.split(" ").at(-1);
-  const hello = part === "night" ? "Hello" : `Good ${part}`;
-  const greetMe = `Hi! Reply with one short greeting: say ${hello.toLowerCase()}, say your name, and ask how you can help. Nothing else.`;
-  return {
-    turns: [{ role: "system", content: `You are Arcanus, a helpful assistant. Facts:\n${facts}` }, { role: "user", content: greetMe }],
-    facts,
-    opening: `${hello}, I'm Arcanus`,
-  };
-}
-
-// Words any greeting may use without a fact behind them.
-const COMMON = new Set(
-  "a an the and or but to of for with in on at by from as it its is are am be been was this that these there here i i'm im me my you you're your yours we us our let let's what how who can could may might will would shall should do does need like want ready glad nice happy today now again back just all any anything something some more help helping assist assistance hello hi hey greetings good morning afternoon evening night day welcome so very well sure today's name call nice meet pleased pleasure when ready yes great happy".split(" "),
-);
-
-/**
- * The words in `line` that neither `facts` nor ordinary greeting words account for: what the model brought in itself.
- * A greeting with more than a couple of these is likely inventing ("your personal AI supervisor at the university").
- * ponytail: plain word overlap with a crude plural strip. Swap in embeddings if it rejects good lines it shouldn't.
- */
-export function unsupported(line: string, facts: string): string[] {
-  const norm = (w: string) => w.replace(/'s$/, "").replace(/(?<=\w{3})s$/, "");
-  const known = new Set((facts.toLowerCase().match(/[a-z']+/g) ?? []).map(norm));
-  return (line.toLowerCase().match(/[a-z']+/g) ?? []).filter((w) => !COMMON.has(w) && !known.has(norm(w)));
+  const hello = part === "night" ? "Hello" : `Good ${part}`; // "Good night" is a goodbye, so at night it says hello
+  const first = m.name?.trim().split(/\s+/)[0];
+  return `${hello}${first ? `, ${first}` : ""}. I'm Arcanus. What shall we think about?`;
 }
 
 export interface Tool {
@@ -276,6 +232,38 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
   return { name: slug(meta.name || fallbackName) || "skill", description: meta.description || body.split("\n")[0].slice(0, 90), body };
 }
 
+// ------------------------------------------------------------------ typed chat
+// What a typed reply is written from. Here, not in the chat module, so llm/reply.eval.ts builds the very prompt the
+// app sends and scores what SmolLM2 writes from it.
+
+// Two system prompts, because SmolLM2-135M follows a short one and trips over a long one (llm/reply.eval.ts).
+// Plain conversation gets one line. The rules that keep it to the facts are said only when there are facts to keep
+// to: read on a plain question, "use the one fact that answers it" turned a story into "The dragon and knight."
+// The biography is in neither. Pasted in, a small model recites "I am Arcanus, a local AI assistant…" instead of
+// answering. Who it is stays in the about route, and only when the question is about that.
+export const CHAT_SYSTEM = 'You are Arcanus, a helpful assistant. Answer in a few short sentences.';
+export const GROUNDED_SYSTEM = `${FIRST_PERSON} Answer the user's question directly. Start with the answer, in a few short sentences, then stop. Do not introduce yourself or say who made you unless they asked. If you do not know, say so. Do not invent a job, a team, a company, or a personal history. ${ONLY_ASKED}`;
+
+/** Facts as the model reads them: Arcanus's own notes, or what a web page or search (`source`) returned. */
+export function factsBlock(facts: string[], source?: string): string {
+  if (!facts.length) return "";
+  const listed = facts.map((f) => `- ${f}`).join("\n");
+  return source
+    ? `${listed}\n\nAnswer from this, and say which site it came from.`
+    : `${listed}\n\n${ONLY_ASKED} Speak as "I" and "my". Do not introduce yourself. Do not add a job, a team, or a personal history.`;
+}
+
+/**
+ * The turns SmolLM2 reads for a typed message. `content`: the context sections and then the message, as one text;
+ * `grounded` says there are such sections (facts, a page, passages). `standing`: the user's ARCANUS.md, which goes
+ * with the system prompt. `history`: earlier turns, already cut to size. The message is the last thing the model
+ * reads, as it was typed: an instruction after it was answered instead of it.
+ */
+export function chatTurns(content: string, opts: { history?: ChatTurn[]; standing?: string; grounded?: boolean } = {}): ChatTurn[] {
+  const system = opts.grounded ? GROUNDED_SYSTEM : CHAT_SYSTEM;
+  return [{ role: "system", content: opts.standing ? `${system}\n\n${opts.standing}` : system }, ...(opts.history ?? []), { role: "user", content }];
+}
+
 // ------------------------------------------------------------------ live voice
 // A spoken turn's prompt is built for the model's KV cache (llm.worker.ts keeps the last prompt and reply, and reads a
 // new prompt only from where it differs). So everything that stays the same comes first and never changes: one fixed
@@ -284,7 +272,9 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
 
 export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
 
-export const LIVE_SYSTEM = `${FIRST_PERSON} You are talking out loud with the user. Answer in one or two short sentences, in plain words. No lists. Do not introduce yourself. If you do not know, say so. ${ONLY_ASKED}`;
+// One line, like CHAT_SYSTEM and for the same reason. The rules that keep a reply to its facts ride with the facts,
+// in the last turn (buildLive), so this prompt never changes and the KV cache holds.
+export const LIVE_SYSTEM = 'You are Arcanus, a helpful assistant. You are talking out loud: answer in one or two short sentences, in plain words.';
 
 const LIVE_BUDGET = 480; // characters of notes and facts a spoken turn may read
 const LIVE_TURN = 160; // characters of each earlier turn

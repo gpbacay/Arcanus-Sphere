@@ -4,9 +4,11 @@
 import * as ort from "onnxruntime-web/wasm";
 import { phonemize } from "phonemizer";
 import { Lru } from "@/shared/lru";
+import { MODELS_PATH, ORT_PATH } from "@/shared/served";
 import { toMisaki } from "./misaki";
 
-const REPO = "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2/resolve/v1.2";
+const REPO = "sahilmahendrakar/Paradee-8M-v1.2";
+const REMOTE = `https://huggingface.co/${REPO}/resolve/v1.2`;
 const VOICES = ["af_heart", "bf_isabella", "am_puck", "bm_fable"]; // the model's own order (config.json)
 // The British male voice: the closest of Paradee's four to a JARVIS-style assistant.
 const VOICE = "bm_fable";
@@ -17,8 +19,8 @@ const BRITISH = VOICE.startsWith("b");
 const MAX_PHONEMES = 510;
 const post = (message: unknown, transfer: Transferable[] = []) => self.postMessage(message, { transfer });
 
-// The same runtime build package.json pins, from the CDN the service worker caches for offline use.
-ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
+// The runtime build package.json pins, served by Arcanus itself.
+ort.env.wasm.wasmPaths = ORT_PATH;
 // Two threads: about 5x faster than real time here, while leaving most cores to SmolLM2 (when it runs on the CPU), which writes at the same time.
 ort.env.wasm.numThreads = 2;
 
@@ -30,12 +32,15 @@ let latest = 0; // sentences queued under an older generation were cancelled
 // ponytail: capped by count (~13 MB at 32 five-second sentences), cap by bytes if replies get long.
 const spoken = new Lru<string, Float32Array>(32);
 
-/** A model file, from this worker's own Cache Storage when it has it, so the voice works offline after one visit. */
-async function cached(url: string) {
+/** A model file, from this worker's own Cache Storage when it has it, so the voice works offline after one visit.
+ *  Otherwise from Arcanus's own server when `npm run models` put it there, and from Hugging Face when not. */
+async function cached(file: string) {
+  const url = `${REMOTE}/${file}`; // the cache key either way, so a copy cached before is still found
   const cache = await caches.open("paradee-v1.2");
   let response = await cache.match(url);
   if (!response) {
-    response = await fetch(url);
+    response = await fetch(`${MODELS_PATH}${REPO}/${file}`).catch(() => undefined);
+    if (!response?.ok) response = await fetch(url);
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     await cache.put(url, response.clone());
   }
@@ -91,7 +96,7 @@ async function synthesize({ session, vocab }: Engine, text: string) {
 
 function load() {
   loading ??= (async () => {
-    const [model, config] = await Promise.all([cached(`${REPO}/onnx/paradee_int8.onnx`), cached(`${REPO}/config.json`)]);
+    const [model, config] = await Promise.all([cached("onnx/paradee_int8.onnx"), cached("config.json")]);
     const engine: Engine = {
       session: await ort.InferenceSession.create(new Uint8Array(await model.arrayBuffer()), { executionProviders: ["wasm"] }),
       vocab: (await config.json()).vocab,

@@ -33,6 +33,12 @@ export const ASK_WEB = /^(?:please\s+)?(?:search(?:\s+(?:the\s+)?(?:web|internet
 /** "go to youtube", "open github", "browse to wikipedia.org": open the user's browser, not the reader. */
 export const GO = /^(?:please\s+)?(?:go\s*to|navigate to|take me to|pull up|open|browse to)\b/i;
 
+/** A question about the present moment: the time, the day, the date, the month or the year it is now. */
+const NOW =
+  /\b(?:what|which) (?:time|day|date|month|year)(?: of the week)? (?:is it|is this|is today|are we in)\b|\bwhat(?:'s| is) the (?:time|date|day)(?: (?:today|now|right now))?\s*\??$|\bis it (?:mon|tues|wednes|thurs|fri|satur|sun)day\b/i;
+/** The words a sum is asked with. */
+const ASKING = /^(?:what|what's|whats|how|much|many|is|are|do|does|you|get|from|calculate|compute|solve|work|out|the|answer|result|to|of|equals?|please|tell|me|can|could)$/i;
+
 export const ROUTES: Route[] = [
   {
     route: "chat",
@@ -103,16 +109,24 @@ export const ROUTES: Route[] = [
     route: "time",
     description: "Asks for the current time, date, or day of the week",
     seeds: ["what time is it", "what's today's date", "what day is it today", "current time in Asia/Tokyo", "what time is it in london"],
+    // The seeds say "time", "date" and "day"; a question about the month or the year shares only "what is it" with
+    // them, which every route's seeds hold. Only a question about now is taken: "what year did the war end" is not.
+    claim(text) {
+      return NOW.test(text) ? "asked about now" : undefined;
+    },
   },
   {
     route: "math",
     description: "Arithmetic to compute",
     seeds: ["what is 12 * 7", "calculate (3 + 4) * 2", "what's 144 / 12", "compute 2^10", "what is 5 times 3", "multiply 4 by 9", "add 10 and 15"],
     // Digits and operators share no words with remembered examples, so a bare expression is caught here.
+    // So is a sum wrapped only in the words of asking ("how much is 9 times 8"): "is" and "how" vote for every route.
+    // A sentence that merely holds one ("the score was 3 - 1") is left to the vote.
     claim(text) {
       const expression = findExpression(text);
-      const bare = expression !== null && spoken(text).replace(expression, "").split(/\s+/).filter(Boolean).length <= 2;
-      return bare ? "arithmetic spotted" : undefined;
+      if (expression === null) return undefined;
+      const rest = spoken(text).replace(expression, "").split(/\s+/).map((w) => w.replace(/[^\p{L}']/gu, "")).filter(Boolean);
+      return rest.length <= 2 || rest.every((w) => ASKING.test(w)) ? "arithmetic spotted" : undefined;
     },
   },
   {

@@ -24,11 +24,12 @@ Embodiment, agent competence, and a local/small-model path are one product — n
 
 - Single-page web app (Next.js): chat panel + Three.js sphere scene; no server-side inference
 - Decide: Hippocampus + Occipital (ARCANE), main thread, under 1 ms per message; ARC 1 reads skill arguments
-- Write: SmolLM2-Instruct (360M on WebGPU, 135M on WASM) via Transformers.js / ONNX Runtime Web, in a Web Worker
+- Write: SmolLM2-Instruct q4 on multi-threaded WASM (135M, or 360M chosen in Settings) via Transformers.js / ONNX Runtime Web, in a Web Worker
 - Speak: Paradee-8M, in a Web Worker; audio drives the sphere through the Web Audio analyser
 - Hear: Moonshine tiny, in a Web Worker; live voice is full duplex, with the user's words written as they speak
 - Knowledge notes live in `src/modules/brain/knowledge.ts`; skills and their routing examples in `src/modules/brain/skills.ts`
-- Models download from Hugging Face on first visit and are cached by the browser
+- Models are served by the app itself when `npm run models` has fetched them, otherwise downloaded from Hugging Face on first visit; either way the browser caches them
+- Local accounts (Argon2id, no server): each has its own conversations and `.arcanus/` files
 
 ## Capabilities and Constraints
 
@@ -36,12 +37,13 @@ Confirmed capabilities:
 - Routing with a Hippocampus memory that learns from /teach; time and calculate answered without the language model
 - Knowledge recall from a Hippocampus memory (word + Occipital letter matching)
 - Streaming replies spoken sentence by sentence, with an on-screen caption
-- Chain of Thought trace on every reply; conversations persisted in the browser
+- Chain of Thought trace on every reply, a live Graph of Thought, conversations persisted in the browser
+- Web search and page reading through a small relay (`/api/web`), only when the user browses or asks to look something up
 
 Constraints:
 - Platform is web (browser); not a native app
 - Small-model / local-first path is identity — do not redefine the product as a generic hosted-chat wrapper
-- No web search or URL fetch: Arcanus is fully local
+- Inference is fully local: no model runs on a server, and conversations never leave the device. The web relay is the one server part
 - SmolLM2 is tiny: replies are short and can be wrong; keep facts in the knowledge notes
 - Multi-user accounts, billing, and public SaaS claims: undecided / out of current scope
 

@@ -1,20 +1,19 @@
 // Arcanus offline-first service worker.
 // - Pages: from the network, so a new deploy shows on the next visit; the cached copy only when offline.
-// - Same-origin assets (hashed Next.js chunks, fonts, ARC 1 weights) and the ONNX Runtime files from jsDelivr:
-//   cache first. Both are versioned by URL, so a cached copy never goes stale.
+// - Same-origin assets (hashed Next.js chunks, fonts, ARC 1 weights, the ONNX Runtime files in /ort/<version>/):
+//   cache first. They are versioned by URL, so a cached copy never goes stale.
 // - Files that change under the same URL (the orb's shape) go network first, like pages, so a new deploy shows at once.
-// - Hugging Face model files pass straight through: Transformers.js ("transformers-cache") and the Paradee voice
-//   worker ("paradee-v1.2") already keep them in Cache Storage and read that before the network. Caching them here
-//   too would store ~270 MB twice.
-const CACHE = "arcanus-v1";
+// - Model files pass straight through, from Hugging Face or from /models/ here: Transformers.js
+//   ("transformers-cache") and the Paradee voice worker ("paradee-v1.2") already keep them in Cache Storage and read
+//   that before the network. Caching them here too would store ~250 MB twice.
+const CACHE = "arcanus-v2"; // v2: the runtime moved from jsDelivr to /ort/, so the old CDN copies are dropped
 const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/vad/silero_vad.onnx", "/icon-192.png", "/icon-512.png"];
-const CDN = "https://cdn.jsdelivr.net";
 const UNVERSIONED = new Set(["/orb.glb"]); // add a public file here when it is redrawn without changing its name
 
-// /api/ is live (the browser relay): never cached.
+// /api/ is live (the browser relay): never cached. /models/ is kept by the model caches (above).
 const cacheable = (href) => {
   const url = new URL(href);
-  return url.origin === CDN || (url.origin === self.location.origin && !url.pathname.startsWith("/sw.js") && !url.pathname.startsWith("/api/"));
+  return url.origin === self.location.origin && !/^\/(?:sw\.js|api\/|models\/)/.test(url.pathname);
 };
 
 async function put(request, response) {

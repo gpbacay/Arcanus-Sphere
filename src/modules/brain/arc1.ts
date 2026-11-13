@@ -1,13 +1,14 @@
 // ARC 1 reads a skill's arguments out of a message, and picks which offered tool applies. It anchors spans of the
 // message's own words, so it cannot make a value up. Measured on held-out messages it found the city 6 of 6 times.
 // It routes whole conversations poorly, so Hippocampus still chooses the skill (routes.ts); ARC 1 chooses the tool.
+import { ORT_PATH } from "@/shared/served";
 import { load, type Arc1Agent } from "./arcane/web.mjs";
 
 let agent: Promise<Arc1Agent> | null = null;
 
 /** ARC 1 (5.5 MB, cached by the service worker). Safe to call repeatedly; retried after a failure. */
 export function arc1() {
-  agent ??= load({ model: "/arcane/arc1.onnx", config: "/arcane/arc1.json" }).catch((err: unknown) => {
+  agent ??= load({ model: "/arcane/arc1.onnx", config: "/arcane/arc1.json", wasmPaths: ORT_PATH }).catch((err: unknown) => {
     agent = null;
     throw err;
   });

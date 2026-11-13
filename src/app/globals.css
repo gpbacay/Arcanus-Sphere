@@ -141,6 +141,7 @@ body {
 /* —— Glass: every pane over the stage is the same material —— */
 .app-nav,
 .side-pane,
+.signin-pane,
 [data-mobile="true"][data-sidebar="sidebar"],
 .app-dialog,
 .ar-dialog,
@@ -156,6 +157,7 @@ body {
 /* Registration ticks: the four corners of each pane, drawn in light. */
 .app-nav::before,
 .side-pane::before,
+.signin-pane::before,
 .app-dialog::before,
 .ar-dialog::before {
   --t: 9px;
@@ -1053,25 +1055,46 @@ textarea.field {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-/* —— Graph of Thought: Arcanus's live thoughts, one train per message or boot —— */
-.got-train + .got-train {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+/* —— Graph of Thought: Arcanus's live thoughts, one accordion per process (a boot, a message, a command) ——
+   Its own material: an opaque drafting plate with a dot grid, where the chat is a clear overlay on the stage. Opaque
+   on purpose: a blurred pane this size over the moving sphere is redrawn every frame, and that costs the models. */
+.mind-pane {
+  --plate: #070c14;
+  --rail: rgba(150, 215, 245, 0.26);
+  background:
+    radial-gradient(circle at 1px 1px, rgba(150, 215, 245, 0.085) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    linear-gradient(180deg, #0b1420, var(--plate) 30%);
+  backdrop-filter: none;
 }
-.got-when {
-  margin: 0 0 8px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-faint);
+.mind-pane .pane-body {
+  padding: 4px 0 16px;
+}
+.mind-pane .pane-body .pane-note {
+  margin: 10px 14px;
+}
+.got-group > h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 14px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.got-group > h3::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 .got-op {
-  margin-right: 2px;
   padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 0;
+  border: 1px solid var(--line-strong);
   font-family: var(--font-mono);
   font-size: 10px;
+  line-height: 16px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1083,132 +1106,188 @@ textarea.field {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
-/* The graph itself: nodes in layers, a curve from each thought to the thoughts that came from it. */
-.got-graph {
-  position: relative;
-}
-.got-edges {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-.got-edges path {
-  fill: none;
-  stroke: var(--line-strong);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke; /* the drawing stretches to the pane's width; the lines stay one pixel */
-}
-.got-edges path[data-lit] {
-  stroke: var(--accent);
-}
-.got-edges path[data-live] {
-  stroke: var(--think);
-  stroke-dasharray: 4 4;
-  animation: got-flow 0.6s linear infinite;
-}
-@keyframes got-flow {
-  to {
-    stroke-dashoffset: -8;
-  }
-}
-.got-node {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  max-width: 240px;
-  padding: 0 7px;
-  overflow: hidden;
-  transform: translateX(-50%);
-  border: 1px solid var(--line-strong);
-  background: var(--glass-solid);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-.got-node .got-op {
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-/* Four or more side by side: the words say more than the operation, which the detail below still names. */
-.got-node[data-tight] .got-op {
-  display: none;
-}
-.got-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.got-node:hover,
-.got-node[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--text);
-}
-.got-node:focus-visible {
-  outline: 1px solid var(--accent-hot);
-  outline-offset: 1px;
-}
-.got-node[data-status="active"] {
-  border-color: var(--think);
-  color: var(--text);
-  box-shadow: 0 0 10px rgba(255, 191, 94, 0.28);
-}
-.got-node[data-status="failed"] {
-  border-color: var(--danger);
-}
-.got-detail {
-  flex: none;
-  max-height: 36%;
-  padding: 9px 12px 11px;
-  overflow: auto;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  line-height: 1.45;
-  scrollbar-width: thin;
-}
-.got-detail p {
-  margin: 0;
-}
-.got-detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.got-facts,
+.got-id,
+.got-ms {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
+  font-size: 10.5px;
+  color: var(--text-muted);
 }
-.got-detail-text {
-  margin-top: 6px !important;
-  color: var(--text);
+.got-facts {
   overflow-wrap: anywhere;
 }
-.got-detail-facts {
-  margin-top: 4px !important;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
+
+/* A process: its root thought is the accordion's heading. */
+.got-proc + .got-proc {
+  border-top: 1px solid var(--line);
 }
-.got-detail-results {
-  margin: 6px 0 0;
-  padding: 0;
+.got-proc-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 9px 12px 9px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.got-proc-head:hover {
+  background: var(--surface);
+}
+.got-proc-head:focus-visible,
+.got-row:focus-visible {
+  outline: 1px solid var(--accent-hot);
+  outline-offset: -1px;
+}
+.got-proc-head .got-op {
+  margin-top: 1px;
+}
+.got-proc-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.got-proc-head .got-facts {
+  grid-column: 2 / -1;
+}
+.got-chevron {
+  margin-top: 2px;
+  color: var(--text-faint);
+  transition: transform 0.2s var(--ease);
+}
+.got-proc-head[aria-expanded="true"] .got-chevron {
+  transform: rotate(180deg);
+}
+.got-proc[data-status="active"] .got-proc-head .got-op {
+  color: var(--think);
+  border-color: color-mix(in srgb, var(--think) 55%, transparent);
+}
+.got-proc[data-status="failed"] .got-proc-head .got-op {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.got-proc-body {
+  padding: 0 10px 10px 20px;
+}
+
+/* The graph: every thought sits on a rail under the thought it came from. A rail runs straight down and its ticks
+   run straight across, each in its own gutter, so no two lines ever cross or cover one another. */
+.got-rail {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 20px;
   list-style: none;
+}
+.got-step {
+  position: relative;
+}
+.got-step::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -13px;
+  width: 1px;
+  background: var(--rail);
+}
+.got-step:last-child::before {
+  bottom: auto;
+  height: 16px; /* the rail ends at its last node */
+}
+/* The node, on the rail. */
+.got-step::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  left: -16px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--plate);
+}
+.got-step[data-status="active"]::after {
+  border-color: var(--think);
+  background: var(--think);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.got-step[data-status="failed"]::after {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+/* A fork: the branch's rail leaves the main rail just under the thought it grew from. */
+.got-step > .got-rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -13px;
+  width: 20px;
+  height: 1px;
+  background: var(--rail);
+}
+.got-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.got-row:hover {
+  background: var(--surface);
+}
+.got-row[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+/* A thought the picked one came from: the edge, read as light instead of a line. */
+.got-row[data-source],
+.got-proc-head[data-source] {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.got-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.got-ms {
+  margin-left: auto;
+  color: var(--text);
+}
+.got-row[data-status="active"] .got-ms {
+  color: var(--think);
+}
+.got-row[data-status="failed"] .got-facts {
+  color: var(--danger);
+}
+.got-text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.got-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.got-results > span {
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-muted);
-}
-.got-detail-results li {
-  padding: 2px 0 2px 8px;
-  border-left: 1px solid var(--line-strong);
   overflow-wrap: anywhere;
 }
 
@@ -1609,6 +1688,140 @@ textarea.field {
   box-shadow: 0 0 8px var(--accent);
 }
 
+.model-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.model-row .field {
+  height: 32px;
+  margin-top: 5px;
+}
+
+.account-form,
+.account-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.account-form label {
+  gap: 3px;
+}
+.account-form .field {
+  height: 32px;
+  margin-top: 3px;
+}
+.account-form [data-bad] {
+  color: var(--danger);
+}
+.account-form .row {
+  display: flex;
+  margin-top: 2px;
+}
+
+/* —— Sign in: one pane of glass over an empty stage. Arcanus boots once you are in. —— */
+.signin {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100vw;
+  min-height: 100dvh;
+  padding: 24px 16px;
+  overflow: auto;
+}
+.signin-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(360px, 100%);
+  padding: 22px 22px 18px;
+  animation: scan-in 0.7s var(--ease) both;
+}
+.signin-pane h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.signin-pane p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.signin-pane label {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.signin-optional {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.signin-pane .field,
+.signin-pane .btn {
+  height: 38px;
+  font-size: 14px;
+}
+.signin-password {
+  display: flex;
+  gap: 6px;
+}
+.signin-password .btn {
+  flex: none;
+  width: 58px;
+  padding: 0;
+  font-size: 12px;
+}
+.signin-pane .field[aria-invalid] {
+  border-color: var(--danger);
+}
+.signin-pane .signin-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+.signin-pane .signin-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-weight: 400;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.signin-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.signin-pane .btn-primary {
+  margin: 12px 0 0;
+}
+.signin-pane .signin-switch {
+  margin: 10px 0 0;
+}
+.signin-switch button {
+  color: var(--accent);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+.signin-switch button:hover,
+.signin-switch button:focus-visible {
+  text-decoration: underline;
+}
+.signin-pane .signin-note {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
 /* The QR dialog on desktop: scan it to open the AR page on a phone. */
 .ar-dialog {
   width: min(320px, calc(100vw - 32px));
@@ -1706,6 +1919,47 @@ textarea.field {
     inset: calc(56px + env(safe-area-inset-top)) 8px 8px;
     width: auto;
     min-width: 0;
+  }
+
+  .signin-pane .field,
+  .account-form .field {
+    font-size: 16px; /* stops iOS from zooming the page when the field is focused */
+  }
+  .signin-pane .field,
+  .signin-pane .btn {
+    height: 44px;
+  }
+
+  /* The Graph of Thought on a phone: larger words, and headings a thumb can hit. */
+  .got-proc-head {
+    min-height: 48px;
+    padding: 12px 12px 12px 14px;
+  }
+  .got-proc-title,
+  .got-text {
+    font-size: 14px;
+  }
+  .got-facts,
+  .got-id,
+  .got-ms,
+  .got-results > span {
+    font-size: 11.5px;
+  }
+  .got-op {
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .got-row {
+    padding: 9px 8px;
+  }
+  .got-step::after {
+    top: 16px;
+  }
+  .got-step:last-child::before {
+    height: 19px;
+  }
+  .got-proc-body {
+    padding-left: 16px;
   }
 
   .app-stage {

@@ -68,7 +68,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "smollm2",
     title: "Language model: SmolLM2",
     content:
-      "I write open answers with SmolLM2-135M Q4, on the CPU, including who made me. In live voice that is a sentence or two, written from the conversation so far and the notes I recall for what you said. It reads and writes text only: I cannot look at images.",
+      "I write open answers with SmolLM2 Q4, on the CPU, including who made me: the 135M model, or the larger 360M one when you choose it in Settings. In live voice that is a sentence or two, written from the conversation so far and the notes I recall for what you said. It reads and writes text only: I cannot look at images.",
   },
   {
     id: "arc1",

@@ -21,10 +21,9 @@ export function ArScreen() {
   const speaking = useStore(voice.state, (s) => s.speaking);
 
   useEffect(() => {
-    hydrateChats();
     voice.restore();
-    greet(ENGINES);
     let current = true;
+    void hydrateChats().then(() => current && greet(ENGINES)); // the boot message goes into a conversation
     void offlineReady().then(() => bootInTurn(ENGINES, () => current));
     return () => {
       current = false;

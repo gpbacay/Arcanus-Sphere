@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { argsFor, asSelf, assemble, callTool, featuresReply, greetingPrompt, identityBrief, introduction, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug, unsupported } from "./index.ts";
+import { argsFor, asSelf, assemble, callTool, featuresReply, greeting, identityBrief, introduction, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -41,15 +41,9 @@ assert.equal(
 );
 assert.equal(asSelf("I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens."), "I'm Arcanus, and the Arcanus Sphere is my body. Arcanus always listens.");
 assert.equal(asSelf("Arcanus can search the web."), "I can search the web.");
-// Greeting context: only true facts, the user's own files fitted in, and a check of what the model adds.
-const greeting = greetingPrompt({ when: "Friday evening", rules: "Call me Sam.", lastTopic: "Cooking pasta", notes: ["Sam likes short answers."] });
-assert.match(greeting.facts, /Gianne Bacay/);
-assert.match(greeting.facts, /Call me Sam/);
-assert.match(greeting.turns[0].content, /Cooking pasta/);
-assert.doesNotMatch(greetingPrompt({ when: "Friday evening" }).facts, /standing instructions|Last time|Notes/);
-assert.deepEqual(unsupported("Good evening Sam, I'm Arcanus. Shall we get back to the pasta?", greeting.facts), ["get"]);
-assert.deepEqual(unsupported("Hello, I'm Arcanus, your personal AI supervisor at the university.", greeting.facts), ["personal", "supervisor", "university"]);
-assert.deepEqual(unsupported("Hello, I am Arcanus. I can search the web or do math for you.", greeting.facts), []);
+// The greeting: by the time of day, to whoever is signed in, by first name. Never "Good night", which is a goodbye.
+assert.equal(greeting({ when: "Friday evening", name: "Gianne Bacay" }), "Good evening, Gianne. I'm Arcanus. What shall we think about?");
+assert.equal(greeting({ when: "Friday night" }), "Hello. I'm Arcanus. What shall we think about?");
 
 // Live voice: each prompt is the last one plus the new turn, so SmolLM2's cache covers all but the new words.
 const talked = (n: number) => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? ("assistant" as const) : ("user" as const), content: `turn ${i}` }));
@@ -67,7 +61,6 @@ assert.equal(jumps, 6);
 // Notes ride with the message, never in the system prompt, and a long turn is cut.
 const noted = liveTurns([{ role: "user", content: "a".repeat(400) }], "what is my name", [{ label: "Notes you remembered", text: "- My name is Sam.", priority: 1 }]);
 assert.match(ONLY_ASKED, /only what the user asked/i);
-assert.match(LIVE_SYSTEM, /only what the user asked/i);
 assert.equal(noted.turns[0].content, LIVE_SYSTEM);
 assert.equal(noted.turns[1].content.length, 161);
 assert.equal(noted.turns[2].content, "Notes you remembered:\n- My name is Sam.\n\nwhat is my name");

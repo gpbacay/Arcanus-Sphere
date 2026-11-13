@@ -9,7 +9,9 @@
 // The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
 // ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Files pane.
+import { scopedHome, scopedKey } from "@/modules/account";
 import { parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
+import { kept } from "@/shared/idb";
 import { Store, errorText } from "@/shared/store";
 
 type Dir = FileSystemDirectoryHandle;
@@ -42,20 +44,6 @@ export const canOpenFolder = () => typeof window !== "undefined" && "showDirecto
 
 // ------------------------------------------------------------------ the root, and remembering an opened folder
 
-/** A folder handle survives reloads only in IndexedDB. */
-function saved<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    const open = indexedDB.open("arcanus-workspace", 1);
-    open.onupgradeneeded = () => open.result.createObjectStore("handles");
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const request = run(open.result.transaction("handles", mode).objectStore("handles"));
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    };
-  });
-}
-
 let root: Promise<Dir> | null = null;
 
 async function mount(dir: Dir, kind: "home" | "folder") {
@@ -66,12 +54,19 @@ async function mount(dir: Dir, kind: "home" | "folder") {
   return dir;
 }
 
-const home = async () => mount(await navigator.storage.getDirectory(), "home");
+/** The signed-in account's private home: the browser's own file system, in a folder of its own per account. */
+const home = async () => {
+  let dir = await navigator.storage.getDirectory();
+  for (const name of scopedHome()) dir = await dir.getDirectoryHandle(name, { create: true });
+  return mount(dir, "home");
+};
+/** Where the signed-in account's opened folder is remembered. The owner's keeps the name it had before accounts. */
+const folderKey = () => scopedKey("folder").replace(/^arcanus_folder$/, "folder");
 
 /** The root, set up on first use: the folder opened last time if access is still granted, otherwise Arcanus home. */
 export function ready(): Promise<Dir> {
   root ??= (async () => {
-    const folder = await saved<Permissioned | undefined>("readonly", (s) => s.get("folder")).catch(() => undefined);
+    const folder = await kept<Permissioned | undefined>("readonly", (s) => s.get(folderKey())).catch(() => undefined);
     if (folder && (await folder.queryPermission({ mode: "readwrite" }).catch(() => "denied")) === "granted") return mount(folder, "folder");
     if (folder) workspace.set({ reconnect: folder.name });
     return home();
@@ -87,19 +82,19 @@ export function ready(): Promise<Dir> {
 export async function openFolder() {
   const picker = (window as unknown as { showDirectoryPicker(o: object): Promise<Dir> }).showDirectoryPicker;
   const dir = await picker({ id: "arcanus", mode: "readwrite" });
-  await saved("readwrite", (s) => s.put(dir, "folder"));
+  await kept("readwrite", (s) => s.put(dir, folderKey()));
   await mount(dir, "folder");
 }
 
 /** Grant access again to the folder opened on an earlier visit. Call from a click. */
 export async function reconnect() {
-  const folder = await saved<Permissioned | undefined>("readonly", (s) => s.get("folder"));
+  const folder = await kept<Permissioned | undefined>("readonly", (s) => s.get(folderKey()));
   if (folder && (await folder.requestPermission({ mode: "readwrite" })) === "granted") await mount(folder, "folder");
 }
 
 /** Back to Arcanus's private home in this browser. The folder is forgotten, not touched. */
 export async function backToHome() {
-  await saved("readwrite", (s) => s.delete("folder")).catch(() => undefined);
+  await kept("readwrite", (s) => s.delete(folderKey())).catch(() => undefined);
   workspace.set({ reconnect: "" });
   await home();
 }

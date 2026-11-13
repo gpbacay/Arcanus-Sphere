@@ -1,6 +1,10 @@
 // Conversations: their state, saving them on this device, and every change to them. Changes apply at once
 // (optimistic) and are written to storage in the background; deletes can be undone for a few seconds.
+// They are kept in IndexedDB. They used to be in localStorage, which stops at about 5 MB: a few hundred replies with
+// their traces. What was saved there is read once, and moved.
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
+import { scopedKey } from "@/modules/account";
+import { kept } from "@/shared/idb";
 import { Store } from "@/shared/store";
 
 export interface Msg {
@@ -26,8 +30,9 @@ type Undo = { label: string; chats: Chat[]; currentId: string };
 type Saved = "all" | "none";
 
 export const MAX = 2000;
-const CHATS_KEY = "arcanus_chats_v1";
-const CURRENT_KEY = "arcanus_current_v1";
+// Each account has its own conversations (account/local.ts): the keys are read when used, once someone is signed in.
+const chatsKey = () => scopedKey("chats_v1");
+const currentKey = () => scopedKey("current_v1");
 const UNDO_MS = 6000;
 
 export const chatStore = new Store({
@@ -65,9 +70,9 @@ function asTrace(value: unknown): ThoughtStep[] | undefined {
   return steps.length ? steps : undefined;
 }
 
-function readSaved(): { chats: Chat[]; currentId: string } {
+/** The saved conversations, checked field by field: what is in storage may be from an older version, or edited. */
+function fromSaved(data: unknown): { chats: Chat[]; currentId: string } {
   try {
-    const data: unknown = JSON.parse(localStorage.getItem(CHATS_KEY) ?? "null");
     const chats: Chat[] = [];
     for (const item of Array.isArray(data) ? data : []) {
       if (!item || typeof item.id !== "string" || !Array.isArray(item.messages)) continue;
@@ -92,7 +97,7 @@ function readSaved(): { chats: Chat[]; currentId: string } {
       });
     }
     if (chats.length) {
-      const saved = localStorage.getItem(CURRENT_KEY);
+      const saved = localStorage.getItem(currentKey());
       return { chats, currentId: chats.some((c) => c.id === saved) ? saved! : chats[0].id };
     }
   } catch {
@@ -105,15 +110,19 @@ function readSaved(): { chats: Chat[]; currentId: string } {
 function persist() {
   window.clearTimeout(saveTimer);
   const { chats, currentId } = chatStore.state;
-  let saved: Saved = "none";
   try {
-    localStorage.setItem(CURRENT_KEY, currentId);
-    localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
-    saved = "all";
+    localStorage.setItem(currentKey(), currentId);
   } catch {
-    /* storage full or blocked: this session still works */
+    /* storage blocked: the first conversation opens next time */
   }
-  if (saved !== chatStore.state.saved) chatStore.set({ saved });
+  const settle = (saved: Saved) => saved !== chatStore.state.saved && chatStore.set({ saved });
+  kept("readwrite", (store) => store.put(chats, chatsKey())).then(
+    () => {
+      settle("all");
+      localStorage.removeItem(chatsKey()); // the copy from before the move: IndexedDB has it now
+    },
+    () => settle("none"), // storage full or blocked: this session still works
+  );
 }
 
 let saveTimer = 0;
@@ -124,12 +133,24 @@ function commit(patch: Partial<State>) {
   saveTimer = window.setTimeout(persist, 300);
 }
 
-/** Read the saved chats. Call once on the client. */
+let hydrating: Promise<void> | null = null;
+
+/** Read the saved chats. Call on the client; it resolves once they are in the store. Never rejects. */
 export function hydrate() {
-  if (chatStore.state.hydrated) return;
-  chatStore.set({ ...readSaved(), hydrated: true });
-  // A change still waiting to be saved is written before the tab goes away.
-  window.addEventListener("pagehide", persist);
+  hydrating ??= (async () => {
+    let data: unknown = await kept<unknown>("readonly", (store) => store.get(chatsKey())).catch(() => undefined);
+    try {
+      data ??= JSON.parse(localStorage.getItem(chatsKey()) ?? "null"); // saved before the move to IndexedDB
+    } catch {
+      /* a bad save starts a fresh chat */
+    }
+    chatStore.set({ ...fromSaved(data), hydrated: true });
+    // A change still waiting to be saved is written before the tab goes away. A phone hides a tab without unloading it.
+    const flush = () => document.visibilityState === "hidden" && persist();
+    window.addEventListener("pagehide", persist);
+    document.addEventListener("visibilitychange", flush);
+  })();
+  return hydrating;
 }
 
 // ------------------------------------------------------------------ changes

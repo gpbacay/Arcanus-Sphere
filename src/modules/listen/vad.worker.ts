@@ -2,8 +2,9 @@
 // frame, that the frame holds speech. It runs here, off the main thread and apart from Moonshine's worker, so a long
 // transcription never holds up the next frame's score. One WASM thread: ~1 ms a frame, 3% of one core.
 import * as ort from "onnxruntime-web/wasm";
+import { ORT_PATH } from "@/shared/served";
 
-ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/";
+ort.env.wasm.wasmPaths = ORT_PATH;
 ort.env.wasm.numThreads = 1;
 
 const FRAME = 512; // samples at 16 kHz; v5 only accepts this size

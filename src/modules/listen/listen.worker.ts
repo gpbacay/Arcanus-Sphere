@@ -5,6 +5,7 @@
 // what lets the words be written while you are still talking (client.ts). The CPU, and one WASM thread, so it never
 // shares SmolLM2's GPU. The encoder stays full precision: an 8-bit encoder mishears.
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
+import { MODELS_PATH, ORT_PATH } from "@/shared/served";
 
 const MODEL = "onnx-community/moonshine-tiny-ONNX";
 const RATE = 16000;
@@ -16,8 +17,12 @@ let loading: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
 
 function load() {
   loading ??= (async () => {
-    const wasm = (env.backends.onnx as { wasm?: { numThreads?: number } }).wasm;
-    if (wasm) wasm.numThreads = 1; // leave the other cores to the sphere, Silero, and Paradee
+    // The runtime and, when `npm run models` fetched them, the model files come from Arcanus's own server.
+    const onnx = env.backends.onnx as { wasm?: { numThreads?: number; wasmPaths?: string } };
+    if (onnx.wasm) onnx.wasm.wasmPaths = ORT_PATH;
+    env.allowLocalModels = true;
+    env.localModelPath = MODELS_PATH;
+    if (onnx.wasm) onnx.wasm.numThreads = 1; // leave the other cores to the sphere, Silero, and Paradee
     const files = new Map<string, { loaded: number; total: number }>();
     const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status !== "progress" || !p.file) return;
