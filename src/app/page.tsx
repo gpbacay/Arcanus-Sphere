@@ -9,6 +9,7 @@ import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
+import { MapPane, trackIfAllowed } from "@/modules/location";
 import { GraphOfThought, mind } from "@/modules/mind";
 import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
@@ -17,10 +18,9 @@ import { voice, voiceEngine } from "@/modules/voice";
 import { Browser } from "@/modules/web";
 import { Files, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
-import { closePane } from "@/shared/pane";
+import { closePane, toggleMap } from "@/shared/pane";
 import { power, restorePower } from "@/shared/power";
 import { bootInTurn, useStore } from "@/shared/store";
-import { SidebarProvider } from "@/shared/ui/sidebar";
 
 // Speech waits until the mic is opened and stays on the CPU. The others start together.
 const ENGINES = [brainEngine, voiceEngine, llmEngine, listenEngine];
@@ -52,8 +52,12 @@ function Home() {
   useEffect(() => {
     void hydrateChats().then(() => setHydrated(true));
     workspaceReady().catch(() => undefined); // .arcanus/: its error shows in the Files pane
-    // A phone opens on the sphere and the chat: there a side pane takes the whole screen, so it waits to be asked for.
-    if (window.matchMedia("(max-width: 767px)").matches) closePane();
+    void trackIfAllowed(); // live GPS if this site may already use it; otherwise asked when you ask where you are, or on the map
+    // A phone opens on the sphere and the chat: there a pane takes the whole screen, so it waits to be asked for.
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      closePane();
+      toggleMap(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -77,21 +81,21 @@ function Home() {
     };
   }, [on, hydrated]);
 
+  // Left: the nav and one side pane. Center: the chat, over the orb. Right: the world map.
   return (
-    <SidebarProvider defaultOpen className="h-dvh overflow-hidden" style={{ "--sidebar-width": "calc(min(372px, 100vw - 20px) + 20px)" } as React.CSSProperties}>
-      <main className="app-shell">
-        <Stage />
-        <AppNav />
-        <Boundary fallback={null}>
-          <GraphOfThought />
-          <Files />
-          <Browser />
-        </Boundary>
-        <Boundary fallback={<ChatFallback />}>
-          <ChatPanel />
-        </Boundary>
-      </main>
-    </SidebarProvider>
+    <main className="app-shell">
+      <Stage />
+      <AppNav />
+      <Boundary fallback={null}>
+        <GraphOfThought />
+        <Files />
+        <Browser />
+        <MapPane />
+      </Boundary>
+      <Boundary fallback={<ChatFallback />}>
+        <ChatPanel />
+      </Boundary>
+    </main>
   );
 }
 

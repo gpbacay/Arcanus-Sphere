@@ -141,7 +141,7 @@ export function Composer() {
               disabled={!on}
               onClick={talk}
             >
-              <Icon name="mic" />
+              <Icon name="live" />
             </button>
           ) : null}
           <button

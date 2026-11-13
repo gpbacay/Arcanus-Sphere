@@ -443,6 +443,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     let shown = "";
     let unspoken = "";
     let spoke = false;
+    const said: string[] = []; // every piece handed to the voice, in order
     let result;
     try {
       result = await llm.generate(
@@ -454,7 +455,10 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           const { sentences, rest } = takeSentences(unspoken + piece, spoke ? 80 : 24);
           unspoken = rest;
           spoke ||= sentences.length > 0;
-          sentences.forEach((s) => voice.say(own(s)));
+          for (const s of sentences) {
+            said.push(own(s));
+            voice.say(own(s));
+          }
           if (sentences.length) speaking ??= voiced(generating);
           show([...trace, writing("Writing on this device")], own(shown));
         },
@@ -477,13 +481,15 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
     // A spoken reply that hit its token cap ends mid-sentence: don't say, or keep, the broken end.
     const cutOff = spoken && result.tokens >= VOICE_TOKENS;
     if (unspoken.trim() && !cutOff) {
+      said.push(own(unspoken));
       voice.say(own(unspoken));
       speaking ??= voiced(generating);
     }
     speaking?.();
     const device = llm.state.state.device === "webgpu" ? "WebGPU" : "WebAssembly";
     const written = own(result.text || shown.trim() || "…");
-    let text = cutOff ? wholeSentences(written) : written;
+    // Cut off at the cap: keep exactly what was spoken (a clause may have been said past the last full stop).
+    let text = cutOff ? said.join(" ") || wholeSentences(written) : written;
     const wrote = result.cached
       ? { label: "Recalled an earlier reply", description: "Same prompt as before, and SmolLM2 writes the same words for it, so it didn't run again" }
       : {
@@ -491,7 +497,13 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
           description: `First word in ${(result.firstMs / 1000).toFixed(1)} s${result.reused ? ` (read ${result.prompted! - result.reused} new of ${result.prompted} tokens)` : ""} · ${result.tokens} tokens at ${result.perSecond.toFixed(1)} tok/s · ${device}`,
         };
     const grounded = built.evidence.length ? grounding(text, built.evidence) : null;
-    if (grounded && grounded.score < 0.5) text = spokenLine(built.evidence[0]);
+    if (grounded && grounded.score < 0.5) {
+      // The model's words were already being spoken: stop them and say the replacement, so the chat and the voice agree.
+      text = spokenLine(built.evidence[0]);
+      voice.cancel();
+      sayAll(text);
+      voiced(generating, "Speaking the corrected reply")();
+    }
     settle(generating, { content: "Wrote the reply", detail: result.cached ? "an earlier reply, recalled" : wrote.description });
     const checked = grounded
       ? {
@@ -786,6 +798,13 @@ export function talk() {
     },
   });
 }
+
+// The live chat's chime: up as the mic opens, down as it closes, however it closed (the button, an error, power off).
+let wasLive = false;
+listen.state.subscribe(() => {
+  const on = listen.state.state.on;
+  if (on !== wasLive) voice.chime((wasLive = on));
+});
 
 const lastAssistant = () => currentChat()?.messages.findLast((m) => m.role === "assistant")?.text ?? "";
 

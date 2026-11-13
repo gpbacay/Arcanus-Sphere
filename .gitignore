@@ -51,5 +51,8 @@ next-env.d.ts
 # ONNX Runtime Web's .wasm files, copied from node_modules by scripts/copy-ort.mjs
 /public/ort/
 
+# MapLibre's worker, copied from node_modules by scripts/copy-maplibre.mjs
+/public/maplibre/
+
 # Models fetched by `npm run models` (scripts/fetch-models.mjs)
 /public/models/

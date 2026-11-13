@@ -128,7 +128,7 @@ export function ArChat() {
                 aria-label={talking ? "End the voice conversation" : "Talk to Arcanus"}
                 onClick={talk}
               >
-                <Icon name="mic" size={26} />
+                <Icon name="live" size={26} />
               </button>
             ) : null}
             {busy || speaking ? (

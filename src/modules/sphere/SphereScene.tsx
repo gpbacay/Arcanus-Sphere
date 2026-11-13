@@ -29,6 +29,8 @@ type Props = {
   on?: boolean;
   /** Bump to put the orb and the camera back where they started. */
   resetKey?: number;
+  /** Called with true when the user moves, rotates or resizes the orb. */
+  onEdit?: (edited: boolean) => void;
 };
 
 const GRID_Y = -1.75; // just under the outermost ring (out to ~1.69 at its largest)
@@ -81,13 +83,14 @@ function makeGrid() {
   return grid;
 }
 
-export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool = "view", on = true, resetKey = 0 }: Props) {
+export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool = "view", on = true, resetKey = 0, onEdit }: Props) {
   const [broken, setBroken] = useState(false);
   const mountRef = useRef<HTMLDivElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const boostRef = useRef(0);
   const onRef = useRef(on);
   const capRef = useRef(cap);
+  const editRef = useRef(onEdit);
   const api = useRef<{ tool: (tool: Tool) => void; reset: () => void } | null>(null);
 
   useEffect(() => {
@@ -105,6 +108,10 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
   useEffect(() => {
     capRef.current = cap;
   }, [cap]);
+
+  useEffect(() => {
+    editRef.current = onEdit;
+  }, [onEdit]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -146,6 +153,7 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
     });
     // Resizing is uniform: the orb never stretches. Of the three axes, take the one the drag actually moved.
     gizmo.addEventListener("objectChange", () => {
+      editRef.current?.(true);
       if (gizmo.mode !== "scale") return;
       const { x, y, z } = rig.scale;
       const moved = [x, y, z].reduce((a, b) => (Math.abs(Math.log(b / dragStartScale)) > Math.abs(Math.log(a / dragStartScale)) ? b : a));

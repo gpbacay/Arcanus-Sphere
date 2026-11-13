@@ -9,6 +9,7 @@ import { callTool, connectMcp, featuresReply, introduction, listTools, matchTool
 import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
 import { deviceCommand, openApp, operate } from "@/modules/device";
 import { sourceAction, sourceCommand } from "@/modules/workspace";
+import { coordinates, gps, noFixReason, whereabouts } from "@/modules/location";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
 import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
@@ -99,6 +100,20 @@ export const SKILLS: Skill[] = [
       return {
         step: { label: "Read the clock", description: city ? `ARC 1 read the city: ${city}` : "Facts for the language model", results: [now.zone] },
         facts,
+      };
+    },
+  },
+  {
+    ...route("location"),
+    async run(text) {
+      // From this device's GPS, said as it is: a small model would garble coordinates. Arcanus runs here, so "where are
+      // you" is the same place.
+      const self = /\b(?:where (?:in the world )?are you|your (?:current |live |exact |gps )?(?:location|position|coordinates|whereabouts)|what (?:city|town|country|place) are you in)\b/i.test(text);
+      const line = await whereabouts(self);
+      const fix = gps.state.fix;
+      return {
+        step: { label: "Read this device's location", description: fix ? `GPS · ±${Math.round(fix.accuracy)} m · ${gps.state.status}` : `no fix · ${gps.state.status}`, results: fix ? [coordinates(fix)] : undefined },
+        reply: line ?? noFixReason(),
       };
     },
   },

@@ -100,7 +100,7 @@ export async function think(text: string): Promise<Plan> {
   // A claim is certain: remember how it was worded, so similar requests are routed without one. Not math: its claims
   // are bare expressions, whose only words are numbers, and numbers would vote math for any message holding them. Not
   // device or source: they are decided by their claim alone (routes.ts).
-  if (decided.claimed && decided.route !== "math" && decided.route !== "device" && decided.route !== "source") void memory.observe(text, decided.route).then((id) => (id ? save(memory) : undefined), () => undefined);
+  if (decided.claimed && decided.route !== "math" && decided.route !== "device" && decided.route !== "source" && decided.route !== "location") void memory.observe(text, decided.route).then((id) => (id ? save(memory) : undefined), () => undefined);
   const voters = decided.neighbors.slice(0, 3);
   const why = decided.claimed
     ? ` · ${decided.claimed}, so ${decided.route}`

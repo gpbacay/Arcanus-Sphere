@@ -7,7 +7,11 @@
 //   ("transformers-cache") and the Paradee voice worker ("paradee-v1.2") already keep them in Cache Storage and read
 //   that before the network. Caching them here too would store ~250 MB twice.
 const CACHE = "arcanus-v2"; // v2: the runtime moved from jsDelivr to /ort/, so the old CDN copies are dropped
-const SHELL = ["/", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/vad/silero_vad.onnx", "/icon-192.png", "/icon-512.png"];
+const SHELL = ["/", "/geo/countries.json", "/geo/places.json", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/vad/silero_vad.onnx", "/icon-192.png", "/icon-512.png"];
+// Map tiles you have looked at, so those streets still show offline. Not "arcanus-": a new deploy keeps them.
+// ponytail: kept until the browser clears site data, never refreshed or capped. Expire them if the cache grows too big.
+const TILES = "map-tiles-v1";
+const isTile = (href) => new URL(href).hostname === "tile.openstreetmap.org";
 const UNVERSIONED = new Set(["/orb.glb"]); // add a public file here when it is redrawn without changing its name
 
 // /api/ is live (the browser relay): never cached. /models/ is kept by the model caches (above).
@@ -31,6 +35,15 @@ async function networkFirst(request) {
   } catch {
     return (await caches.match(request)) ?? Response.error();
   }
+}
+
+async function tile(request) {
+  const cache = await caches.open(TILES);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const response = await fetch(request);
+  if (response.ok) await cache.put(request, response.clone());
+  return response;
 }
 
 const load = (request) => (UNVERSIONED.has(new URL(request.url).pathname) ? networkFirst(request) : cacheFirst(request));
@@ -69,4 +82,5 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || request.headers.has("range")) return;
   if (request.mode === "navigate") event.respondWith(page(event));
   else if (cacheable(request.url)) event.respondWith(load(request));
+  else if (isTile(request.url)) event.respondWith(tile(request));
 });

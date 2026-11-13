@@ -59,7 +59,7 @@ export function asSelf(text: string): string {
 
 /** What Arcanus can really do, as it says it ("I can …"). The only abilities the model is told about, so it has no
  *  reason to invent others. */
-export const abilities = ["tell the time", "do math", "search the web and read pages", "open a site in your browser", "open apps on this computer and click, type, scroll and read in them", "tell you this computer's specs", "remember notes", "answer from the books you add", "run your skills", "read and edit my own files", "open, search and commit my own source code", "talk by voice"];
+export const abilities = ["tell the time", "tell where we are, live, and show it on my world map", "do math", "search the web and read pages", "open a site in your browser", "open apps on this computer and click, type, scroll and read in them", "tell you this computer's specs", "remember notes", "answer from the books you add", "run your skills", "read and edit my own files", "open, search and commit my own source code", "talk by voice"];
 
 /** The answer to "what can you do": the abilities themselves, so a small model cannot invent or disown any. */
 export const featuresReply = `I can ${abilities.slice(0, -1).join(", ")}, and ${abilities.at(-1)}. Everything but the web runs on your device. What shall we try?`;

@@ -103,6 +103,29 @@ class Voice {
     return this.ctx;
   }
 
+  /**
+   * A short two-note chime: rising when live chat starts, falling when it ends. Synthesized, so there is no file to
+   * load offline. It goes straight to the speakers, past the analyser (the sphere doesn't react) and the ducking.
+   */
+  chime(up: boolean) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.01;
+    (up ? [660, 990] : [990, 660]).forEach((hz, i) => {
+      const at = t + i * 0.09;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.14, at + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.22);
+    });
+  }
+
   /** Turn the voice down while someone may be talking over it (and its echo out of the mic), or back up. */
   duck(on: boolean) {
     if (this.ctx && this.out) this.out.gain.setTargetAtTime(on ? 0.08 : 1, this.ctx.currentTime, 0.03);

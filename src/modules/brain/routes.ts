@@ -38,6 +38,9 @@ export const GO = /^(?:please\s+)?(?:go\s*to|navigate to|take me to|pull up|open
 /** A question about the present moment: the time, the day, the date, the month or the year it is now. */
 const NOW =
   /\b(?:what|which) (?:time|day|date|month|year)(?: of the week)? (?:is it|is this|is today|are we in)\b|\bwhat(?:'s| is) the (?:time|date|day)(?: (?:today|now|right now))?\s*\??$|\bis it (?:mon|tues|wednes|thurs|fri|satur|sun)day\b/i;
+/** A question about where the user or Arcanus is right now. "Where are you from" is about its origin, not this. */
+export const WHERE =
+  /\bwhere (?:am i|are (?:you|we)(?! from)|is (?:this|here)|in the world are (?:you|we))\b|\b(?:my|your|our) (?:current |live |exact |gps )?(?:location|position|coordinates|whereabouts)\b|\bwhat (?:city|town|country|place) (?:am i|are (?:you|we)) in\b/i;
 /** The words a sum is asked with. */
 const ASKING = /^(?:what|what's|whats|how|much|many|is|are|do|does|you|get|from|calculate|compute|solve|work|out|the|answer|result|to|of|equals?|please|tell|me|can|could)$/i;
 
@@ -115,6 +118,16 @@ export const ROUTES: Route[] = [
     // them, which every route's seeds hold. Only a question about now is taken: "what year did the war end" is not.
     claim(text) {
       return NOW.test(text) ? "asked about now" : undefined;
+    },
+  },
+  {
+    route: "location",
+    description: "Asks where the user or Arcanus is: the live position, city, country or coordinates",
+    // No seeds, and no vote, like device: WHERE reads every such question, and seeds would pull "where" questions
+    // about other things ("where are my notes kept") off their routes.
+    seeds: [],
+    claim(text) {
+      return WHERE.test(text) ? "asked where we are" : undefined;
     },
   },
   {
@@ -223,7 +236,7 @@ export async function decide(memory: Hippocampus, text: string, routes: Route[] 
   let route = claim?.route ?? (voted.label && voted.confidence >= SURE ? voted.label : "chat");
   // Seeds hold numbers ("what is 12 * 7"), so any "12" votes math. Math with nothing to compute is chat.
   if (route === "math" && !findExpression(text)) route = "chat";
-  if ((route === "device" || route === "source") && !claim) route = "chat";
+  if ((route === "device" || route === "source" || route === "location") && !claim) route = "chat";
   const unmatched = !voted.neighbors.length;
   const aboutSelf = route === "chat" && TO_YOU.test(text) && (unmatched || (voted.distribution.about ?? 0) >= SELF_SHARE);
   return { route, claimed: claim?.why, label: voted.label, confidence: voted.confidence, aboutSelf, neighbors: voted.neighbors };

@@ -7,20 +7,16 @@ import { voice } from "@/modules/voice";
 import { power } from "@/shared/power";
 import { useStore } from "@/shared/store";
 import { MessageSquare } from "lucide-react";
-import { Sidebar, useSidebar } from "@/shared/ui/sidebar";
 import { COMPOSER_ID, Composer } from "./Composer";
-import { discard, send, useBusy } from "./conversation";
+import { discard, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { Thread } from "./Thread";
 import { chatStore, newChat, rename, select, selectCurrent, undo } from "./store";
-
-const SUGGESTIONS = ["Who are you?", "What time is it?", "What's (12 + 8) * 3?", "Write a haiku about the sea"];
 
 type Mood = "off" | "ready" | "thinking" | "speaking";
 
 /** The chat: each part below reads its own data, so a streamed token or a loading model re-renders only its part. */
 export function ChatPanel() {
-  const { isMobile } = useSidebar();
   const [collapsed, setCollapsed] = useState(false);
   // Phone opens on the sphere. The chat row only exists while this panel is open.
   useEffect(() => {
@@ -31,38 +27,15 @@ export function ChatPanel() {
   const speaking = useStore(voice.state, (s) => s.speaking);
   const mood: Mood = !on ? "off" : busy ? "thinking" : speaking ? "speaking" : "ready";
 
-  if (collapsed) {
-    return (
-      // Minimized: only the header stays, docked on the bottom edge at the pane's full width.
-      <aside className="rail" aria-label="Arcanus chat (minimized)">
-        <Header mood={mood} collapsed onToggle={() => setCollapsed(false)} />
-      </aside>
-    );
-  }
-
-  const body = (
-    <>
-      <Header mood={mood} onToggle={() => setCollapsed(true)} />
-      <Thread />
-      <UndoBar />
-      <Suggestions />
-      <Composer />
-    </>
-  );
-
-  if (isMobile) {
-    return (
-      <aside className="panel" aria-label="Arcanus chat">
-        {body}
-      </aside>
-    );
-  }
+  // The header stays at the top and the composer at the bottom; minimizing hides only the thread between them.
+  // One tree for both states, so the composer (and what you were typing) stays mounted.
   return (
-    <Sidebar side="right" variant="floating" collapsible="offcanvas">
-      <div className="panel panel-docked" role="complementary" aria-label="Arcanus chat">
-        {body}
-      </div>
-    </Sidebar>
+    <aside className="panel" data-min={collapsed || undefined} aria-label="Arcanus chat">
+      <Header mood={mood} collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
+      {collapsed ? null : <Thread />}
+      {collapsed ? null : <UndoBar />}
+      <Composer />
+    </aside>
   );
 }
 
@@ -231,7 +204,7 @@ function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?:
         title={collapsed ? "Expand chat" : "Minimize chat"}
         onClick={onToggle}
       >
-        <Icon name={collapsed ? "up" : "down"} />
+        <Icon name={collapsed ? "down" : "up"} />
       </button>
     </header>
   );
@@ -247,22 +220,6 @@ function UndoBar() {
       <button type="button" className="btn" onClick={undo}>
         Undo
       </button>
-    </div>
-  );
-}
-
-function Suggestions() {
-  const empty = useStore(chatStore, (s) => !selectCurrent(s)?.messages.some((m) => m.role === "user"));
-  const busy = useBusy();
-  const on = useStore(power, (s) => s.on);
-  if (on && (!empty || busy)) return null;
-  return (
-    <div className="suggestions">
-      {(on ? SUGGESTIONS : ["/run"]).map((s) => (
-        <button key={s} type="button" className="chip" onClick={() => send(s)}>
-          {s}
-        </button>
-      ))}
     </div>
   );
 }

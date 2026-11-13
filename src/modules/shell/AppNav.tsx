@@ -1,9 +1,9 @@
 "use client";
 
-import { FolderOpen, Globe, Info, Network, Settings, User, X } from "lucide-react";
+import { FolderOpen, Globe, Info, MapPin, Network, Settings, User, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { account, passwordError, saveAccount, signOut } from "@/modules/account";
-import { pane, togglePane } from "@/shared/pane";
+import { pane, toggleMap, togglePane, TOP_ACTIONS } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
 import { modelSize, MODELS, setModelSize, type ModelSize } from "@/modules/llm";
@@ -12,15 +12,20 @@ import { voice } from "@/modules/voice";
 
 type DialogName = "about" | "settings" | "account";
 
-/** Left rail: the mark, Arcanus's Graph of Thought, files and browser (side panes), then About and Settings (dialogs). */
+/**
+ * The top bar: the mark, then Arcanus's Graph of Thought, files, browser and world map (side panes), then Account, About
+ * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's ⋮ tools.
+ */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
   const side = useStore(pane, (s) => s.open);
+  const map = useStore(pane, (s) => s.map);
   const thinking = useStore(mind, (s) => s.thoughts.some((t) => t.status === "active"));
   return (
-    <nav className="app-nav" aria-label="Arcanus">
+    <nav className="app-topbar" aria-label="Arcanus">
       <div className="app-nav-brand" title="Arcanus">
         <Logo size={26} />
+        <span className="app-topbar-title">Arcanus</span>
       </div>
       <button
         type="button"
@@ -39,6 +44,9 @@ export function AppNav() {
       <button type="button" className="app-nav-btn" aria-label="Browser" title="Browser" aria-expanded={side === "browser"} onClick={() => togglePane("browser")}>
         <Globe size={17} aria-hidden />
       </button>
+      <button type="button" className="app-nav-btn" aria-label="World map" title="World map: where you and Arcanus are, live" aria-expanded={map} onClick={() => toggleMap()}>
+        <MapPin size={17} aria-hidden />
+      </button>
       <div className="app-nav-gap" />
       <button type="button" className="app-nav-btn" aria-label="Account" title="Account" aria-expanded={open === "account"} aria-haspopup="dialog" onClick={() => setOpen("account")}>
         <User size={17} aria-hidden />
@@ -49,6 +57,7 @@ export function AppNav() {
       <button type="button" className="app-nav-btn" aria-label="Settings" title="Settings" aria-expanded={open === "settings"} aria-haspopup="dialog" onClick={() => setOpen("settings")}>
         <Settings size={17} aria-hidden />
       </button>
+      <div id={TOP_ACTIONS} className="app-topbar-actions" />
       {open === "about" ? <AboutDialog onClose={() => setOpen(null)} /> : null}
       {open === "settings" ? <SettingsDialog onClose={() => setOpen(null)} /> : null}
       {open === "account" ? <AccountDialog onClose={() => setOpen(null)} /> : null}

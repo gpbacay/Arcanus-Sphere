@@ -102,4 +102,11 @@ for (const text of ["open your source code", "open page.tsx", "what branch are y
   assert.equal((await decide(routerMemory(), text)).route, "source", text);
 }
 assert.notEqual((await decide(routerMemory(), "who wrote your code")).route, "source");
+// Where you and Arcanus are is claimed; "where are you from" and other "where" questions are not.
+for (const text of ["where am I", "where are you right now", "what's my current location", "what are your coordinates", "what city am I in", "where in the world are we"]) {
+  assert.equal((await decide(routerMemory(), text)).route, "location", text);
+}
+for (const text of ["where are you from", "where are my notes kept", "where is paris"]) {
+  assert.notEqual((await decide(routerMemory(), text)).route, "location", text);
+}
 console.log("routing ok");

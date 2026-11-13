@@ -57,6 +57,7 @@
   --r-sm: 0; /* controls */
   --panel-w: min(372px, calc(100vw - 20px));
   --gap: 10px;
+  --top-h: 44px; /* the top bar; the chat and the side panes start under it */
 
   --sidebar: transparent;
   --sidebar-foreground: var(--text);
@@ -139,7 +140,7 @@ body {
 }
 
 /* —— Glass: every pane over the stage is the same material —— */
-.app-nav,
+.app-topbar,
 .side-pane,
 .signin-pane,
 [data-mobile="true"][data-sidebar="sidebar"],
@@ -155,7 +156,7 @@ body {
 }
 
 /* Registration ticks: the four corners of each pane, drawn in light. */
-.app-nav::before,
+.app-topbar::before,
 .side-pane::before,
 .signin-pane::before,
 .app-dialog::before,
@@ -190,13 +191,9 @@ body {
     clip-path: inset(0 0 0 0);
   }
 }
-.app-nav {
-  animation: scan-in 0.7s var(--ease) both;
-}
 
 /* —— Stage —— */
 .app-shell {
-  --nav-w: 52px;
   position: relative;
   width: 100vw;
   height: 100dvh;
@@ -251,58 +248,67 @@ body {
   }
 }
 
-/* —— Chat: a clear overlay. The sphere stays visible; each line carries its own scrim. —— */
+/* —— Chat: a clear column at the center, over the orb. Each line carries its own scrim. ——
+   It fills the room the panes leave (a side pane on the left, the world map on the right): its header at the top,
+   its composer at the bottom, the conversation between, at most a comfortable reading width. */
 .panel {
+  --chat-w: min(620px, 100%);
   position: absolute;
-  top: auto;
+  top: calc(var(--top-h) + 2 * var(--gap) + env(safe-area-inset-top));
   bottom: var(--gap);
-  left: var(--gap);
-  z-index: 10;
-  width: var(--panel-w);
-  height: auto;
-  max-height: calc(100dvh - 2 * var(--gap));
+  left: 0;
+  right: 0;
+  z-index: 20;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   border: none;
-  background: linear-gradient(to bottom, transparent 0%, rgba(2, 6, 12, 0.04) 28%, rgba(2, 6, 12, 0.22) 100%);
+  background: none;
   box-shadow: none;
   backdrop-filter: none;
+}
+/* Fixed: the chat is centered on the screen, and does not move when a side pane or the map opens or closes. On a wide
+   screen it is as wide as the room between the two panes; a pane opened wider than that (Files with its editor) lies over it. */
+@media (min-width: 768px) {
+  .panel {
+    --chat-w: min(620px, max(360px, calc(100vw - 2 * (var(--panel-w) + 3 * var(--gap)))));
+  }
+}
+/* The header, the conversation and the composer share one width. The header and the composer are boxes with the same
+   8px inset, so their edges line up. */
+.panel > .thread,
+.panel > .composer {
+  width: 100%;
+  max-width: var(--chat-w);
+}
+.panel > .panel-head {
+  width: calc(100% - 16px);
+  max-width: calc(var(--chat-w) - 16px);
+}
+.panel > .undo {
+  width: calc(100% - 16px);
+  max-width: calc(var(--chat-w) - 16px);
+  margin: 0 0 8px;
 }
 
-.panel-docked {
-  position: relative;
-  inset: auto;
-  width: auto;
-  height: auto;
-  max-height: calc(100dvh - 2 * var(--gap));
-  min-height: 0;
-  overflow: visible;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
+/* The chat lies over the orb: only its header, messages and composer take clicks, so the orb can be dragged between
+   them, the chat open or minimized. Minimized, the header stays at the top and the composer at the bottom. */
+.panel {
+  pointer-events: none;
 }
-
-.rail {
-  position: absolute;
-  right: var(--gap);
-  bottom: 0;
-  z-index: 20;
-  width: var(--panel-w);
-  border: none;
-  border-radius: 0;
-  background: linear-gradient(to top, rgba(2, 6, 12, 0.55), transparent);
-  box-shadow: none;
-  backdrop-filter: none;
-  padding-bottom: env(safe-area-inset-bottom);
-  animation: dock-up 0.35s var(--ease) both;
+.panel > *,
+.panel .thread > * {
+  pointer-events: auto;
 }
-/* Docked at the bottom, the conversation menu opens upward. */
-.rail .menu {
-  top: auto;
-  bottom: calc(100% + 6px);
+.panel .thread {
+  pointer-events: none; /* its messages scroll it: a wheel or a swipe on one scrolls the thread */
+}
+.panel[data-min] {
+  background: none;
+}
+.panel[data-min] .composer {
+  margin-top: auto;
 }
 @keyframes dock-up {
   from {
@@ -313,18 +319,19 @@ body {
 .panel-head {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  align-self: flex-start;
-  width: max-content;
-  max-width: 100%;
+  align-items: center;
   gap: 0;
-  padding: 8px 6px 8px 12px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid rgba(150, 215, 245, 0.32);
+  border-radius: var(--r);
+  background: rgba(2, 6, 12, 0.58);
+  backdrop-filter: blur(12px) saturate(1.3);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.65);
 }
 .panel-head .title-btn .truncate {
-  flex: 0 0 auto;
-  min-width: max-content;
-  max-width: min(240px, calc(100vw - 12.5rem));
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .panel-head .icon-btn,
 .panel-head .brand-logo {
@@ -339,7 +346,7 @@ body {
   transition: filter 0.4s, opacity 0.4s;
 }
 .panel-head .brand-logo {
-  margin: 3px 8px 0 0;
+  margin: 0 8px 0 0;
 }
 .brand-logo img {
   position: absolute;
@@ -360,8 +367,7 @@ body {
 
 .panel-title {
   position: relative;
-  flex: 0 0 auto;
-  max-width: min(280px, calc(100vw - 11.5rem));
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -503,6 +509,10 @@ textarea.field {
   border-top: none;
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22px);
   mask-image: linear-gradient(to bottom, transparent, #000 22px);
+}
+/* A short conversation sits by the composer, not under the header. */
+.thread > :first-child {
+  margin-top: auto;
 }
 
 .msg {
@@ -814,30 +824,6 @@ textarea.field {
   margin: 0;
 }
 
-.suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 0 10px 6px;
-}
-
-.chip {
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid rgba(150, 215, 245, 0.28);
-  border-radius: var(--r-sm);
-  background: rgba(2, 6, 12, 0.55);
-  color: #e7f4fb;
-  font-size: 11.5px;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.chip:hover {
-  border-color: rgba(111, 224, 255, 0.5);
-  background: var(--accent-soft);
-  color: var(--text);
-}
-
 /* —— Composer —— */
 .composer {
   display: flex;
@@ -900,7 +886,7 @@ textarea.field {
   border-radius: var(--r);
   background: rgba(2, 6, 12, 0.58);
   backdrop-filter: blur(12px) saturate(1.3);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s;
 }
 .composer-box[data-command] textarea {
   font-family: var(--font-mono);
@@ -908,8 +894,7 @@ textarea.field {
   color: var(--accent);
 }
 .composer-box:focus-within {
-  border-color: rgba(111, 224, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(111, 224, 255, 0.08), 0 0 22px -6px rgba(111, 224, 255, 0.4);
+  border-color: rgba(111, 224, 255, 0.55); /* the focus mark: a brighter edge, no glow */
 }
 
 .composer textarea {
@@ -979,54 +964,14 @@ textarea.field {
   }
 }
 
-/* —— Floating right sidebar: the chat sits on the sphere, only as tall as the thread —— */
-[data-side="right"] > [data-slot="sidebar-gap"] {
-  display: none;
-}
-[data-side="right"][data-variant="floating"] > [data-slot="sidebar-container"] {
-  z-index: 20;
-  top: auto;
-  height: auto;
-  padding: var(--gap);
-  pointer-events: none;
-  background: transparent;
-}
-[data-variant="floating"] [data-slot="sidebar-inner"] {
-  position: relative;
-  height: auto;
-  max-height: calc(100dvh - 2 * var(--gap));
-  pointer-events: auto;
-  overflow: visible;
-  border: none;
-  border-radius: 0;
-  background: linear-gradient(to bottom, transparent 0%, rgba(2, 6, 12, 0.04) 28%, rgba(2, 6, 12, 0.22) 100%);
-  box-shadow: none;
-  backdrop-filter: none;
-}
-[data-side="right"] [data-sidebar="trigger"] svg {
-  transform: scaleX(-1);
-}
-
-/* —— Left rail: mark, About, Settings. Dialogs, not routes, so the sphere stays up. —— */
-.app-nav {
-  position: absolute;
-  z-index: 25;
-  top: var(--gap);
-  bottom: var(--gap);
-  left: var(--gap);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: var(--nav-w);
-  padding: 10px 0 8px;
-}
+/* —— Top bar buttons: the mark, then the panes, the dialogs, and (last) the orb's ⋮ tools —— */
 .app-nav-brand {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 6px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
 }
 .app-nav-gap {
   flex: 1;
@@ -1301,21 +1246,36 @@ textarea.field {
   overflow-wrap: anywhere;
 }
 
-/* 3D orb tools: one horizontal row at the top center, above the sphere. */
-.stage-tools {
+/* —— Top bar: the mark, every pane and dialog button, and the orb's ⋮ tools at the right end —— */
+.app-topbar {
   position: absolute;
   top: var(--gap);
-  left: 50%;
+  left: var(--gap);
+  right: var(--gap);
   z-index: 26;
   display: flex;
-  flex-flow: row nowrap;
   align-items: center;
-  justify-content: center;
   gap: 2px;
-  width: max-content;
-  max-width: calc(100% - 2 * var(--gap));
-  padding: 4px;
-  transform: translateX(-50%);
+  height: var(--top-h);
+  padding: 0 4px 0 12px;
+  animation: scan-in 0.7s var(--ease) both;
+}
+.app-topbar-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.app-topbar-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+/* 3D orb tools: one ⋮ button; sphere/Tools.tsx puts it in the top bar's slot. */
+.stage-tools {
+  position: relative;
+  display: flex;
 }
 .stage-tools .icon-btn {
   width: 36px;
@@ -1324,29 +1284,34 @@ textarea.field {
 .power-btn[data-changing] svg {
   animation: pulse 0.5s ease-in-out infinite;
 }
-.stage-tools .icon-btn[aria-pressed="true"] {
+.stage-tools .icon-btn[aria-expanded="true"] {
   background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(111, 224, 255, 0.3);
 }
-.tools-sep {
-  flex: none;
-  width: 1px;
-  height: 18px;
-  margin: 0 4px;
-  background: var(--line-strong);
+/* The tools menu drops down from the ⋮ button, right-aligned with it. */
+.tools-menu {
+  left: auto;
+  right: 0;
+  width: 230px;
+}
+.tools-menu .menu-item {
+  min-height: 34px;
+}
+.tools-menu .menu-item[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* —— Side panes: Arcanus's files and browser, beside the rail, over the stage —— */
 .side-pane {
   position: absolute;
-  z-index: 27; /* over the orb tools when the stage is narrow: the pane is what you're using */
-  top: var(--gap);
+  z-index: 25;
+  top: calc(var(--top-h) + 2 * var(--gap)); /* under the top bar */
   bottom: var(--gap);
-  left: calc(var(--nav-w) + 2 * var(--gap));
+  left: var(--gap);
   display: flex;
   flex-direction: column;
-  width: min(var(--panel-w), calc(100vw - var(--nav-w) - var(--panel-w) - 6 * var(--gap))); /* as wide as the chat */
+  width: min(var(--panel-w), calc(100vw - var(--panel-w) - 4 * var(--gap)));
   min-width: 280px;
   animation: scan-in 0.45s var(--ease) both;
 }
@@ -1510,7 +1475,7 @@ textarea.field {
 }
 /* The IDE: open files as tabs, the folder, and the code editor. Wide, the pane covers the stage and shows both. */
 .files-pane[data-wide] {
-  width: calc(100vw - var(--nav-w) - var(--panel-w) - 5 * var(--gap));
+  width: calc(100vw - var(--panel-w) - 3 * var(--gap));
 }
 .ide {
   display: flex;
@@ -2048,38 +2013,34 @@ textarea.field {
   }
 
   .app-shell {
-    --nav-w: 0px;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
-    grid-template-areas: "nav status" "stage stage";
+    grid-template-areas: "nav" "stage";
     width: 100%;
     height: 100dvh;
     padding-top: env(safe-area-inset-top);
   }
-  /* One strip across the top: the mark and the two dialogs, then the telemetry, scrolling sideways, beside them. */
-  .app-nav {
+  /* One strip across the top: the mark, every pane and dialog button, and the ⋮ at the right end. */
+  .app-topbar {
     grid-area: nav;
     position: relative;
     inset: auto;
-    flex-direction: row;
-    align-self: start;
-    justify-self: start;
-    width: auto;
-    height: 40px;
-    margin: 8px 0 0 8px;
-    padding: 0 2px 0 7px;
+    margin: 8px 8px 0;
+    padding: 0 2px 0 8px;
     gap: 0;
   }
   .app-nav-brand {
-    width: auto;
-    padding: 0 8px 0 0;
     margin-right: 2px;
-    border-bottom: 0;
-    border-right: 1px solid var(--line);
+    padding-right: 8px;
   }
+  .app-topbar-title,
   .app-nav-gap {
     display: none;
+  }
+  .app-topbar-actions {
+    margin-left: auto;
+    padding-left: 2px;
   }
   .app-nav-btn {
     width: 36px;
@@ -2149,37 +2110,11 @@ textarea.field {
     height: auto;
     min-height: 0;
   }
-  .stage-tools {
-    top: 6px;
-    max-width: calc(100% - 16px);
-    padding: 2px;
-  }
-  .stage-tools .icon-btn {
-    width: 40px;
-    height: 40px; /* a finger-sized target */
-  }
 
+  /* The chat fills the screen under the top bar; the base .panel rules (header top, composer bottom) apply. */
   .panel {
-    position: absolute;
-    left: 0;
-    right: auto;
     bottom: 0;
-    top: auto;
-    z-index: 20;
-    width: min(100%, 440px);
-    height: auto;
-    max-height: min(68dvh, calc(100dvh - 56px - env(safe-area-inset-top)));
-    margin: 0;
-    overflow: visible;
-    border: none;
-    border-radius: 0;
     padding-bottom: env(safe-area-inset-bottom);
-  }
-  .rail {
-    right: auto;
-    left: 0;
-    width: min(100%, 440px);
-    border: none;
   }
   .panel-head {
     flex-wrap: nowrap;
@@ -2202,9 +2137,6 @@ textarea.field {
   .send {
     width: 38px;
     height: 34px;
-  }
-  .chip {
-    height: 30px;
   }
 }
 
@@ -2294,6 +2226,89 @@ textarea.field {
   text-align: center;
   transform: translateX(-50%);
   pointer-events: none;
+}
+
+/* —— World map: a pane on the right, the device's live position on MapLibre, a card with what Arcanus knows of it —— */
+@media (min-width: 768px) {
+  .side-pane.map-pane {
+    left: auto;
+    right: var(--gap);
+    width: var(--panel-w);
+  }
+}
+.map-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #04121c;
+}
+.map-view {
+  width: 100%;
+  height: 100%; /* MapLibre makes its container position: relative, so the size can't come from inset */
+}
+.map-card {
+  position: absolute;
+  left: var(--gap);
+  bottom: var(--gap);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: calc(100% - 2 * var(--gap));
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--glass-sheen), var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.map-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.map-card p {
+  margin: 0;
+}
+.map-state {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.map-state[data-live]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.map-place {
+  font-size: 13.5px;
+}
+.map-coords {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.map-note {
+  font-size: 11.5px;
+  color: var(--think);
+}
+.map-card .row {
+  margin-top: 6px;
+}
+/* This device on the map: a glowing dot that breathes. */
+.map-me {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 6px rgba(111, 224, 255, 0.25), 0 0 18px var(--accent);
+  animation: orb-breathe 2.4s ease-in-out infinite;
 }
 
 /* —— Chatting in AR: a mic button and a caption that never cover the middle of the screen —— */

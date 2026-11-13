@@ -51,6 +51,7 @@ export function Sphere({ analyser, state, on = true, working = false }: { analys
   const canDraw = useSyncExternalStore(never, hasWebGL, () => true);
   const [tool, setTool] = useState<Tool>("view");
   const [resetKey, setResetKey] = useState(0);
+  const [edited, setEdited] = useState(false); // the orb was moved, rotated or resized: undo is offered
   const orb = <Stand state={state} off={!on} />;
   if (!canDraw) return orb;
   return (
@@ -63,13 +64,16 @@ export function Sphere({ analyser, state, on = true, working = false }: { analys
           tool={tool}
           on={on}
           resetKey={resetKey}
+          onEdit={setEdited}
         />
       </Boundary>
       <SphereTools
         tool={tool}
         onTool={setTool}
+        edited={edited}
         onReset={() => {
           setTool("view");
+          setEdited(false);
           setResetKey((key) => key + 1);
         }}
       />
