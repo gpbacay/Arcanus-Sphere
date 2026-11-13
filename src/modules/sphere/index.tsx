@@ -3,8 +3,9 @@
 // Public API of the sphere module. The three.js scene is its own chunk, fetched after the page paints; until then,
 // and for good when WebGL is missing or the scene crashes, a CSS orb stands in and still shows Arcanus's state.
 import dynamic from "next/dynamic";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Boundary } from "@/shared/boundary";
+import { hideStage, showStage } from "@/shared/stage";
 import { TALK_FPS, WORK_FPS } from "./pace";
 import type { Tool } from "./SphereScene";
 import { SphereTools } from "./Tools";
@@ -13,6 +14,15 @@ export type SphereState = "idle" | "thinking" | "speaking";
 
 function Orb({ state, loading, off }: { state: SphereState; loading?: boolean; off?: boolean }) {
   return <div className="orb-fallback" data-state={state} data-loading={loading || undefined} data-off={off || undefined} aria-hidden />;
+}
+
+/** The CSS orb standing in for good (no WebGL, or the scene crashed): it is what is on screen, so the stage is shown. */
+function Stand(props: { state: SphereState; off?: boolean }) {
+  useEffect(() => {
+    showStage();
+    return hideStage;
+  }, []);
+  return <Orb {...props} />;
 }
 
 /** The AR page: Arcanus's orb in your space, tracked by the 8th Wall engine. Its own chunk, fetched only on /ar. */
@@ -41,7 +51,7 @@ export function Sphere({ analyser, state, on = true, working = false }: { analys
   const canDraw = useSyncExternalStore(never, hasWebGL, () => true);
   const [tool, setTool] = useState<Tool>("view");
   const [resetKey, setResetKey] = useState(0);
-  const orb = <Orb state={state} off={!on} />;
+  const orb = <Stand state={state} off={!on} />;
   if (!canDraw) return orb;
   return (
     <>

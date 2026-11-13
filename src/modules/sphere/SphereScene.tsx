@@ -8,6 +8,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { hideStage, showStage } from "@/shared/stage";
 import { loadOrb, ORB_BLOOM, type Orb } from "./orb";
 import { Pace } from "./pace";
 
@@ -197,6 +198,7 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
         orb = loaded;
         rig.add(loaded.root);
         const pace = new Pace();
+        let drawn = false;
         const render = (now = 0) => {
           frame = requestAnimationFrame(render);
           if (!pace.draw(now, capRef.current)) return; // a model is working: skip the frame, and the machine goes to the model
@@ -205,6 +207,13 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
           grid.position.z = camera.position.z;
           loaded.update(Math.min(clock.getDelta(), 0.1)); // 0.1 s: a held frame is ~0.08 s, and the orb must not slow down for it
           composer.render();
+          // The orb's first frame is the page appearing, and its power-on starts with it: the greeting waits for this
+          // (shared/stage.ts) so it is heard as the sphere lights, not while the scene is still loading. The next frame
+          // starts once this one has been presented, which is when it can be seen.
+          if (!drawn) {
+            drawn = true;
+            requestAnimationFrame(() => !dead && showStage());
+          }
         };
         clock.getDelta();
         render();
@@ -216,6 +225,7 @@ export default function SphereScene({ analyser, activityBoost = 0, cap = 0, tool
 
     return () => {
       dead = true;
+      hideStage();
       api.current = null;
       cancelAnimationFrame(frame);
       onResize.disconnect();

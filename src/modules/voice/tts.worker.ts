@@ -115,7 +115,16 @@ function load() {
 self.onmessage = ({ data }: MessageEvent) => {
   if (data.type === "load") void load().catch(() => undefined);
   else if (data.type === "cancel") latest = data.gen;
-  else if (data.type === "speak") {
+  else if (data.type === "warm") {
+    // Written and kept, not played: speak() finds it in `spoken`. A cancel doesn't drop it; it is only a cache entry.
+    queue = queue.then(async () => {
+      try {
+        if (!spoken.get(data.text)) spoken.set(data.text, await synthesize(await load(), data.text));
+      } catch {
+        /* it will be written when it is spoken, or not at all */
+      }
+    });
+  } else if (data.type === "speak") {
     latest = Math.max(latest, data.gen);
     queue = queue.then(async () => {
       if (data.gen !== latest) return;

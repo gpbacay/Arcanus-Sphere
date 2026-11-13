@@ -12,6 +12,7 @@ import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modu
 import { HOME, createSkill, instructions, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
+import { stageShown, whenShown } from "@/shared/stage";
 import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
 import { MAX, chatStore, currentChat, newChat, push, remove, write, type Msg, type Removal } from "./store";
@@ -165,6 +166,7 @@ function reportLine(r: Report[number]) {
 }
 
 const sayAll = (text: string) => takeSentences(`${text}\n`).sentences.forEach((s) => voice.say(s));
+const warmAll = (text: string) => takeSentences(`${text}\n`).sentences.forEach((s) => voice.warm(s));
 const lastRole = (messages: Msg[], role: Msg["role"]) => messages.findLastIndex((m) => m.role === role);
 
 // ------------------------------------------------------------------ boot
@@ -263,15 +265,27 @@ function voiced(parent: string | null, text = "Speaking the reply") {
 const operationOf = (label: string): Operation => (/recall|search|read a web|grounded|notes/i.test(label) ? "retrieve" : "execute");
 
 let listening = false;
-/** This boot's greeting. */
-let bootLine = "";
+/** This boot's greeting, until it is spoken: its words, and the thought it was composed as. */
+let pending: { line: string; said: string } | null = null;
+/** Stops waiting for the stage to appear. */
+let unstage: (() => void) | null = null;
+
+/**
+ * Speak the boot greeting once it can be heard and seen: the browser has let audio play (a tap unlocked it), and the
+ * stage is on screen (the sphere's first frame, or AR's camera). The voice is ready long before the scene is, so
+ * without the second it spoke over a blank page. Whichever of the two comes last calls this again.
+ */
+function speakGreeting() {
+  const greeting = pending;
+  if (!greeting || !power.state.on || voice.state.state.off || !stageShown() || !voice.state.state.analyser) return;
+  silence();
+  sayAll(greeting.line);
+  voiced(greeting.said, greeting.line)();
+}
 
 function onPointer() {
   voice.unlock();
-  if (!listening || !power.state.on || voice.state.state.off) return;
-  listening = false;
-  window.removeEventListener("pointerdown", onPointer);
-  sayAll(bootLine);
+  speakGreeting();
 }
 
 function watchGesture() {
@@ -280,7 +294,11 @@ function watchGesture() {
   window.addEventListener("pointerdown", onPointer);
 }
 
+/** Nothing is waiting any more: no tap, no stage, no greeting. */
 function silence() {
+  pending = null;
+  unstage?.();
+  unstage = null;
   if (!listening) return;
   listening = false;
   window.removeEventListener("pointerdown", onPointer);
@@ -298,7 +316,7 @@ export function cancelGreet() {
 /**
  * Boot: post Arcanus's boot message, its trace the models loading, live until they settle. A boot right after another
  * replaces it, so reloads don't stack them. The greeting is there at once: it waits for no model. It is spoken as
- * soon as the voice has loaded, or on the next tap when the browser hasn't let audio play yet.
+ * the page appears (speakGreeting): not before the sphere is drawn, and not until the browser has let audio play.
  */
 export function greet(list = engines) {
   engines = list;
@@ -308,7 +326,7 @@ export function greet(list = engines) {
   stopGreeting();
   const when = moment();
   const name = account.state.user?.name;
-  const line = (bootLine = greeting({ when, name }));
+  const line = greeting({ when, name });
   const intro: Msg = { id: crypto.randomUUID(), role: "assistant", text: line, at: Date.now(), kind: "boot" };
   write(chat.id, (c) => ({ ...c, messages: [...(c.messages.at(-1)?.kind === "boot" ? c.messages.slice(0, -1) : c.messages), intro] }));
   watchBoot(chat.id, intro.id);
@@ -316,10 +334,14 @@ export function greet(list = engines) {
   const known = thought("retrieve", "Who you are, and when it is", { parents: [wakeId], detail: "what the greeting is made from", results: [...(name ? [name] : []), when] });
   const said = thought("generate", line, { parents: [known], detail: "composed from those facts · no language model, so no wait" });
   if (voice.state.state.off) return;
+  pending = { line, said };
+  warmAll(line); // written now, while the page loads, so it is spoken the moment the page appears
   // Without a tap the browser plays nothing: the greeting waits for one, and the Graph of Thought says so.
-  if (voice.state.state.analyser) sayAll(line);
-  else watchGesture();
-  voiced(said, line)();
+  if (!voice.state.state.analyser) {
+    thought("speak", line, { parents: [said], detail: "waiting for a tap to unlock audio" });
+    watchGesture();
+  }
+  unstage = whenShown(speakGreeting);
 }
 
 /** "Friday evening": when this boot is, in words the greeting can use. */

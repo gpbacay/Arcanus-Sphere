@@ -84,6 +84,17 @@ class Voice {
   }
 
   /**
+   * Synthesize `text` now, without playing it: a later say() of the same words then plays from what the worker already
+   * has, within a frame, instead of after the time it takes to write it. The boot greeting is warmed while the page
+   * loads, so it can be spoken the moment the page appears.
+   */
+  warm(text: string) {
+    const spoken = forSpeech(text);
+    if (!spoken || this.state.state.off) return;
+    void this.start().then((w) => w.postMessage({ type: "warm", text: spoken }), () => undefined);
+  }
+
+  /**
    * The context this voice plays through. The microphone records in this same context, so the browser's echo
    * cancellation hears the voice and can keep the mic open while it plays.
    */

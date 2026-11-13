@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { hideStage, showStage } from "@/shared/stage";
 import { startAr } from "./ar";
 
 /** The AR page: a camera view with Arcanus's orb placed in your space. The camera only starts after a tap. */
@@ -26,6 +27,7 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
     return () => {
       alive.current = false;
       stopRef.current?.();
+      hideStage();
     };
   }, []);
 
@@ -49,7 +51,7 @@ export default function ArView({ analyser = null, activity = 0, children }: { an
     }
     setPhase("starting");
     try {
-      const stop = await startAr(mount.current!, { onReady: () => setPhase("running"), onError: fail, onLock: setLocked }, { analyser: () => analyserRef.current, boost: () => activityRef.current });
+      const stop = await startAr(mount.current!, { onReady: () => (showStage(), setPhase("running")), onError: fail, onLock: setLocked }, { analyser: () => analyserRef.current, boost: () => activityRef.current });
       if (alive.current) stopRef.current = stop;
       else stop();
     } catch (cause) {
