@@ -1,9 +1,9 @@
 "use client";
 
-import { FolderOpen, Info, Settings, Shapes, User, X } from "lucide-react";
+import { FolderOpen, Info, MessageSquare, Settings, Shapes, User, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { account, passwordError, saveAccount, signOut } from "@/modules/account";
-import { pane, sectionOf, togglePane, TOP_ACTIONS, type PaneName } from "@/shared/pane";
+import { pane, sectionOf, togglePane, TOP_ACTIONS, type Page } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { Logo } from "@/shared/ui/logo";
 import { modelSize, MODELS, setModelSize, type ModelSize } from "@/modules/llm";
@@ -20,8 +20,8 @@ type DialogName = "about" | "settings" | "account";
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
   // Which pages are open, in whatever section: one string, so the selector returns a primitive.
-  const shown = useStore(pane, (s) => (["artifacts", "os"] as PaneName[]).filter((p) => sectionOf(s, p)).join(" "));
-  const isOpen = (page: PaneName) => shown.split(" ").includes(page);
+  const shown = useStore(pane, (s) => (["chat", "artifacts", "os"] as Page[]).filter((p) => sectionOf(s, p)).join(" "));
+  const isOpen = (page: Page) => shown.split(" ").includes(page);
   const thinking = useStore(mind, (s) => s.thoughts.some((t) => t.status === "active"));
   return (
     <nav className="app-topbar" aria-label="Arcanus">
@@ -29,6 +29,9 @@ export function AppNav() {
         <Logo size={26} />
         <span className="app-topbar-title">Arcanus</span>
       </div>
+      <button type="button" className="app-nav-btn" aria-label="Chat" title="Chat" aria-expanded={isOpen("chat")} onClick={() => togglePane("chat")}>
+        <MessageSquare size={17} aria-hidden />
+      </button>
       <button
         type="button"
         className="app-nav-btn"

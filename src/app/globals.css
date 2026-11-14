@@ -1567,6 +1567,8 @@ textarea.field {
   display: flex;
   flex: 1;
   min-width: 0;
+  min-height: 0; /* the tree scrolls inside the column; without this it paints over the git panel on a phone */
+  overflow: hidden;
 }
 /* Beside the center, the files are as wide as their tree. */
 .os-files:not(:only-child) {
@@ -2629,6 +2631,13 @@ textarea.field {
   .panel-head {
     flex-wrap: nowrap;
     padding-left: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  /* One page at a time: the others stay open underneath, so closing the Operating System leaves the editor. */
+  .side-pane[data-at]:not([data-front]),
+  .panel[data-at]:not([data-front]) {
+    visibility: hidden;
   }
   .composer textarea {
     height: 34px; /* level with the phone's 34px buttons */
@@ -2744,8 +2753,8 @@ textarea.field {
 /* —— Sections. Every page (the chat too) shows in the section it was put in, data-at: left, center or right. A side
    page expanded (data-wide) spreads over the center, and the center's page shows on the other side meanwhile; the page
    it covers there is hidden, not closed. Wide screens give each section a column of its own; under 1100px the side
-   pages float over the orb at the window's edges and a center page lies across the middle. A phone has no sections:
-   its pages take the screen, so the move and expand buttons are not offered there. —— */
+   pages float over the orb at the window's edges and a center page lies across the middle. A phone shows one page
+   at a time (the one in front), so the move and expand buttons are not offered there. —— */
 .side-pane[hidden],
 .panel[hidden] {
   display: none;

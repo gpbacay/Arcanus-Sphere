@@ -19,8 +19,8 @@ import { Tree } from "./Tree";
 
 /** The Operating System: browse the workspace and Arcanus's own source, edit files in tabs, run commands and skills, use git. */
 export function OperatingSystem() {
-  const { home, at, wide } = usePlace("os");
-  return home ? <OperatingSystemPane at={at} wide={wide} /> : null;
+  const { home, at, wide, front } = usePlace("os");
+  return home ? <OperatingSystemPane at={at} wide={wide} front={front} /> : null;
 }
 
 const baseName = (path: string) => path.split("/").pop() ?? path;
@@ -79,7 +79,7 @@ function MenuBar({ menus }: { menus: [string, Item[]][] }) {
   );
 }
 
-function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }) {
+function OperatingSystemPane({ at, wide, front }: { at: Section | null; wide: boolean; front: boolean }) {
   const kind = useStore(workspace, (s) => s.kind);
   const name = useStore(workspace, (s) => s.name);
   const lost = useStore(workspace, (s) => s.reconnect);
@@ -290,6 +290,7 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
       aria-label="Operating System"
       data-at={at ?? undefined}
       data-wide={wide || undefined}
+      data-front={front || undefined}
       hidden={!at}
       onKeyDown={(e) => {
         if (!e.altKey || (e.target as HTMLElement).closest(".cm-editor")) return; // the editor keeps its own Alt keys

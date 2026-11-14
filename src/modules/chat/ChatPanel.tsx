@@ -29,12 +29,12 @@ export function ChatPanel() {
   const speaking = useStore(voice.state, (s) => s.speaking);
   const mood: Mood = !on ? "off" : busy ? "thinking" : speaking ? "speaking" : "ready";
   // In any section, like every page. Behind another page while a side is expanded over its own: kept, not unmounted.
-  const { at, wide } = usePlace("chat");
+  const { at, wide, front } = usePlace("chat");
 
   // The header stays at the top and the composer at the bottom; minimizing hides only the thread between them.
   // One tree for both states, so the composer (and what you were typing) stays mounted.
   return (
-    <aside className="panel" data-min={collapsed || undefined} data-at={at ?? undefined} data-wide={wide || undefined} hidden={!at} aria-label="Arcanus chat">
+    <aside className="panel" data-min={collapsed || undefined} data-at={at ?? undefined} data-wide={wide || undefined} data-front={front || undefined} hidden={!at} aria-label="Arcanus chat">
       <Header mood={mood} collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       {collapsed ? null : <Thread />}
       {collapsed ? null : <UndoBar />}
@@ -210,7 +210,7 @@ function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?:
       >
         <Icon name={collapsed ? "down" : "up"} />
       </button>
-      <PaneControls page="chat" title="the chat" close={false} />
+      <PaneControls page="chat" title="the chat" />
     </header>
   );
 }

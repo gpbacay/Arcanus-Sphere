@@ -8,7 +8,7 @@
 import { AppWindow, CodeXml, EllipsisVertical, MapPin, Network, RotateCcw, Search, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { artifacts, BUILT_IN_ARTIFACTS, openFile, restoreArtifact, workspace, type Artifact } from "@/modules/workspace";
-import { pane, usePlace, type Section } from "@/shared/pane";
+import { pane, pickArtifact, restoreArtifactTab, usePlace, type Section } from "@/shared/pane";
 import { useStore } from "@/shared/store";
 import { PaneControls } from "@/shared/ui/pane-controls";
 import { PopMenu, type PopItem } from "@/shared/ui/pop-menu";
@@ -33,14 +33,20 @@ const fileTab = (file: Artifact): Tab => ({
 
 /** The Artifacts, in whichever section they were put. Rendered only while open, so a closed pane costs nothing. */
 export function Artifacts({ pages }: { pages: ArtifactPage[] }) {
-  const { home, at, wide } = usePlace("artifacts");
-  return home ? <ArtifactsPane pages={pages} at={at} wide={wide} /> : null;
+  const { home, at, wide, front } = usePlace("artifacts");
+  return home ? <ArtifactsPane pages={pages} at={at} wide={wide} front={front} /> : null;
 }
 
-function ArtifactsPane({ pages, at, wide }: { pages: ArtifactPage[]; at: Section | null; wide: boolean }) {
+function ArtifactsPane({ pages, at, wide, front }: { pages: ArtifactPage[]; at: Section | null; wide: boolean; front: boolean }) {
   const chosen = useStore(pane, (s) => s.artifact);
+  const back = useStore(pane, (s) => s.artifactBack);
   const version = useStore(workspace, (s) => s.version); // a file saved, added or deleted: the tabs are read again
   const [files, setFiles] = useState<Artifact[] | null>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    restoreArtifactTab();
+    setReady(true);
+  }, []);
   useEffect(() => {
     let live = true;
     void artifacts().then((found) => live && setFiles(found));
@@ -51,14 +57,21 @@ function ArtifactsPane({ pages, at, wide }: { pages: ArtifactPage[]; at: Section
   const mine = (files ?? []).map(fileTab);
   const tabs: Tab[] = [...mine.filter((t) => shipped(t.file!)), ...pages, ...mine.filter((t) => !shipped(t.file!))];
   // Until the files are read the first tab isn't known, so nothing is shown in its place.
-  const active = tabs.find((t) => t.id === chosen) ?? (files ? tabs[0] : undefined);
+  // A tab that left (the editor, once the Operating System draws it) returns to the previous artifact, not the Graph of Thought.
+  const active = tabs.find((t) => t.id === chosen) ?? tabs.find((t) => t.id === back) ?? (ready && files ? tabs[0] : undefined);
+  const ids = tabs.map((t) => t.id).join("\n");
+  useEffect(() => {
+    if (!ready || !files || !chosen || ids.split("\n").includes(chosen)) return;
+    const fallback = pane.state.artifactBack;
+    if (fallback && ids.split("\n").includes(fallback)) pickArtifact(fallback);
+  }, [ready, files, chosen, ids]);
   const file = active?.file;
 
   function arrows(e: KeyboardEvent) {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!step || !active) return;
     const next = tabs[(tabs.indexOf(active) + step + tabs.length) % tabs.length];
-    pane.set({ artifact: next.id });
+    pickArtifact(next.id);
     // After the artifact has mounted: one that takes the focus as it opens (the search box) would end the arrowing there.
     requestAnimationFrame(() => document.getElementById(`artifact-tab-${next.id}`)?.focus());
   }
@@ -79,7 +92,7 @@ function ArtifactsPane({ pages, at, wide }: { pages: ArtifactPage[]; at: Section
     : [];
 
   return (
-    <section className="side-pane artifacts-pane" aria-label="Artifacts" data-kind={file ? "file" : undefined} data-at={at ?? undefined} data-wide={wide || undefined} hidden={!at}>
+    <section className="side-pane artifacts-pane" aria-label="Artifacts" data-kind={file ? "file" : undefined} data-at={at ?? undefined} data-wide={wide || undefined} data-front={front || undefined} hidden={!at}>
       <header className="art-head">
         <div className="art-tabs" role="tablist" aria-label="Artifacts" onKeyDown={arrows}>
           {tabs.map(({ id, label, hint, icon: Icon }) => (
@@ -94,7 +107,7 @@ function ArtifactsPane({ pages, at, wide }: { pages: ArtifactPage[]; at: Section
               aria-label={label}
               title={hint ? `${label}: ${hint}` : label}
               tabIndex={id === active?.id ? 0 : -1}
-              onClick={() => pane.set({ artifact: id })}
+              onClick={() => pickArtifact(id)}
             >
               <Icon size={15} aria-hidden />
               <span>{label}</span>

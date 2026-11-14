@@ -3,7 +3,7 @@
 // What the Operating System has open: the folder being browsed, the files open in the editor as tabs, and which panels are
 // open beside them. Kept outside React so the chat's commands (/open, /source) and Arcanus's own skills can open a
 // file in the editor, and so open tabs survive closing the pane.
-import { openArtifact, openPane, pane, shownAt, type State } from "@/shared/pane";
+import { openArtifact, openPane, osDrawsEditor, pane, type State } from "@/shared/pane";
 import { Store } from "@/shared/store";
 import { read, remove, SOURCE, write } from "./fs";
 
@@ -60,10 +60,8 @@ ide.subscribe(() => {
   if (!travelling) ide.set({ back: [...back, from].slice(-50), forward: [] });
 });
 
-/** The center (open files, the knowledge graph) has room beside the files: the Operating System is expanded, or in the center. */
-const split = (s: State) => (s.expanded !== null && s[s.expanded] === "os") || shownAt(s, "os") === "center";
-/** The Operating System is shown in a side section, not expanded: its center is an Artifacts tab instead. */
-export const centerAway = (s: State = pane.state) => !!shownAt(s, "os") && !split(s);
+/** The editor is an Artifacts tab whenever the Operating System is not drawing it. Closing the Operating System leaves it there. */
+export const centerAway = (s: State = pane.state) => !osDrawsEditor(s);
 /** Bring the center into view: the Artifacts' Editor tab, while it is away from the Operating System. */
 export const showCenter = () => centerAway() && openArtifact("editor");
 

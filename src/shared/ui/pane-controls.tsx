@@ -8,7 +8,7 @@ const NAMES = { left: "Left section", center: "Center section", right: "Right se
 
 /**
  * The buttons at the end of every page's header: move it to another section, expand it over the center (in a side
- * section only), and close it (every page but the chat). A phone has no sections, so it shows only the close.
+ * section only), and close it. A phone has no columns, so it shows only the close.
  */
 export function PaneControls({ page, title, close = true }: { page: Page; title: string; close?: boolean }) {
   const { home, at, wide } = usePlace(page);
@@ -35,7 +35,7 @@ export function PaneControls({ page, title, close = true }: { page: Page; title:
           {wide ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </button>
       ) : null}
-      {close && page !== "chat" ? (
+      {close ? (
         <button type="button" className="icon-btn" aria-label={`Close ${title}`} title="Close" onClick={() => closePane(page)}>
           <X size={16} />
         </button>
