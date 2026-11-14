@@ -46,7 +46,7 @@ Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.a
   AGENTS.md             the roles its agents take, one "## name" section each, in the order /agents runs them
   skills/<name>/SKILL.md  a skill: frontmatter `name` and `description`, then instructions. Run it with /<name> <message>
   memory/*.md           notes; the ones a message is about are recalled into the reply's context
-  artifacts/            what Arcanus saved: replies (/save) and web pages
+  artifacts/            what Arcanus saved: replies (/save) and web pages; and its artifacts, the .html pages the Artifacts pane runs (the Graph of Thought, the search engine, the world map, and any you add)
   source/               Arcanus's own source code: this project, mounted from the server it runs from (localhost only)
 ```
 
@@ -138,7 +138,8 @@ src/
     llm/          SmolLM2: worker + client, with a cache of finished replies
     voice/        Paradee: worker + playback through the analyser, with a cache of spoken sentences
     listen/       speech to text, full duplex: microphone frames, Silero voice detection (vad.worker.ts), the utterance segmenter (segment.ts), Moonshine tiny (listen.worker.ts)
-    mind/         the live Graph of Thought: every thought a node, its parents its edges, drawn as a graph (layout.ts)
+    mind/         the live Graph of Thought: every thought a node, its parents its edges, laid out as a graph (layout.ts)
+    artifacts/    the Artifacts pane: a tab for each artifact, and the sealed frame a file artifact runs in (seal.ts), and the bridge that is its only way in (bridge.ts)
     chat/         conversations (store.ts), answering (conversation.ts), the chat panel UI
     sphere/       the three.js scene, loaded as its own chunk, with a CSS orb fallback; pace.ts is its frame budget
     offline/      service worker registration, online status

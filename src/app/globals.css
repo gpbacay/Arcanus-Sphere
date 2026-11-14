@@ -145,7 +145,6 @@ body {
 .signin-pane,
 [data-mobile="true"][data-sidebar="sidebar"],
 .app-dialog,
-.ar-dialog,
 .menu {
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -159,8 +158,7 @@ body {
 .app-topbar::before,
 .side-pane::before,
 .signin-pane::before,
-.app-dialog::before,
-.ar-dialog::before {
+.app-dialog::before {
   --t: 9px;
   content: "";
   position: absolute;
@@ -1053,7 +1051,7 @@ textarea.field {
   background: var(--surface-2);
   color: var(--text);
 }
-/* The Graph of Thought's button glows while Arcanus is thinking, so the rail shows a mind at work even when closed. */
+/* The Artifacts button (the Graph of Thought is there) glows while Arcanus is thinking, so the bar shows a mind at work even when closed. */
 .app-nav-btn[data-live] {
   position: relative;
   color: var(--accent);
@@ -1070,297 +1068,85 @@ textarea.field {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-/* —— Graph of Thought: Arcanus's live thoughts, one accordion per process (a boot, a message, a command) ——
-   Its own material: an opaque drafting plate with a dot grid, where the chat is a clear overlay on the stage. Opaque
-   on purpose: a blurred pane this size over the moving sphere is redrawn every frame, and that costs the models. */
-.mind-pane {
-  --plate: #070c14;
-  --rail: rgba(150, 215, 245, 0.26);
-  background:
-    radial-gradient(circle at 1px 1px, rgba(150, 215, 245, 0.085) 1px, transparent 1.5px) 0 0 / 14px 14px,
-    linear-gradient(180deg, #0b1420, var(--plate) 30%);
-  backdrop-filter: none;
-}
-.mind-pane .pane-body {
-  padding: 4px 0 16px;
-}
-.mind-pane .pane-body .pane-note {
-  margin: 10px 14px;
-}
-.mind-pane .pane-head .icon-btn {
-  margin-left: 0;
-}
-.got-tools {
-  position: relative;
-  margin-left: auto;
-}
-.got-menu {
-  left: auto;
-  right: 0;
-  width: 200px;
-}
-/* Minimized: the header and the newest thought, sized to them; the column below shows the stage. */
-.mind-pane[data-min] {
-  bottom: auto;
-  max-height: calc(100% - var(--top-h) - 3 * var(--gap));
-}
-.mind-pane[data-min] .pane-body {
-  padding-bottom: 0;
-}
-
-/* Beside the chat, the Graph of Thought is the chat's material, not a plate: a header box like the chat's, and below it
-   no background at all, the thoughts lying on the stage with the chat's text shadow. (A phone keeps the plate: there
-   the pane covers the chat.) */
-@media (min-width: 768px) {
-  .mind-pane {
-    border: none;
-    background: none;
-    box-shadow: none;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.65);
-  }
-  .mind-pane::before {
-    display: none;
-  }
-  .mind-pane > .pane-head {
-    padding: 8px 6px 8px 12px;
-    border: 1px solid rgba(150, 215, 245, 0.32);
-    border-radius: var(--r);
-    background: rgba(2, 6, 12, 0.58);
-    backdrop-filter: blur(12px) saturate(1.3);
-  }
-  .mind-pane .pane-body {
-    padding: 8px 0 4px;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
-    mask-image: linear-gradient(to bottom, transparent, #000 14px);
-  }
-  .mind-pane[data-min] .pane-body {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-  .mind-pane .got-group > h3 {
-    padding: 12px 2px 6px;
-  }
-  .mind-pane .pane-body .pane-note {
-    margin: 10px 2px;
-  }
-}
-.got-group > h3 {
+/* —— Artifacts: one pane, a tab for each artifact (modules/artifacts). The row of tabs is the pane's own header: the
+   open tab is named, the others are their icons until the pane is wide enough to name them all, and the pane's
+   controls (move, expand, close) sit at its end. Under it each artifact lays out its own header and body. —— */
+.art-head {
+  container-type: inline-size;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 14px 14px 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
+  align-items: stretch;
+  min-height: 40px;
+  border-bottom: 1px solid var(--line);
 }
-.got-group > h3::after {
-  content: "";
+.art-tabs {
+  display: flex;
   flex: 1;
-  height: 1px;
-  background: var(--line);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.got-op {
-  padding: 0 5px;
-  border: 1px solid var(--line-strong);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 16px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.got-op[data-op="retrieve"],
-.got-op[data-op="keep_best"],
-.got-op[data-op="aggregate"],
-.got-op[data-op="generate"],
-.got-op[data-op="refine"] {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.got-facts,
-.got-id,
-.got-ms {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-}
-.got-facts {
-  overflow-wrap: anywhere;
-}
-
-/* A process: its root thought is the accordion's heading. */
-.got-proc + .got-proc {
-  border-top: 1px solid var(--line);
-}
-.got-proc-head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 4px 8px;
-  width: 100%;
-  padding: 9px 12px 9px 14px;
-  font: inherit;
-  text-align: left;
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.got-proc-head:hover {
-  background: var(--surface);
-}
-.got-proc-head:focus-visible,
-.got-row:focus-visible {
-  outline: 1px solid var(--accent-hot);
-  outline-offset: -1px;
-}
-.got-proc-head .got-op {
-  margin-top: 1px;
-}
-.got-proc-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.got-proc-head .got-facts {
-  grid-column: 2 / -1;
-}
-.got-chevron {
-  margin-top: 2px;
-  color: var(--text-faint);
-  transition: transform 0.2s var(--ease);
-}
-.got-proc-head[aria-expanded="true"] .got-chevron {
-  transform: rotate(180deg);
-}
-.got-proc[data-status="active"] .got-proc-head .got-op {
-  color: var(--think);
-  border-color: color-mix(in srgb, var(--think) 55%, transparent);
-}
-.got-proc[data-status="failed"] .got-proc-head .got-op {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
-}
-.got-proc-body {
-  padding: 0 10px 10px 20px;
-}
-
-/* The graph: every thought sits on a rail under the thought it came from. A rail runs straight down and its ticks
-   run straight across, each in its own gutter, so no two lines ever cross or cover one another. */
-.got-rail {
-  position: relative;
-  margin: 0;
-  padding: 0 0 0 20px;
-  list-style: none;
-}
-.got-step {
-  position: relative;
-}
-.got-step::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -13px;
-  width: 1px;
-  background: var(--rail);
-}
-.got-step:last-child::before {
-  bottom: auto;
-  height: 16px; /* the rail ends at its last node */
-}
-/* The node, on the rail. */
-.got-step::after {
-  content: "";
-  position: absolute;
-  top: 13px;
-  left: -16px;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--accent);
-  border-radius: 50%;
-  background: var(--plate);
-}
-.got-step[data-status="active"]::after {
-  border-color: var(--think);
-  background: var(--think);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-.got-step[data-status="failed"]::after {
-  border-color: var(--danger);
-  background: var(--danger);
-}
-/* A fork: the branch's rail leaves the main rail just under the thought it grew from. */
-.got-step > .got-rail::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -13px;
-  width: 20px;
-  height: 1px;
-  background: var(--rail);
-}
-.got-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  font: inherit;
-  text-align: left;
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.got-row:hover {
-  background: var(--surface);
-}
-.got-row[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: var(--accent-soft);
-}
-/* A thought the picked one came from: the edge, read as light instead of a line. */
-.got-row[data-source],
-.got-proc-head[data-source] {
-  background: var(--surface-2);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-.got-row-head {
-  display: flex;
+.art-tab {
+  display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 7px;
+  min-width: 40px;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
 }
-.got-ms {
-  margin-left: auto;
+.art-tab:hover {
+  background: var(--surface);
   color: var(--text);
 }
-.got-row[data-status="active"] .got-ms {
-  color: var(--think);
+.art-tab[aria-selected="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
-.got-row[data-status="failed"] .got-facts {
-  color: var(--danger);
+.art-tab[aria-selected="true"] svg {
+  color: var(--accent);
 }
-.got-text {
-  font-size: 12.5px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
+.art-tab:focus-visible {
+  outline-offset: -2px;
+  box-shadow: none;
 }
-.got-results {
+.art-tab:not([aria-selected="true"]) span {
+  display: none;
+}
+@container (min-width: 600px) {
+  .art-tab:not([aria-selected="true"]) span {
+    display: inline;
+  }
+}
+.art-controls {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex: none;
+  align-items: center;
+  padding: 0 6px 0 4px;
 }
-.got-results > span {
-  max-width: 100%;
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
+/* The open artifact is laid out by the pane itself: its header, its body and its actions are the pane's rows. */
+.art-panel {
+  display: contents;
+}
+/* A file artifact (.arcanus/artifacts/*.html) runs in a frame that fills the pane, on the pane's glass. One that sends
+   its height (data-fit) gets a pane as tall as it is, up to the window's foot, and scrolls inside past that. */
+.art-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+.art-frame[data-fit] {
+  flex: 0 1 auto;
+}
+.artifacts-pane:has(.art-frame[data-fit]) {
+  bottom: auto;
+  max-height: calc(100% - var(--top-h) - 3 * var(--gap));
 }
 
 /* —— Top bar: the mark, every pane and dialog button, and the orb's tools at the right end —— */
@@ -2302,292 +2088,17 @@ textarea.field {
   flex: 1;
   margin-left: 4px;
 }
-.reader {
-  font-size: 13px;
-  line-height: 1.6;
-}
-.reader h1 {
-  margin: 0 0 10px;
-  font-size: 17px;
-  line-height: 1.3;
-}
-.reader h3 {
-  margin: 14px 0 4px;
-  font-size: 14px;
-}
-.reader article p {
-  margin: 0 0 8px;
-  color: var(--text);
-}
-.reader .reader-item {
-  margin-bottom: 4px;
-  padding-left: 14px;
-  text-indent: -10px;
-}
-.reader .reader-item::before {
-  content: "· ";
-  color: var(--accent);
-}
-.reader a {
-  color: var(--accent);
-  text-decoration: underline;
-  text-decoration-color: rgba(111, 224, 255, 0.35);
-  text-underline-offset: 2px;
-}
-.reader a:hover {
-  text-decoration-color: var(--accent);
-}
-/* —— Search engine: a code editor's search over Arcanus's files, with the web under it —— */
-.find-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--line);
-}
-.find-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-/* The query field with its three toggles inside it, at its right end. */
-.find-box {
-  position: relative;
-  display: flex;
-  flex: 1;
-  align-items: center;
-  min-width: 0;
-}
-.find-box .field {
-  width: 100%;
-  height: 32px;
-  padding-right: 84px;
-}
-.find-toggle {
-  position: absolute;
-  top: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  color: var(--text-muted);
-}
-.find-toggle:nth-of-type(1) {
-  right: 56px;
-}
-.find-toggle:nth-of-type(2) {
-  right: 30px;
-}
-.find-toggle:nth-of-type(3) {
-  right: 4px;
-}
-.find-toggle:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.find-toggle[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.find-label {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-.find-label .field {
-  height: 30px;
-}
-.find-scopes {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.find-scope {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.find-scope:hover {
-  color: var(--text);
-}
-.find-scope[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.find-go {
-  height: 26px;
-  margin-left: auto;
-  padding: 0 12px;
-  font-size: 12px;
-}
-.search-body {
-  padding-top: 6px;
-}
-.find-section + .find-section {
-  margin-top: 10px;
-}
-.find-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 4px 0 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.find-count {
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-faint);
-}
-.find-nav {
-  display: flex;
-  margin-left: auto;
-}
-.find-nav .icon-btn {
-  width: 24px;
-  height: 24px;
-}
-.find-why {
-  margin: 6px 0;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-.find-files,
-.find-lines {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.find-file,
-.find-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 26px;
-  padding: 2px 4px;
-  border-radius: var(--r-sm);
-  text-align: left;
-}
-.find-file:hover,
-.find-line:hover {
-  background: var(--surface-2);
-}
-.find-chevron {
-  flex: none;
-  color: var(--text-faint);
-  transition: transform 0.15s;
-}
-.find-chevron[data-open] {
-  transform: rotate(90deg);
-}
-.find-name {
-  flex: none;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-.find-name[data-named] {
-  color: var(--accent);
-}
-.find-dir {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-.find-badge {
-  flex: none;
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  font-size: 10.5px;
-  line-height: 17px;
-  text-align: center;
-  color: var(--text-muted);
-}
-.find-line {
-  align-items: baseline;
-  padding-left: 22px;
-}
-.find-ln {
-  flex: none;
-  min-width: 26px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  text-align: right;
-  color: var(--text-faint);
-}
-.find-text {
-  min-width: 0;
-  overflow: hidden;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-muted);
-}
-.find-text mark {
-  border-radius: 2px;
-  background: rgba(255, 196, 92, 0.28);
-  color: var(--text);
-}
-
-.results {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.results li {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-}
-.results li a {
-  font-weight: 600;
-}
-.result-url {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.results p {
-  margin: 4px 0 0;
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
-
 /* —— Dialogs —— */
-.app-dialog,
-.ar-dialog {
+.app-dialog {
   margin: auto;
   overflow: visible;
   background: var(--glass-sheen), var(--glass-solid);
 }
-.app-dialog::backdrop,
-.ar-dialog::backdrop {
+.app-dialog::backdrop {
   background: rgba(2, 4, 8, 0.5);
   backdrop-filter: blur(3px);
 }
-.app-dialog[open],
-.ar-dialog[open] {
+.app-dialog[open] {
   animation: dialog-in 0.35s var(--ease);
 }
 @keyframes dialog-in {
@@ -2853,34 +2364,34 @@ textarea.field {
   font-size: 12px;
 }
 
-/* The QR dialog on desktop: scan it to open the AR page on a phone. */
-.ar-dialog {
-  width: min(320px, calc(100vw - 32px));
-  padding: 16px;
-  text-align: center;
-}
-.ar-dialog[open] {
+/* View in AR (an artifact): the QR code to scan, which opens the AR page on a phone. */
+.ar-link {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  padding: 16px;
+  text-align: center;
 }
-.ar-dialog h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+.ar-link > * {
+  flex: none;
 }
-.ar-dialog p {
+.ar-link .field {
+  max-width: 320px;
+}
+.ar-link p {
+  max-width: 320px;
   margin: 0;
   color: var(--text-muted);
   font-size: 12.5px;
 }
-.ar-dialog .ar-warn {
+.ar-link .ar-warn {
   color: var(--think);
   font-size: 11.5px;
 }
-.ar-dialog .row {
-  align-self: stretch;
+.ar-link .row {
+  width: 100%;
+  max-width: 320px;
 }
 .ar-qr {
   padding: 6px;
@@ -2958,6 +2469,10 @@ textarea.field {
     width: auto;
     min-width: 0;
   }
+  .artifacts-pane:has(.art-frame[data-fit]) {
+    bottom: auto;
+    max-height: calc(100% - 64px - env(safe-area-inset-top));
+  }
 
   .signin-pane .field,
   .account-form .field {
@@ -2968,36 +2483,12 @@ textarea.field {
     height: 44px;
   }
 
-  /* The Graph of Thought on a phone: larger words, and headings a thumb can hit. */
-  .got-proc-head {
-    min-height: 48px;
-    padding: 12px 12px 12px 14px;
+  /* Tabs a thumb can hit. */
+  .art-head {
+    min-height: 44px;
   }
-  .got-proc-title,
-  .got-text {
-    font-size: 14px;
-  }
-  .got-facts,
-  .got-id,
-  .got-ms,
-  .got-results > span {
-    font-size: 11.5px;
-  }
-  .got-op {
-    font-size: 11px;
-    line-height: 18px;
-  }
-  .got-row {
-    padding: 9px 8px;
-  }
-  .got-step::after {
-    top: 16px;
-  }
-  .got-step:last-child::before {
-    height: 19px;
-  }
-  .got-proc-body {
-    padding-left: 16px;
+  .art-tab {
+    min-width: 44px;
   }
 
   .app-stage {
@@ -3232,99 +2723,6 @@ textarea.field {
     grid-area: 1 / 2 / 2 / 4;
   }
 }
-.map-shell {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  background: #04121c;
-}
-.map-view {
-  width: 100%;
-  height: 100%; /* MapLibre makes its container position: relative, so the size can't come from inset */
-}
-.map-card {
-  position: absolute;
-  left: var(--gap);
-  bottom: var(--gap);
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: calc(100% - 2 * var(--gap));
-  padding: 10px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  background: var(--glass-sheen), var(--glass);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
-}
-.map-card h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.map-card p {
-  margin: 0;
-}
-.map-state {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.map-state[data-live]::before {
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-}
-.map-place {
-  font-size: 13.5px;
-}
-.map-coords {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-.map-note {
-  font-size: 11.5px;
-  color: var(--think);
-}
-.map-card .row {
-  margin-top: 6px;
-}
-/* This device on the map: a glowing dot that breathes. */
-/* The dot is a MapLibre marker: MapLibre places it with this element's own transform, so nothing here may animate
-   transform on it (an animated scale overwrote the position every frame, and the dot wandered). The pulse is a ring
-   drawn by ::after instead. */
-.map-me {
-  position: relative;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 18px var(--accent);
-}
-.map-me::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  background: rgba(111, 224, 255, 0.25);
-  animation: map-me-pulse 2.4s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes map-me-pulse {
-  50% {
-    transform: scale(1.35);
-    opacity: 0.4;
-  }
-}
-
 /* —— Chatting in AR: a mic button and a caption that never cover the middle of the screen —— */
 .arc {
   position: absolute;

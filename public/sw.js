@@ -8,11 +8,11 @@
 //   that before the network. Caching them here too would store ~250 MB twice.
 const CACHE = "arcanus-v2"; // v2: the runtime moved from jsDelivr to /ort/, so the old CDN copies are dropped
 const SHELL = ["/", "/geo/countries.json", "/geo/places.json", "/manifest.webmanifest", "/arcane/arc1.onnx", "/arcane/arc1.json", "/vad/silero_vad.onnx", "/icon-192.png", "/icon-512.png"];
-// Map tiles you have looked at, so those streets still show offline. Not "arcanus-": a new deploy keeps them.
+// Map tiles you have looked at (streets and satellite), so those places still show offline. Not "arcanus-": a new deploy keeps them.
 // ponytail: kept until the browser clears site data, never refreshed or capped. Expire them if the cache grows too big.
 const TILES = "map-tiles-v1";
-const isTile = (href) => new URL(href).hostname === "tile.openstreetmap.org";
-const UNVERSIONED = new Set(["/orb.glb"]); // add a public file here when it is redrawn without changing its name
+const isTile = (href) => ["tile.openstreetmap.org", "server.arcgisonline.com"].includes(new URL(href).hostname);
+const UNVERSIONED = new Set(["/orb.glb", "/artifacts/graph-of-thought.html", "/artifacts/search-engine.html", "/artifacts/world-map.html"]); // add a public file here when it is redrawn without changing its name
 
 // /api/ is live (the browser relay): never cached. /models/ is kept by the model caches (above).
 const cacheable = (href) => {

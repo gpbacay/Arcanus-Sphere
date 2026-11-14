@@ -1,10 +1,10 @@
-// The window's layout: three sections, left, center and right, each showing one page (the chat, the Graph of Thought,
-// the search engine, the Operating System or the world map) or none, so the orb shows there. Any page fits any
+// The window's layout: three sections, left, center and right, each showing one page (the chat, the Artifacts or the
+// Operating System) or none, so the orb shows there. The Artifacts page is tabbed: `artifact` is the tab it shows. Any page fits any
 // section. A side section can be expanded over the center; the center's page then moves to the other side, and that
 // side's own page waits behind it until the side is collapsed. Also the page or file Arcanus reads with every message.
 import { Store, useStore } from "./store";
 
-export type Page = "chat" | "mind" | "search" | "os" | "map";
+export type Page = "chat" | "artifacts" | "os";
 /** A page that can be closed: every page but the chat. */
 export type PaneName = Exclude<Page, "chat">;
 export type Section = "left" | "center" | "right";
@@ -14,13 +14,14 @@ export type Pinned = { label: string; text: string; href?: string };
 
 export const SECTIONS: Section[] = ["left", "center", "right"];
 /** Where a page opens from the top bar. */
-const HOME: Record<Page, Section> = { chat: "center", mind: "left", search: "left", os: "right", map: "right" };
+const HOME: Record<Page, Section> = { chat: "center", artifacts: "left", os: "right" };
 
 type Layout = Record<Section, Page | null>;
-type State = Layout & { expanded: Side | null; pinned: Pinned | null };
+/** `artifact`: the Artifacts page's open tab, a file's name ("search-engine.html") or a built-in page ("ar"); "" is the first tab. */
+type State = Layout & { expanded: Side | null; pinned: Pinned | null; artifact: string };
 
-// The Graph of Thought (left), the chat (center) and the Operating System (right) from the start; a phone shows the chat alone (app/page.tsx).
-export const pane = new Store<State>({ left: "mind", center: "chat", right: "os", expanded: null, pinned: null });
+// The Artifacts on the Graph of Thought (left), the chat (center) and the Operating System (right) from the start; a phone shows the chat alone (app/page.tsx).
+export const pane = new Store<State>({ left: "artifacts", center: "chat", right: "os", expanded: null, pinned: null, artifact: "" });
 
 /** The section a page is in, or null when it is closed. */
 export const sectionOf = (s: Layout, page: Page) => SECTIONS.find((k) => s[k] === page) ?? null;
@@ -73,6 +74,12 @@ export function closePane(page: PaneName) {
 }
 
 export const togglePane = (page: PaneName) => (sectionOf(pane.state, page) ? closePane(page) : openPane(page));
+
+/** Show one artifact: its tab, with the Artifacts page opened if it was closed. */
+export function openArtifact(artifact: string) {
+  pane.set({ artifact });
+  openPane("artifacts");
+}
 
 /** Move a page to a section. The page there takes its place, so nothing is closed. */
 export function movePane(page: Page, to: Section) {

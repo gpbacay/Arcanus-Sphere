@@ -1,10 +1,13 @@
 "use client";
 
 // Arcanus's browser: history, the page or results in view, and the calls to the relay (src/app/api/web). The chat's
-// web skill drives the same browser, so what Arcanus reads is what the Browser pane shows.
+// web skill drives the same browser, so what Arcanus reads is what the search engine (an artifact) shows.
 import type { Page, Result } from "@/shared/html";
-import { openPane } from "@/shared/pane";
+import { openArtifact } from "@/shared/pane";
 import { Store, errorText } from "@/shared/store";
+
+/** The search engine's tab: its file in .arcanus/artifacts/. */
+export const SEARCH = "search-engine.html";
 
 export type View = { kind: "page"; page: Page } | { kind: "results"; query: string; results: Result[]; engine: string; brief?: string };
 
@@ -55,12 +58,12 @@ async function load(target: string): Promise<View> {
   }
 }
 
-/** Open an address or a search as a new history entry, and show the Browser pane. */
+/** Open an address or a search as a new history entry, and show the search engine. */
 export function go(input: string): Promise<View> {
   const target = toTarget(input);
   const { history, at } = browser.state;
   browser.set({ history: [...history.slice(0, at + 1), target], at: at + 1 });
-  openPane("search");
+  openArtifact(SEARCH);
   return load(target);
 }
 
@@ -99,5 +102,5 @@ export async function openUserBrowser(url: string) {
     error: "",
     view: { kind: "page", page: { url, title: "Opened in your browser", text: `Opened in your browser.\n\n[${url}](${url})` } },
   });
-  openPane("search");
+  openArtifact(SEARCH);
 }

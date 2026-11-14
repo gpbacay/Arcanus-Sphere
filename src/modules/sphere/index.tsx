@@ -28,6 +28,9 @@ function Stand(props: { state: SphereState; off?: boolean }) {
 /** The AR page: Arcanus's orb in your space, tracked by the 8th Wall engine. Its own chunk, fetched only on /ar. */
 export const ArView = dynamic(() => import("./ArView"), { ssr: false });
 
+/** View in AR, one of the Artifacts pane's pages (app/page.tsx): the way to the AR page. Its QR code is its own chunk. */
+export const ArLink = dynamic(() => import("./ArLink"), { ssr: false });
+
 const Scene = dynamic(() => import("./SphereScene"), { ssr: false, loading: () => <Orb state="idle" loading /> });
 
 let webgl: boolean | undefined;

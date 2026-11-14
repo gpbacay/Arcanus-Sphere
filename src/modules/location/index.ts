@@ -1,7 +1,7 @@
 "use client";
 
 // Public API of the location module: where this device is, live from its GPS (the browser's Geolocation API), and
-// the world map pane that shows it. Arcanus runs on this device, so this is its position and the user's.
+// the world map artifact (.arcanus/artifacts/world-map.html) shows it, through modules/artifacts' bridge. Arcanus runs on this device, so this is its position and the user's.
 // Offline: the GPS keeps working (a phone's satellite fix needs no network; a desktop's Wi-Fi location does), the last
 // fix is kept per account so a later visit still knows it, and places are named from public/geo/places.json.
 import { scopedKey } from "@/modules/account";
@@ -31,6 +31,20 @@ function restore() {
   }
 }
 
+const reading = ({ coords, timestamp }: GeolocationPosition): Fix => ({
+  lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy, at: timestamp, altitude: coords.altitude, heading: coords.heading, speed: coords.speed,
+});
+
+/** Keep a fix: shown, and saved for a later visit. */
+function keep(fix: Fix) {
+  gps.set({ fix, status: "live", error: undefined, prompting: false });
+  try {
+    localStorage.setItem(KEY(), JSON.stringify(fix));
+  } catch {
+    /* storage blocked: the fix lasts this session */
+  }
+}
+
 /** Follow this device's position live. Asks for permission the first time; safe to call again. */
 export function track() {
   restore();
@@ -38,17 +52,8 @@ export function track() {
   if (!("geolocation" in navigator)) return gps.set({ status: "unavailable", error: "This browser has no location access." });
   if (gps.state.status !== "live") gps.set({ status: "asking", error: undefined });
   watchId = navigator.geolocation.watchPosition(
-    ({ coords, timestamp }) => {
-      const reading: Fix = { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy, at: timestamp, altitude: coords.altitude, heading: coords.heading, speed: coords.speed };
-      // A reading that only wobbles inside its accuracy keeps the position where it is (geo steady).
-      const fix = steady(gps.state.fix, reading);
-      gps.set({ fix, status: "live", error: undefined, prompting: false });
-      try {
-        localStorage.setItem(KEY(), JSON.stringify(fix));
-      } catch {
-        /* storage blocked: the fix lasts this session */
-      }
-    },
+    // A reading that only wobbles inside its accuracy keeps the position where it is (geo steady).
+    (pos) => keep(steady(gps.state.fix, reading(pos))),
     (err) => {
       gps.set({ status: err.code === err.PERMISSION_DENIED ? "denied" : "unavailable", error: err.message, prompting: false });
       if (err.code === err.PERMISSION_DENIED && watchId !== null) {
@@ -78,6 +83,28 @@ export async function askLocation() {
   if (permission?.state === "denied") return gps.set({ status: "denied", prompting: false });
   gps.set({ prompting: permission?.state === "prompt" });
   track();
+}
+
+/**
+ * Take the position again, from scratch: a fresh reading (none cached), kept as it comes rather than steadied. For when
+ * the dot is in the wrong place: a fix that claimed a good accuracy would otherwise hold it there. The watch carries on.
+ */
+export async function recalibrate(): Promise<Fix | null> {
+  await askLocation();
+  if (gps.state.status === "denied" || !("geolocation" in navigator)) return null;
+  return new Promise((resolve) =>
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        keep(reading(pos));
+        resolve(gps.state.fix);
+      },
+      (err) => {
+        gps.set({ error: err.message, prompting: false });
+        resolve(null);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20_000 },
+    ),
+  );
 }
 
 /** The position now: the live fix, else the first one after asking (up to `wait` ms), else the last one kept. */
@@ -122,4 +149,3 @@ export function noFixReason() {
   return "I couldn't get a position from this device in time. Try again in a moment.";
 }
 
-export { MapPane } from "./MapPane";

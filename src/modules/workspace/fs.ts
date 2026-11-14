@@ -7,7 +7,8 @@
 //   .arcanus/skills/<name>/SKILL.md  skills you or Arcanus wrote, run with /<name>
 //   .arcanus/memory/*.md         notes Arcanus remembers, recalled when a message is about them
 //   .arcanus/knowledge/*.md|txt  books and documents you add; Arcanus answers from their passages (brain/shelf.ts)
-//   .arcanus/artifacts/          what Arcanus saves: replies, web pages
+//   .arcanus/artifacts/          what Arcanus saves: replies, web pages; and its artifacts, the .html pages its
+//                                Artifacts pane runs (the Graph of Thought is one), each a tab there
 //   .arcanus/source/             Arcanus's own source code: the project it runs from, with its git history (source.ts)
 // The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
@@ -343,7 +344,7 @@ This pane is my file manager and my editor. My own files live in .arcanus/:
 - skills/ — run with /name, like [[skills/eli5/SKILL|/eli5]]
 - memory/ — notes I recall
 - knowledge/ — books I answer from
-- artifacts/ — replies and pages I saved
+- artifacts/ — replies and pages I saved, and my artifacts: the .html pages my Artifacts pane runs, like the Graph of Thought
 - source/ — my own source code, at localhost
 
 Ctrl+S saves the file that is open. ${LINKING}
@@ -393,6 +394,7 @@ async function setUp() {
   const told = await read(`${HOME}/lore.md`);
   if (told === null || told.includes(LORE_BEFORE)) await write(`${HOME}/lore.md`, LORE_MD);
   for (const dir of ["memory", "artifacts", "knowledge"]) await makeFolder(`${HOME}/${dir}`);
+  for (const name of BUILT_IN_ARTIFACTS) await seedArtifact(name).catch(() => undefined); // offline on a first visit: the shipped page runs meanwhile
   if ((await read(`${GUARDRAILS}/rules.md`)) === null) await write(`${GUARDRAILS}/rules.md`, RULES_MD);
   // built-in.md says what the code enforces, so it is rewritten whenever the code says something else.
   if ((await read(`${GUARDRAILS}/built-in.md`)) !== BUILT_IN_GUARDRAILS) await write(`${GUARDRAILS}/built-in.md`, BUILT_IN_GUARDRAILS);
@@ -505,6 +507,54 @@ export async function saveArtifact(title: string, text: string) {
   const path = `${HOME}/artifacts/${slug(title) || "artifact"}-${stamp()}.md`;
   await write(path, text);
   return path;
+}
+
+// ------------------------------------------------------------------ artifacts: the pages the Artifacts pane runs
+
+const ARTIFACTS = `${HOME}/artifacts`;
+/** The artifacts Arcanus ships (public/artifacts/). Each is copied into .arcanus/artifacts, where it is yours to edit. */
+export const BUILT_IN_ARTIFACTS = ["graph-of-thought.html", "search-engine.html", "world-map.html"];
+export type Artifact = { name: string; path: string; text: string };
+
+const shipped = async (name: string) => {
+  const res = await fetch(`/artifacts/${name}`);
+  if (!res.ok) throw new Error(`The original ${name} couldn't be fetched (${res.status}).`);
+  return res.text();
+};
+const print = (text: string) => String([...text].reduce((h, c) => (h * 33) ^ c.charCodeAt(0), 5381) >>> 0);
+const printKey = (name: string) => scopedKey(`artifact_${name}`);
+
+/** Put a shipped artifact back as it came, over whatever is there. */
+export async function restoreArtifact(name: string) {
+  const text = await shipped(name);
+  await write(`${ARTIFACTS}/${name}`, text);
+  localStorage.setItem(printKey(name), print(text));
+}
+
+/** Copy a shipped artifact in when it is missing, or when the copy is still the one shipped before: a new version
+ *  of Arcanus brings its new page, and a page you edited is never overwritten. */
+async function seedArtifact(name: string) {
+  const [mine, theirs] = [await read(`${ARTIFACTS}/${name}`), await shipped(name)];
+  if (mine === theirs) return;
+  if (mine === null || print(mine) === localStorage.getItem(printKey(name))) await restoreArtifact(name);
+}
+
+/** The artifacts: every .html page in .arcanus/artifacts. A shipped one that isn't there (these files couldn't be
+ *  opened, or it was deleted) runs from the copy Arcanus ships, with no path: there is no file to edit. */
+export async function artifacts(): Promise<Artifact[]> {
+  const found: Artifact[] = [];
+  for (const entry of await list(ARTIFACTS).catch(() => [])) {
+    if (entry.kind !== "file" || !/\.html?$/i.test(entry.name)) continue;
+    const path = `${ARTIFACTS}/${entry.name}`;
+    const text = await read(path).catch(() => null);
+    if (text) found.push({ name: entry.name, path, text });
+  }
+  for (const name of BUILT_IN_ARTIFACTS) {
+    if (found.some((a) => a.name === name)) continue;
+    const text = await shipped(name).catch(() => null);
+    if (text) found.push({ name, path: "", text });
+  }
+  return found;
 }
 
 /** Write .arcanus/skills/<name>/SKILL.md. Returns the skill's name and path. */

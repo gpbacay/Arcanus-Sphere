@@ -1,0 +1,662 @@
+<!--
+  Search engine: an Arcanus artifact.
+
+  Arcanus's files by name and by line, like a code editor's search, and the web when it is needed. Web pages arrive
+  as text through Arcanus's relay and show in reader view. The chat's web skill drives the same browser, so what
+  Arcanus reads shows here.
+
+  It runs sealed, like every artifact (see graph-of-thought.html), and reaches Arcanus through the bridge:
+    arcanus.on("search", (s) => …)    s: { query, options, scope, searching, web, files, browser, reading }
+    arcanus.call("search.set", { query?, options?, scope? }), arcanus.call("search.files"), arcanus.call("search.run")
+    arcanus.call("web.go", address), arcanus.call("web.step", -1 | 1), arcanus.call("web.reload")
+    arcanus.call("file.open", path), arcanus.call("file.save", title, text), arcanus.call("chat.pin", page | null)
+  A web link pressed opens in a tab of your browser. The full list is in src/modules/artifacts/bridge.ts.
+
+  This file is the copy Arcanus ships (public/artifacts/). Edit yours freely: the ⋮ menu beside the tabs restores it.
+-->
+<title>Search engine</title>
+<meta name="description" content="My files first, by name and by line, and the web when it is needed." />
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  button {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  svg {
+    flex: none;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  .truncate {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .field {
+    width: 100%;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: rgba(2, 5, 9, 0.6);
+    font: inherit;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field::placeholder {
+    color: var(--text-faint);
+  }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+  }
+  .icon-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    transition: background 0.15s, color 0.15s;
+  }
+  .icon-btn:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .icon-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .icon-btn[aria-pressed="true"] {
+    color: var(--accent);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover {
+    background: var(--surface-3);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover {
+    border-color: var(--accent-hot);
+    background: var(--accent-hot);
+  }
+
+  /* —— The form: the query with its toggles, the file filters, where to search —— */
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 0 12px;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+  .head span {
+    flex: 1;
+  }
+  .info {
+    position: fixed;
+    inset: 0;
+    width: min(360px, calc(100vw - 32px));
+    height: fit-content;
+    margin: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--line-strong);
+    background: #0a0f16;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-muted);
+  }
+  .info p {
+    margin: 0;
+  }
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 10px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  /* The query field with its three toggles inside it, at its right end. */
+  .box {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .box .field {
+    height: 32px;
+    padding-right: 84px;
+  }
+  .toggle {
+    position: absolute;
+    top: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+  }
+  .toggle:nth-of-type(1) {
+    right: 56px;
+  }
+  .toggle:nth-of-type(2) {
+    right: 30px;
+  }
+  .toggle:nth-of-type(3) {
+    right: 4px;
+  }
+  .toggle:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .toggle[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  label .field {
+    height: 30px;
+  }
+  .scope {
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .scope:hover {
+    color: var(--text);
+  }
+  .scope[aria-checked="true"] {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .go {
+    height: 26px;
+    margin-left: auto;
+  }
+
+  /* —— Results: the files, then the web —— */
+  main {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 6px 12px 10px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  section + section {
+    margin-top: 10px;
+  }
+  h3.heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .count {
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-faint);
+  }
+  .nav {
+    display: flex;
+    margin-left: auto;
+  }
+  .nav .icon-btn {
+    width: 24px;
+    height: 24px;
+  }
+  .why {
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+  .note {
+    margin: 8px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+  ul.files,
+  ul.lines {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .file,
+  .line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 26px;
+    padding: 2px 4px;
+    border-radius: var(--r-sm);
+  }
+  .file:hover,
+  .line:hover {
+    background: var(--surface-2);
+  }
+  .chevron {
+    color: var(--text-faint);
+    transition: transform 0.15s;
+  }
+  .file[aria-expanded="true"] .chevron {
+    transform: rotate(90deg);
+  }
+  .file:not([aria-expanded]) .chevron {
+    visibility: hidden;
+  }
+  .name {
+    flex: none;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .name[data-named] {
+    color: var(--accent);
+  }
+  .dir {
+    flex: 1;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+  .badge {
+    flex: none;
+    min-width: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    font-size: 10.5px;
+    line-height: 17px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .line {
+    align-items: baseline;
+    padding-left: 22px;
+  }
+  .ln {
+    flex: none;
+    min-width: 26px;
+    font: 10.5px var(--font-mono);
+    text-align: right;
+    color: var(--text-faint);
+  }
+  .text {
+    font: 11.5px/1.5 var(--font-mono);
+    color: var(--text-muted);
+  }
+  mark {
+    border-radius: 2px;
+    background: rgba(255, 196, 92, 0.28);
+    color: var(--text);
+  }
+  a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(111, 224, 255, 0.35);
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    text-decoration-color: var(--accent);
+  }
+  ol.results {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .results li {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .results li a {
+    font-weight: 600;
+  }
+  .url {
+    font: 11px var(--font-mono);
+    color: var(--text-faint);
+  }
+  .results p {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  article h1 {
+    margin: 0 0 10px;
+    font-size: 17px;
+    line-height: 1.3;
+  }
+  article h3 {
+    margin: 14px 0 4px;
+    font-size: 14px;
+  }
+  article p {
+    margin: 0 0 8px;
+  }
+  article .item {
+    margin-bottom: 4px;
+    padding-left: 14px;
+    text-indent: -10px;
+  }
+  article .item::before {
+    content: "· ";
+    color: var(--accent);
+  }
+
+  /* —— For a page in the reader: hand it to Arcanus, save it, or open it in a tab —— */
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--line);
+  }
+  .actions .status {
+    min-width: 0;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+</style>
+
+<div class="head">
+  <span class="truncate" id="sub">Files first · ARC 1</span>
+  <button type="button" class="icon-btn" popovertarget="info" aria-label="How search works" title="How search works" data-icon="info"></button>
+</div>
+<div class="info" id="info" popover>
+  <p>
+    Search my files as you type: notes, memory, books, skills and my own source code, by name and by line. Press Enter and ARC 1 reads what you asked:
+    if it needs the internet, and the device is online, I search the web too. An address opens in the reader. Your chats never go there.
+  </p>
+</div>
+
+<form id="form">
+  <div class="row">
+    <div class="box">
+      <input class="field" id="query" placeholder="Search my files and the web, or type an address" aria-label="Search" spellcheck="false" autocomplete="off" autofocus />
+      <button type="button" class="toggle" data-option="matchCase" aria-pressed="false" aria-label="Match case" title="Match case" data-icon="case-sensitive"></button>
+      <button type="button" class="toggle" data-option="wholeWord" aria-pressed="false" aria-label="Match whole word" title="Match whole word" data-icon="whole-word"></button>
+      <button type="button" class="toggle" data-option="regex" aria-pressed="false" aria-label="Use regular expression" title="Use regular expression" data-icon="regex"></button>
+    </div>
+    <button type="button" class="icon-btn" id="filter" aria-pressed="false" aria-label="Files to include or exclude" title="Files to include or exclude" data-icon="list-filter"></button>
+  </div>
+  <div id="filters" hidden>
+    <label>files to include <input class="field" data-glob="include" placeholder="e.g. *.md, memory" spellcheck="false" /></label>
+    <label>files to exclude <input class="field" data-glob="exclude" placeholder="e.g. *.ts, src/**/exclude" spellcheck="false" /></label>
+  </div>
+  <div class="row" role="radiogroup" aria-label="Where to search">
+    <button type="button" class="scope" role="radio" data-scope="all" aria-checked="true">All</button>
+    <button type="button" class="scope" role="radio" data-scope="files" aria-checked="false">Files</button>
+    <button type="button" class="scope" role="radio" data-scope="web" aria-checked="false">Web</button>
+    <button type="button" class="btn btn-primary go" id="go" disabled>Search</button>
+  </div>
+</form>
+
+<main id="body" aria-live="polite"></main>
+
+<div class="actions" id="actions" hidden>
+  <button type="button" class="btn" id="pin" title="Arcanus reads this page with every message until you remove it"></button>
+  <button type="button" class="btn" id="save"></button>
+  <a class="icon-btn" id="tab" aria-label="Open in a new tab" title="Open in a new tab" data-icon="external-link"></a>
+  <span class="status truncate" id="status" role="status"></span>
+</div>
+
+<script>
+  const PATHS = {
+    info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    "case-sensitive": '<path d="m2 16 4.039-9.69a.5.5 0 0 1 .923 0L11 16"/><path d="M22 9v7"/><path d="M3.304 13h6.392"/><circle cx="18.5" cy="12.5" r="3.5"/>',
+    "whole-word": '<circle cx="7" cy="12" r="3"/><path d="M10 9v6"/><circle cx="17" cy="12" r="3"/><path d="M14 7v8"/><path d="M22 17v1c0 .5-.5 1-1 1H3c-.5 0-1-.5-1-1v-1"/>',
+    regex: '<path d="M17 3v10"/><path d="m12.67 5.5 8.66 5"/><path d="m12.67 10.5 8.66-5"/><path d="M9 17a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-2z"/>',
+    "list-filter": '<path d="M2 5h20"/><path d="M6 12h12"/><path d="M9 19h6"/>',
+    "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+    "arrow-left": '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    "arrow-right": '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    "rotate-cw": '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+    "chevron-right": '<path d="m9 18 6-6-6-6"/>',
+    "message-square-text": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/>',
+    save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+    "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  };
+  const icon = (name, size = 15, cls = "") =>
+    `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+  const $ = (id) => document.getElementById(id);
+  const esc = (text) => String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const plain = (text) => text.replace(/\[([^\]]*)\]\([^)\s]*\)/g, "$1");
+  const shown = (target = "") => (target.startsWith("search:") ? target.slice(7) : target);
+  for (const el of document.querySelectorAll("[data-icon]")) el.innerHTML = icon(el.dataset.icon, el.classList.contains("toggle") ? 16 : 15);
+
+  const WHY = {
+    arc1: "ARC 1 read this as a web search",
+    "no files": "Nothing in my files, so I searched the web",
+    offline: "Offline · the web needs a connection, so only my files were searched",
+    "not needed": "ARC 1 read this as a search of my files · press Web to search the internet too",
+  };
+
+  let s = { query: "", options: {}, scope: "all", files: null, browser: {}, reading: null }; // the last state Arcanus sent
+  const closed = {}; // file groups you folded
+
+  // —— Asking: files are searched as you type (they are on this device); the web waits for Enter ——
+  let timer = 0;
+  const findSoon = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => arcanus.call("search.files"), 180);
+  };
+  const setOptions = (change) => {
+    s.options = { ...s.options, ...change };
+    arcanus.call("search.set", { options: s.options }).then(findSoon);
+  };
+  $("query").addEventListener("input", (e) => {
+    s.query = e.target.value;
+    $("go").disabled = !s.query.trim();
+    arcanus.call("search.set", { query: s.query }).then(findSoon);
+  });
+  // Not a form submit: a sealed frame may not submit forms, so Enter and the button run it themselves.
+  const run = () => s.query.trim() && arcanus.call("search.run").catch(() => {});
+  $("query").addEventListener("keydown", (e) => e.key === "Enter" && !e.isComposing && run());
+  $("go").addEventListener("click", run);
+  for (const el of document.querySelectorAll("[data-option]")) el.addEventListener("click", () => setOptions({ [el.dataset.option]: !s.options[el.dataset.option] }));
+  for (const el of document.querySelectorAll("[data-glob]")) el.addEventListener("input", () => setOptions({ [el.dataset.glob]: el.value }));
+  for (const el of document.querySelectorAll("[data-scope]")) el.addEventListener("click", () => arcanus.call("search.set", { scope: el.dataset.scope }).then(findSoon));
+  $("filter").addEventListener("click", () => {
+    const open = $("filters").hidden;
+    $("filters").hidden = !open;
+    $("filter").setAttribute("aria-pressed", String(open));
+  });
+
+  // —— The results, drawn again whenever Arcanus sends the state ——
+  function filesView() {
+    const files = s.files;
+    if (!files) return s.searching ? `<p class="why">Searching my files…</p>` : "";
+    if (files.error) return `<p class="note" role="alert">${esc(files.error)}</p>`;
+    const n = files.files.length;
+    const count = n ? `${files.matches} ${files.matches === 1 ? "result" : "results"} in ${n} ${n === 1 ? "file" : "files"}${files.more ? ", and more" : ""}` : "no results";
+    const groups = files.files.map((f) => {
+      const name = f.short.split("/").pop();
+      const dir = f.short.split("/").slice(0, -1).join("/");
+      const open = f.lines.length && !closed[f.path];
+      const lines = open
+        ? `<ul class="lines">${f.lines
+            .map(
+              (l) =>
+                `<li><button type="button" class="line" data-open="${esc(f.path)}" title="Open ${esc(f.short)} in my editor"><span class="ln">${l.line}</span><span class="text truncate">${esc(l.text.slice(0, l.from))}<mark>${esc(l.text.slice(l.from, l.to))}</mark>${esc(l.text.slice(l.to))}</span></button></li>`,
+            )
+            .join("")}</ul>`
+        : "";
+      const act = f.lines.length ? `data-fold="${esc(f.path)}" aria-expanded="${!!open}"` : `data-open="${esc(f.path)}"`;
+      return `<li><button type="button" class="file" ${act} title="${esc(f.path)}">${icon("chevron-right", 13, "chevron")}<span class="name"${f.named ? " data-named" : ""}>${esc(name)}</span><span class="dir truncate">${esc(dir)}</span><span class="badge">${f.lines.length || "name"}</span></button>${lines}</li>`;
+    });
+    return `<section aria-label="Files"><h3 class="heading">${icon("file-text", 13)} Files <span class="count">${count}</span></h3><ul class="files">${groups.join("")}</ul></section>`;
+  }
+
+  const LINK = /\[([^\]]*)\]\((https?:[^)\s]*)\)/;
+  /** One block of reader text, its [text](url) links opening in the reader. */
+  function line(text) {
+    const heading = text.startsWith("# ");
+    const item = text.startsWith("- ");
+    let rest = heading || item ? text.slice(2) : text;
+    let html = "";
+    for (let m = rest.match(LINK); m; m = rest.match(LINK)) {
+      html += `${esc(rest.slice(0, m.index))}<a href="${esc(m[2])}" data-go>${esc(m[1])}</a>`;
+      rest = rest.slice(m.index + m[0].length);
+    }
+    html += esc(rest);
+    return heading ? `<h3>${html}</h3>` : `<p${item ? ' class="item"' : ""}>${html}</p>`;
+  }
+
+  function webView() {
+    const { view, loading, error } = s.browser;
+    let html = loading ? `<p class="why">Loading ${esc(shown(loading))}…</p>` : "";
+    if (error && !loading) html += `<p class="note" role="alert">${esc(error)}</p>`;
+    if (view?.kind === "results" && !loading) {
+      html += `<ol class="results">${view.results
+        .map(
+          (r) =>
+            `<li><a href="${esc(r.url)}" data-go>${esc(r.title)}</a><span class="url truncate">${esc(r.url.replace(/^https?:\/\/(www\.)?/, ""))}</span>${r.snippet ? `<p>${esc(r.snippet)}</p>` : ""}</li>`,
+        )
+        .join("")}</ol>`;
+      if (!view.results.length) html += `<p class="note">Nothing found on the web for “${esc(view.query)}”.</p>`;
+    }
+    if (view?.kind === "page" && !loading) {
+      const page = view.page;
+      html += `<article><h1>${esc(page.title)}</h1>${page.text.split("\n").map(line).join("")}${page.text ? "" : `<p class="note">This page has no readable text. It may build itself with scripts: open it in a tab.</p>`}</article>`;
+    }
+    return html;
+  }
+
+  function draw() {
+    const { view, loading, error, back, forward, here } = s.browser;
+    const page = view?.kind === "page" ? view.page : null;
+    $("sub").textContent = page ? page.title : view?.kind === "results" ? `Web · ${view.engine}` : "Files first · ARC 1";
+    if (document.activeElement !== $("query")) $("query").value = s.query;
+    $("go").disabled = !s.query.trim();
+    for (const el of document.querySelectorAll("[data-option]")) el.setAttribute("aria-pressed", String(!!s.options[el.dataset.option]));
+    for (const el of document.querySelectorAll("[data-scope]")) el.setAttribute("aria-checked", String(s.scope === el.dataset.scope));
+    for (const el of document.querySelectorAll("[data-glob]")) if (document.activeElement !== el) el.value = s.options[el.dataset.glob] ?? "";
+
+    let html = s.scope !== "web" && s.query.trim() ? filesView() : "";
+    if (WHY[s.web]) html += `<p class="why">${WHY[s.web]}</p>`;
+    if (s.scope !== "files" && (view || loading || error)) {
+      html += `<section aria-label="Web"><h3 class="heading">${icon("globe", 13)} Web<span class="nav">
+        <button type="button" class="icon-btn" data-step="-1" aria-label="Back"${back ? "" : " disabled"}>${icon("arrow-left", 14)}</button>
+        <button type="button" class="icon-btn" data-step="1" aria-label="Forward"${forward ? "" : " disabled"}>${icon("arrow-right", 14)}</button>
+        <button type="button" class="icon-btn" id="reload" aria-label="Reload"${here ? "" : " disabled"}>${icon("rotate-cw", 13)}</button>
+      </span></h3>${webView()}</section>`;
+    }
+    $("body").innerHTML = html;
+    $("body").setAttribute("aria-busy", String(!!(s.searching || loading)));
+
+    $("actions").hidden = !page || s.scope === "files";
+    if (page) {
+      const reading = s.reading === page.url;
+      $("pin").setAttribute("aria-pressed", String(reading));
+      $("pin").innerHTML = `${icon("message-square-text", 14)} ${reading ? "Arcanus is reading this" : "Ask Arcanus"}`;
+      $("save").innerHTML = `${icon("save", 14)} Save`;
+      $("tab").href = page.url;
+    }
+  }
+
+  $("body").addEventListener("click", (e) => {
+    const at = e.target.closest("[data-go], [data-open], [data-fold], [data-step], #reload");
+    if (!at) return;
+    e.preventDefault(); // a link here opens in the reader, not a tab
+    if (at.dataset.go !== undefined) arcanus.call("web.go", at.href).catch(() => {});
+    else if (at.dataset.open) arcanus.call("file.open", at.dataset.open).catch(() => {});
+    else if (at.dataset.fold) {
+      closed[at.dataset.fold] = !closed[at.dataset.fold];
+      draw();
+    } else if (at.dataset.step) arcanus.call("web.step", Number(at.dataset.step));
+    else arcanus.call("web.reload");
+  });
+
+  let shownPage = null;
+  const page = () => (s.browser.view?.kind === "page" ? s.browser.view.page : null);
+  $("pin").addEventListener("click", () => {
+    const p = page();
+    if (p) arcanus.call("chat.pin", s.reading === p.url ? null : { label: p.title, text: plain(p.text), href: p.url }).catch(() => {});
+  });
+  $("save").addEventListener("click", async () => {
+    const p = page();
+    if (!p) return;
+    try {
+      $("status").textContent = `Saved ${await arcanus.call("file.save", p.title, `# ${p.title}\n\n${p.url}\n\n${plain(p.text)}\n`)}`;
+    } catch (err) {
+      $("status").textContent = err.message;
+    }
+  });
+
+  arcanus.on("search", (state) => {
+    s = state;
+    if (page()?.url !== shownPage) $("status").textContent = ""; // a note about the last page isn't about this one
+    shownPage = page()?.url;
+    draw();
+  });
+  draw();
+  $("query").focus();
+</script>

@@ -1,0 +1,409 @@
+<!--
+  World map: an Arcanus artifact.
+
+  The world (MapLibre) with this device on it: you, and Arcanus with you. Two layers of world: a country outline that
+  Arcanus ships (Natural Earth), which draws with no network, and over it when online the layer you pick:
+  OpenStreetMap's streets, or Esri's satellite imagery, alone or with place names. Tiles you have looked at are kept
+  by Arcanus's service worker, so those places still show offline.
+
+  It runs sealed, like every artifact (see graph-of-thought.html), and reaches Arcanus through the bridge:
+    arcanus.on("gps", (g) => …)    g: { fix: { lat, lon, accuracy, at } | null, status, error, prompting, place }
+    arcanus.call("location.ask"), arcanus.call("location.recalibrate")
+    arcanus.call("lib", "maplibre")       MapLibre's code, its worker and its stylesheet, as text
+    arcanus.call("fetch", url)            a map tile from the tile servers, or /geo/countries.json, as bytes
+  The full list is in src/modules/artifacts/bridge.ts.
+
+  This file is the copy Arcanus ships (public/artifacts/). Edit yours freely: the ⋮ menu beside the tabs restores it.
+-->
+<title>World map</title>
+<meta name="description" content="Where you and Arcanus are, live from this device's location, on streets or satellite." />
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    position: relative;
+    overflow: hidden;
+    background: #04121c;
+  }
+  button {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  svg {
+    flex: none;
+  }
+  #map {
+    position: absolute;
+    inset: 0;
+  }
+  .note-full {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    font-size: 12.5px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .icon-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    transition: background 0.15s, color 0.15s;
+  }
+  .icon-btn:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .icon-btn[aria-pressed="true"],
+  .icon-btn[aria-expanded="true"] {
+    color: var(--accent);
+  }
+  .icon-btn[aria-busy="true"] svg {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  /* —— The card: where you are, and the map's two tools —— */
+  .card {
+    position: absolute;
+    left: var(--gap);
+    right: var(--gap);
+    bottom: var(--gap);
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 8px 10px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r);
+    background: var(--glass-sheen), var(--glass);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-shadow);
+  }
+  .card p {
+    margin: 0;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .card-head h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .state {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .state[data-live]::before {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .place {
+    font-size: 13.5px;
+  }
+  .coords {
+    font: 11.5px var(--font-mono);
+    color: var(--text-muted);
+  }
+  .offline {
+    font-size: 11.5px;
+    color: var(--think);
+  }
+
+  /* —— The layers menu: a popover over the map, above its button —— */
+  .menu {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    padding: 4px;
+    min-width: 200px;
+    border: 1px solid var(--line-strong);
+    background: var(--glass-sheen), #0a0f16;
+    box-shadow: var(--glass-shadow);
+    color: var(--text);
+  }
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+  .menu-item:hover {
+    background: var(--surface-2);
+  }
+  .menu-item svg:first-child {
+    color: var(--accent);
+  }
+  .menu-item span {
+    flex: 1;
+  }
+  .menu-item:not([aria-checked="true"]) .check {
+    visibility: hidden;
+  }
+
+  /* This device on the map: a glowing dot that breathes. MapLibre places the marker with this element's own
+     transform, so nothing may animate transform on it: the pulse is a ring drawn by ::after instead. */
+  .me {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 18px var(--accent);
+  }
+  .me::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    background: rgba(111, 224, 255, 0.25);
+    animation: me-pulse 2.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes me-pulse {
+    50% {
+      transform: scale(1.35);
+      opacity: 0.4;
+    }
+  }
+</style>
+
+<div id="map"></div>
+<p class="note-full" id="loading">Opening the map…</p>
+
+<section class="card" aria-live="polite">
+  <div class="card-head">
+    <h3>You and Arcanus</h3>
+    <button type="button" class="icon-btn" id="locate" data-icon="locate-fixed"></button>
+    <button type="button" class="icon-btn" id="layers" popovertarget="layers-menu" aria-label="Map layers" title="Map layers" data-icon="layers"></button>
+  </div>
+  <p class="state" id="state"></p>
+  <p class="place" id="place" hidden></p>
+  <p class="coords" id="coords" hidden></p>
+  <p class="offline" id="offline" hidden>Offline · the world outline and any places you viewed before still show</p>
+</section>
+
+<div class="menu" id="layers-menu" popover role="menu" aria-label="Map layers"></div>
+
+<script>
+  const PATHS = {
+    "locate-fixed": '<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
+    layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
+    map: '<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/>',
+    satellite: '<path d="m13.5 6.5-3.148-3.148a1.205 1.205 0 0 0-1.704 0L6.352 5.648a1.205 1.205 0 0 0 0 1.704L9.5 10.5"/><path d="M16.5 7.5 19 5"/><path d="m17.5 10.5 3.148 3.148a1.205 1.205 0 0 1 0 1.704l-2.296 2.296a1.205 1.205 0 0 1-1.704 0L13.5 14.5"/><path d="M9 21a6 6 0 0 0-6-6"/><path d="M9.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l4.296-4.296a1.205 1.205 0 0 0 0-1.704l-2.296-2.296a1.205 1.205 0 0 0-1.704 0z"/>',
+    earth: '<path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+  };
+  const icon = (name, size = 16, cls = "") =>
+    `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+  const $ = (id) => document.getElementById(id);
+  for (const el of document.querySelectorAll("[data-icon]")) el.innerHTML = icon(el.dataset.icon);
+
+  // The layers you can pick, by the raster layers each shows. The outline and the borders always draw.
+  const VIEWS = [
+    { id: "map", label: "Map", icon: "map", shows: ["streets"] },
+    { id: "satellite", label: "Satellite", icon: "satellite", shows: ["satellite"] },
+    { id: "hybrid", label: "Satellite with labels", icon: "earth", shows: ["satellite", "labels"] },
+  ];
+  const RASTERS = ["streets", "satellite", "labels"];
+  // Tiles come through Arcanus (the frame has no network): "arcanus://host/path" is fetched as "https://host/path".
+  const STYLE = {
+    version: 8,
+    projection: { type: "globe" },
+    sources: {
+      world: { type: "geojson", data: { type: "FeatureCollection", features: [] }, attribution: "Natural Earth" },
+      osm: {
+        type: "raster",
+        tiles: ["arcanus://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      },
+      satellite: {
+        type: "raster",
+        tiles: ["arcanus://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
+      },
+      labels: {
+        type: "raster",
+        tiles: ["arcanus://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Labels © Esri",
+      },
+    },
+    layers: [
+      { id: "sea", type: "background", paint: { "background-color": "#04121c" } },
+      { id: "land", type: "fill", source: "world", paint: { "fill-color": "#0c2533" } },
+      // Toned down to sit with the rest of Arcanus: dark, low colour.
+      { id: "streets", type: "raster", source: "osm", paint: { "raster-brightness-max": 0.62, "raster-saturation": -0.55, "raster-contrast": 0.1 } },
+      { id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
+      { id: "labels", type: "raster", source: "labels", layout: { visibility: "none" } },
+      { id: "borders", type: "line", source: "world", paint: { "line-color": "#6fe0ff", "line-opacity": 0.35, "line-width": 0.7 } },
+    ],
+  };
+
+  let map = null;
+  let me = null;
+  let g = { fix: null, status: "off" }; // the last position Arcanus sent
+  let view = "map";
+  let follow = true; // keep the dot centred until you pan away
+  let locating = false;
+
+  const ago = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return s < 10 ? "just now" : s < 90 ? `${s} seconds ago` : s < 5400 ? `${Math.round(s / 60)} minutes ago` : `${Math.round(s / 3600)} hours ago`;
+  };
+
+  function draw() {
+    const { fix, status, error, prompting, place } = g;
+    const live = status === "live" && !!fix; // the watch is running: a device that stays put gets no new readings
+    $("state").textContent =
+      status === "denied"
+        ? "Location blocked · allow it in the browser's site settings"
+        : prompting
+          ? "Allow location access in your browser's prompt to show where you are"
+          : status === "asking" && !fix
+            ? "Finding this device…"
+            : !fix
+              ? status === "unavailable"
+                ? `No position${error ? ` · ${error}` : ""}`
+                : "Location not shared yet"
+              : live
+                ? "Live · from this device's location"
+                : `Last known · ${ago(Date.now() - fix.at)}`;
+    $("state").toggleAttribute("data-live", live);
+    $("place").hidden = $("coords").hidden = !fix;
+    if (fix) {
+      $("place").textContent = place ?? "";
+      $("coords").textContent = `latitude ${fix.lat.toFixed(4)}, longitude ${fix.lon.toFixed(4)} · ±${Math.round(fix.accuracy)} m`;
+    }
+    $("offline").hidden = navigator.onLine;
+    const label = fix ? "Center on me and find my position again" : "Use my location";
+    $("locate").setAttribute("aria-label", label);
+    $("locate").title = label;
+    $("locate").setAttribute("aria-pressed", String(follow && live));
+    $("locate").setAttribute("aria-busy", String(locating));
+    $("layers-menu").innerHTML = VIEWS.map(
+      (v) => `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${view === v.id}" data-view="${v.id}">${icon(v.icon, 14)}<span>${v.label}</span>${icon("check", 14, "check")}</button>`,
+    ).join("");
+  }
+
+  /** The dot follows the position; the view follows the dot until you pan away. */
+  function place(fix, centre) {
+    if (!map || !fix) return;
+    const first = !me.getElement().isConnected;
+    const at = !first && me.getLngLat();
+    if (at && at.lng === fix.lon && at.lat === fix.lat && !centre) return; // the position held still: only its time changed
+    me.setLngLat([fix.lon, fix.lat]).addTo(map);
+    if (first) map.jumpTo({ center: [fix.lon, fix.lat], zoom: 14 });
+    else if (centre) map.easeTo({ center: [fix.lon, fix.lat], zoom: Math.max(map.getZoom(), 14), duration: 800 });
+    else if (follow) map.easeTo({ center: [fix.lon, fix.lat], duration: 600 });
+  }
+
+  // Centre on you and take the position again, every press: the GPS is sometimes off, and a fresh reading corrects it.
+  $("locate").addEventListener("click", async () => {
+    follow = true;
+    place(g.fix, true);
+    locating = true;
+    draw();
+    const fresh = await arcanus.call("location.recalibrate").catch(() => null);
+    locating = false;
+    draw();
+    if (fresh && follow) place(fresh, true);
+  });
+
+  $("layers-menu").addEventListener("toggle", (e) => {
+    $("layers").setAttribute("aria-expanded", String(e.newState === "open"));
+    if (e.newState !== "open") return;
+    const at = $("layers").getBoundingClientRect();
+    const menu = e.currentTarget;
+    menu.style.left = `${Math.max(4, at.right - menu.offsetWidth)}px`;
+    menu.style.top = `${Math.max(4, at.top - 4 - menu.offsetHeight)}px`;
+  });
+  $("layers-menu").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-view]");
+    if (!item || !map) return;
+    view = item.dataset.view;
+    const shows = VIEWS.find((v) => v.id === view).shows;
+    for (const layer of RASTERS) map.setLayoutProperty(layer, "visibility", shows.includes(layer) ? "visible" : "none");
+    $("layers-menu").hidePopover();
+    draw();
+  });
+
+  addEventListener("online", draw);
+  addEventListener("offline", draw);
+  setInterval(draw, 15_000); // "last known, N minutes ago" stays true
+
+  arcanus.on("gps", (state) => {
+    g = state;
+    draw();
+    place(g.fix, false);
+  });
+
+  // MapLibre is handed in as text: it can't be fetched from in here.
+  async function open() {
+    const [code, worker, css] = await arcanus.call("lib", "maplibre");
+    const style = document.createElement("style");
+    style.textContent = css;
+    document.head.append(style);
+    const blob = new Blob([code], { type: "text/javascript" });
+    const maplibregl = await import(URL.createObjectURL(blob));
+    // A data: URL, not a blob: one: in a frame with no origin, Chrome won't start a module worker from a blob.
+    const dataUrl = await new Promise((done) => {
+      const reader = new FileReader();
+      reader.onload = () => done(reader.result);
+      reader.readAsDataURL(new Blob([worker], { type: "text/javascript" }));
+    });
+    maplibregl.setWorkerUrl(dataUrl);
+    maplibregl.addProtocol("arcanus", async (params) => ({ data: await arcanus.call("fetch", params.url.replace(/^arcanus:/, "https:")) }));
+
+    map = new maplibregl.Map({ container: $("map"), style: STYLE, center: [0, 15], zoom: 1.4, attributionControl: { compact: true } });
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.on("dragstart", () => {
+      follow = false; // panning yourself stops following; the locate button starts it again
+      draw();
+    });
+    const dot = document.createElement("div");
+    dot.className = "me";
+    me = new maplibregl.Marker({ element: dot });
+    $("loading").remove();
+    const world = arcanus.call("fetch", "/geo/countries.json").then((bytes) => JSON.parse(new TextDecoder().decode(bytes)));
+    map.once("load", () => world.then((data) => map.getSource("world").setData(data)).catch(() => {}));
+    place(g.fix, false);
+  }
+
+  draw();
+  open().catch((err) => ($("loading").textContent = `The map couldn't open: ${err.message}`));
+  // The map asks for the location as it opens: the browser's permission prompt first, then the live dot.
+  arcanus.call("location.ask").catch(() => {});
+</script>

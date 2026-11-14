@@ -1,0 +1,721 @@
+<!--
+  Graph of Thought: an Arcanus artifact.
+
+  An artifact is one .html file in .arcanus/artifacts/. Each is a tab of the Artifacts pane, named by its <title>, and
+  saving the file redraws it. It runs sealed: its own frame, no network, none of Arcanus's files. Arcanus gives it:
+
+    Style   the design tokens as CSS variables (--text, --text-muted, --text-faint, --accent, --think, --danger, --ok,
+            --line, --line-strong, --surface, --surface-2, --surface-3, --accent-soft, --font-ui, --font-mono, --ease)
+            and the "pulse" keyframes. The page is transparent over the pane's plate unless it paints a background.
+    Mind    a message whenever a thought changes:
+              addEventListener("message", (e) => e.data.arcanus === "mind" && draw(e.data.thoughts, e.data.processes))
+            thoughts:  [{ id, operation, content, parents, status: "active" | "complete" | "failed", at, ms?, detail?, results? }]
+            processes: [{ root, steps: [{ t, joins, branches }], count, active, failed, init }]   (src/modules/mind/layout.ts)
+    Clear   parent.postMessage({ arcanus: "clear-mind" }, "*") empties the graph.
+    Height  parent.postMessage({ arcanus: "height", height }, "*") fits the pane to the page, up to the window's height.
+            A page that never sends it fills the pane.
+
+  This file is the copy Arcanus ships (public/artifacts/). Edit yours freely: the ⋮ menu beside the tabs restores it.
+-->
+<title>Graph of Thought</title>
+<meta name="description" content="Arcanus's mind, live: what it hears, recalls, decides, writes, checks and says, as it happens." />
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  /* Transparent: the pane's glass shows through. --plate fills what must hide the rail behind it (the nodes). */
+  body {
+    --plate: #070c14;
+    --rail: rgba(150, 215, 245, 0.26);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  button {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  svg {
+    flex: none;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  .truncate {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* —— The bar: what to show (each filter carries its count, so the bar is also the status), then the graph's tools —— */
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 7px 8px 7px 10px;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+  }
+  .filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .filter:hover {
+    color: var(--text);
+  }
+  .filter b {
+    font: 500 10.5px var(--font-mono);
+    color: var(--text-faint);
+  }
+  .filter[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .filter[data-live] b {
+    color: var(--think);
+  }
+  .filter[data-bad] b {
+    color: var(--danger);
+  }
+  .tool {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 28px;
+    height: 28px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+  }
+  #fold {
+    margin-left: auto;
+  }
+  /* Asking takes the room of the other tool, so the bar never grows past a narrow pane. */
+  .bar:has([data-armed]) #fold {
+    display: none;
+  }
+  .bar:has([data-armed]) #clear {
+    margin-left: auto;
+  }
+  .tool:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .tool:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .tool[data-armed] {
+    padding: 0 8px;
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    color: var(--danger);
+  }
+
+  /* —— Now: the thought that is running, always in view while Arcanus works. Pressing it goes to its place in the graph. —— */
+  .now {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--think) 30%, transparent);
+    background: color-mix(in srgb, var(--think) 8%, transparent);
+    font-size: 12.5px;
+  }
+  .now:hover {
+    background: color-mix(in srgb, var(--think) 13%, transparent);
+  }
+  .now .truncate {
+    flex: 1;
+  }
+  .dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--think);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  /* —— The graph —— */
+  /* As tall as its thoughts (so its scrollHeight is the height the pane is fitted to), shrinking to scroll when capped. */
+  #graph {
+    position: relative;
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+    padding: 2px 0 20px;
+  }
+  #graph > * {
+    flex: none;
+  }
+  .empty {
+    margin: auto;
+    padding: 32px 28px;
+    text-align: center;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-muted);
+  }
+  .empty strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .group > h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 14px 12px 6px 14px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .group > h3::after {
+    content: "";
+    order: 1;
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+  .group > h3 b {
+    order: 2;
+    font: 500 10.5px var(--font-mono);
+    letter-spacing: 0;
+    color: var(--text-faint);
+  }
+  .op {
+    padding: 0 5px;
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 16px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  /* ARCANE's own operations, in the interface colour; Arcanus's (wake, load, perceive, execute, speak, learn) stay quiet. */
+  .op[data-op="retrieve"],
+  .op[data-op="keep_best"],
+  .op[data-op="aggregate"],
+  .op[data-op="generate"],
+  .op[data-op="refine"] {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  .facts,
+  .id,
+  .ms {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+  }
+  .facts {
+    overflow-wrap: anywhere;
+  }
+
+  /* A process: its root thought is the accordion's heading. */
+  .proc + .proc {
+    border-top: 1px solid var(--line);
+  }
+  .proc-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 4px 8px;
+    width: 100%;
+    padding: 9px 12px 9px 14px;
+    transition: background 0.15s;
+  }
+  .proc-head:hover {
+    background: var(--surface);
+  }
+  .proc-head:focus-visible,
+  .row:focus-visible,
+  .now:focus-visible {
+    outline: 1px solid var(--accent-hot);
+    outline-offset: -1px;
+    box-shadow: none;
+  }
+  .proc-head .op {
+    margin-top: 1px;
+  }
+  .proc-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  /* Closed, a heading is two lines at most, so a screen of them can be scanned; open, it is whole. */
+  .proc-head[aria-expanded="false"] .proc-title,
+  .row:not([aria-pressed="true"], [data-status="active"]) .text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .proc-head[aria-expanded="false"] .proc-title {
+    -webkit-line-clamp: 2;
+  }
+  .proc-head .facts {
+    grid-column: 2 / -1;
+  }
+  .chevron {
+    margin-top: 2px;
+    color: var(--text-faint);
+    transition: transform 0.2s var(--ease);
+  }
+  .proc-head[aria-expanded="true"] .chevron {
+    transform: rotate(180deg);
+  }
+  .proc[data-status="active"] .proc-head .op {
+    color: var(--think);
+    border-color: color-mix(in srgb, var(--think) 55%, transparent);
+  }
+  .proc[data-status="failed"] .proc-head .op {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  }
+  .proc-body {
+    padding: 0 10px 10px 20px;
+  }
+
+  /* Every thought sits on a rail under the thought it came from. A rail runs straight down and its ticks run straight
+     across, each in its own gutter, so no two lines ever cross or cover one another. */
+  .rail {
+    position: relative;
+    margin: 0;
+    padding: 0 0 0 20px;
+    list-style: none;
+  }
+  .step {
+    position: relative;
+  }
+  .step::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -13px;
+    width: 1px;
+    background: var(--rail);
+  }
+  .step:last-child::before {
+    bottom: auto;
+    height: 16px; /* the rail ends at its last node */
+  }
+  /* The node, on the rail. */
+  .step::after {
+    content: "";
+    position: absolute;
+    top: 13px;
+    left: -16px;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--accent);
+    border-radius: 50%;
+    background: var(--plate);
+  }
+  .step[data-status="active"]::after {
+    border-color: var(--think);
+    background: var(--think);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .step[data-status="failed"]::after {
+    border-color: var(--danger);
+    background: var(--danger);
+  }
+  /* A fork: the branch's rail leaves the main rail just under the thought it grew from. */
+  .step > .rail::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -13px;
+    width: 20px;
+    height: 1px;
+    background: var(--rail);
+  }
+  .row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .row:hover {
+    background: var(--surface);
+  }
+  .row[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    background: var(--accent-soft);
+  }
+  /* A thought the picked one came from: the edge, read as light instead of a line. */
+  .row[data-source],
+  .proc-head[data-source] {
+    background: var(--surface-2);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .row-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .ms {
+    margin-left: auto;
+    color: var(--text);
+  }
+  .row[data-status="active"] .ms {
+    color: var(--think);
+  }
+  .row[data-status="failed"] .facts {
+    color: var(--danger);
+  }
+  /* What the thought cost, against the slowest thought of its process, under its time: where the time went, at a glance. */
+  .cost {
+    align-self: flex-end;
+    width: calc(var(--w) * min(100%, 120px));
+    min-width: 3px;
+    height: 2px;
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .text {
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  /* Three lines until it is picked (or while it is being written): pick a thought to read all of it. */
+  .row:not([aria-pressed="true"], [data-status="active"]) .text {
+    -webkit-line-clamp: 3;
+  }
+  .results {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .results > span {
+    max-width: 100%;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* Back to the newest thought, offered once you scroll up to read. */
+  .latest {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px 0 8px;
+    border: 1px solid var(--line-strong);
+    background: #0c1622;
+    box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.8);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .latest:hover {
+    border-color: var(--accent);
+  }
+
+  /* A finger: larger words, and headings a thumb can hit. */
+  @media (pointer: coarse) {
+    .filter,
+    .tool {
+      height: 34px;
+      min-width: 34px;
+    }
+    .proc-head {
+      min-height: 48px;
+      padding: 12px 12px 12px 14px;
+    }
+    .proc-title,
+    .text {
+      font-size: 14px;
+    }
+    .facts,
+    .id,
+    .ms,
+    .results > span {
+      font-size: 11.5px;
+    }
+    .op {
+      font-size: 11px;
+      line-height: 18px;
+    }
+    .row {
+      padding: 9px 8px;
+    }
+    .step::after {
+      top: 16px;
+    }
+    .step:last-child::before {
+      height: 19px;
+    }
+    .proc-body {
+      padding-left: 16px;
+    }
+    .latest {
+      height: 36px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+
+<header class="bar">
+  <button type="button" class="filter" data-filter="all" aria-pressed="true" title="Every process">All <b id="n-all">0</b></button>
+  <button type="button" class="filter" data-filter="running" aria-pressed="false" title="Only what is running now">Running <b id="n-running">0</b></button>
+  <button type="button" class="filter" data-filter="failed" aria-pressed="false" title="Only what failed">Failed <b id="n-failed">0</b></button>
+  <button type="button" class="tool" id="fold"></button>
+  <button type="button" class="tool" id="clear"></button>
+</header>
+<button type="button" class="now" id="now" hidden></button>
+<main id="graph" aria-label="Thoughts, oldest first"></main>
+<button type="button" class="latest" id="latest" hidden></button>
+
+<script>
+  const PATHS = {
+    chevron: '<path d="m6 9 6 6 6-6"/>',
+    down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    fold: '<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>',
+    unfold: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
+    trash: '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  };
+  const icon = (name, cls = "") =>
+    `<svg class="${cls}" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const time = (at) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const took = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
+  const flat = (steps) => steps.flatMap((s) => [s.t, ...flat(s.branches)]);
+  const $ = (id) => document.getElementById(id);
+  const graph = $("graph");
+
+  let thoughts = [];
+  let procs = [];
+  let filter = "all";
+  let picked = null; // the thought you picked: it shows in full, and the thoughts it came from light up
+  let chosen = {}; // a process is open while it runs, and the newest stays open; opening or closing one yourself overrides that
+  let pinned = true; // follow the newest thought unless you scrolled up to read
+  let armed = 0; // Clear asks twice: the timer that disarms it
+
+  /** Make `from` equal `to`, changing only what differs: a thought being written keeps its focus, selection and pulse. */
+  function morph(from, to) {
+    for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
+    for (const a of to.attributes) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+    const keyed = new Map([...from.children].filter((n) => n.dataset.key).map((n) => [n.dataset.key, n]));
+    let i = 0;
+    for (const next of [...to.childNodes]) {
+      const at = from.childNodes[i] ?? null;
+      const key = next.dataset?.key;
+      const same = key ? keyed.get(key) : at && !at.dataset?.key && at.nodeName === next.nodeName ? at : null;
+      if (!same) from.insertBefore(next, at);
+      else {
+        if (same !== at) from.insertBefore(same, at);
+        if (same.nodeType === 1) morph(same, next);
+        else if (same.data !== next.data) same.data = next.data;
+      }
+      i++;
+    }
+    while (from.childNodes.length > i) from.lastChild.remove();
+  }
+  function paint(el, html) {
+    const to = el.cloneNode(false);
+    to.innerHTML = html;
+    morph(el, to);
+  }
+
+  function draw() {
+    const running = thoughts.filter((t) => t.status === "active");
+    const failed = thoughts.filter((t) => t.status === "failed").length;
+    const sources = thoughts.find((t) => t.id === picked)?.parents ?? [];
+    const newest = procs.at(-1)?.root.id;
+    const isOpen = (p) => chosen[p.root.id] ?? (filter !== "all" || p.active > 0 || p.root.id === newest);
+
+    const row = (s, max) => {
+      const t = s.t;
+      const facts = [t.detail, s.joins.length ? `joins ${s.joins.join(" + ")}` : "", t.status === "failed" ? "failed" : ""].filter(Boolean);
+      const from = t.parents.length ? ` title="Came from ${esc(t.parents.join(" + "))}. Pick it to read all of it and light them up."` : "";
+      return (
+        `<li class="step" data-key="${t.id}" data-status="${t.status}">` +
+        `<button type="button" class="row" data-pick="${t.id}" data-status="${t.status}" aria-pressed="${picked === t.id}"${sources.includes(t.id) ? " data-source" : ""}${from}>` +
+        `<span class="row-head"><span class="op" data-op="${t.operation}">${t.operation}</span><span class="id">${t.id}</span>` +
+        `<span class="ms">${t.ms !== undefined ? took(t.ms) : t.status === "active" ? "running" : ""}</span></span>` +
+        (t.ms !== undefined ? `<span class="cost" style="--w:${(t.ms / max).toFixed(3)}"></span>` : "") +
+        `<span class="text">${esc(t.content) || "…"}</span>` +
+        (facts.length ? `<span class="facts">${esc(facts.join(" · "))}</span>` : "") +
+        (t.results?.length ? `<span class="results">${t.results.map((r) => `<span>${esc(r)}</span>`).join("")}</span>` : "") +
+        `</button>${s.branches.length ? rail(s.branches, max) : ""}</li>`
+      );
+    };
+    const rail = (steps, max) => `<ol class="rail">${steps.map((s) => row(s, max)).join("")}</ol>`;
+    const proc = (p) => {
+      const { root } = p;
+      const open = isOpen(p);
+      const facts = [
+        time(root.at),
+        `${p.count} ${p.count === 1 ? "thought" : "thoughts"}`,
+        p.active ? `${p.active} running` : root.ms !== undefined ? took(root.ms) : "",
+        p.failed ? `${p.failed} failed` : "",
+        root.detail,
+      ].filter(Boolean);
+      const max = Math.max(1, ...flat(p.steps).map((t) => t.ms ?? 0));
+      return (
+        `<article class="proc" data-key="${root.id}" data-status="${p.active ? "active" : p.failed ? "failed" : "complete"}">` +
+        `<button type="button" class="proc-head" data-toggle="${root.id}" aria-expanded="${open}"${sources.includes(root.id) ? " data-source" : ""}>` +
+        `<span class="op" data-op="${root.operation}">${root.operation}</span><span class="proc-title">${esc(root.content) || "…"}</span>` +
+        `${icon("chevron", "chevron")}<span class="facts">${esc(facts.join(" · "))}</span></button>` +
+        (open && p.steps.length ? `<div class="proc-body">${rail(p.steps, max)}</div>` : "") +
+        `</article>`
+      );
+    };
+    const group = (key, title, list) => (list.length ? `<section class="group" data-key="${key}" aria-label="${title}"><h3>${title}<b>${list.length}</b></h3>${list.map(proc).join("")}</section>` : "");
+
+    const shown = procs.filter((p) => filter === "all" || (filter === "running" ? p.active : p.failed));
+    const none =
+      filter === "running"
+        ? "<strong>Nothing is running</strong>Arcanus is idle. What it does next shows here as it happens."
+        : filter === "failed"
+          ? "<strong>Nothing failed</strong>Every thought so far finished."
+          : "<strong>No thoughts yet</strong>Talk or type to Arcanus. Each thing it hears, recalls, decides, writes, checks and says shows here as a thought, under the thought it came from.";
+    paint(graph, shown.length ? group("init", "Initialization", shown.filter((p) => p.init)) + group("talk", "Conversation", shown.filter((p) => !p.init)) : `<p class="empty">${none}</p>`);
+
+    $("n-all").textContent = thoughts.length;
+    $("n-running").textContent = running.length;
+    $("n-failed").textContent = failed;
+    document.querySelector('[data-filter="running"]').toggleAttribute("data-live", running.length > 0);
+    document.querySelector('[data-filter="failed"]').toggleAttribute("data-bad", failed > 0);
+    for (const b of document.querySelectorAll("[data-filter]")) b.setAttribute("aria-pressed", String(b.dataset.filter === filter));
+
+    const anyOpen = String(shown.some(isOpen));
+    if ($("fold").dataset.open !== anyOpen) {
+      $("fold").dataset.open = anyOpen;
+      $("fold").innerHTML = icon(anyOpen === "true" ? "fold" : "unfold");
+      $("fold").title = anyOpen === "true" ? "Close every process" : "Open every process";
+      $("fold").setAttribute("aria-label", $("fold").title);
+    }
+    $("fold").disabled = !shown.length;
+    $("clear").disabled = !thoughts.length;
+
+    const now = running.at(-1);
+    $("now").hidden = !now;
+    if (now) {
+      $("now").dataset.go = now.id;
+      $("now").title = "Go to this thought";
+      paint($("now"), `<span class="dot"></span><span class="op" data-op="${now.operation}">${now.operation}</span><span class="truncate">${esc(now.content) || "…"}</span>${running.length > 1 ? `<span class="ms">+${running.length - 1} more</span>` : ""}`);
+    }
+
+    if (pinned) graph.scrollTop = graph.scrollHeight;
+    follow();
+  }
+
+  /** The Latest button shows only once you have scrolled away from the newest thought. */
+  function follow() {
+    pinned = graph.scrollHeight - graph.scrollTop - graph.clientHeight < 40;
+    $("latest").hidden = pinned;
+  }
+  function disarm() {
+    clearTimeout(armed);
+    armed = 0;
+    $("clear").removeAttribute("data-armed");
+    $("clear").innerHTML = icon("trash");
+    $("clear").title = "Clear the graph";
+    $("clear").setAttribute("aria-label", "Clear the graph");
+  }
+
+  graph.addEventListener("scroll", follow);
+  $("latest").innerHTML = `${icon("down")}Latest`;
+  $("latest").addEventListener("click", () => {
+    pinned = true;
+    draw();
+  });
+  $("fold").addEventListener("click", () => {
+    const open = $("fold").dataset.open === "true";
+    chosen = Object.fromEntries(procs.map((p) => [p.root.id, !open]));
+    draw();
+  });
+  // Clearing throws the whole session's thoughts away, so it asks once more, in place.
+  $("clear").addEventListener("click", () => {
+    if (!armed) {
+      $("clear").setAttribute("data-armed", "");
+      $("clear").innerHTML = `${icon("trash")}Clear all?`;
+      $("clear").title = "Press again to clear every thought";
+      armed = setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    picked = null;
+    chosen = {};
+    parent.postMessage({ arcanus: "clear-mind" }, "*");
+  });
+  $("now").addEventListener("click", (e) => {
+    const id = e.currentTarget.dataset.go;
+    const home = procs.find((p) => p.root.id === id || flat(p.steps).some((t) => t.id === id));
+    if (!home) return;
+    filter = "all";
+    chosen[home.root.id] = true;
+    draw();
+    document.querySelector(`[data-key="${id}"]`)?.scrollIntoView({ block: "center" });
+    follow();
+  });
+  document.addEventListener("click", (e) => {
+    const at = e.target.closest("[data-filter], [data-toggle], [data-pick]");
+    if (!at) return;
+    pinned = !!at.dataset.filter; // a new filter starts at its newest thought; opening, closing or picking is reading, so the view stays put
+    if (at.dataset.filter) {
+      filter = at.dataset.filter;
+      chosen = {};
+    } else if (at.dataset.toggle) chosen[at.dataset.toggle] = at.getAttribute("aria-expanded") !== "true";
+    else picked = picked === at.dataset.pick ? null : at.dataset.pick;
+    draw();
+  });
+
+  addEventListener("message", (e) => {
+    if (e.source !== parent || e.data?.arcanus !== "mind") return;
+    thoughts = e.data.thoughts;
+    procs = e.data.processes;
+    draw();
+  });
+  // The pane fits the page: its height is sent whenever the page changed or was resized.
+  const fit = () => parent.postMessage({ arcanus: "height", height: document.querySelector(".bar").offsetHeight + $("now").offsetHeight + $("graph").scrollHeight }, "*");
+  new MutationObserver(fit).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  addEventListener("resize", fit);
+  disarm();
+  draw();
+  fit();
+</script>

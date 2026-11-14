@@ -3,19 +3,20 @@
 // The composition root: the only place that knows every module. Modules talk through their public APIs
 // (src/modules/<name>/index.ts); to add an engine, append it to ENGINES and it gets a line in the chat's boot log.
 // Moonshine (speech to text) is not in this boot: it loads when the mic opens, on the CPU, so it never shares SmolLM2's GPU.
+import { View } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Gate } from "@/modules/account";
+import { Artifacts, type ArtifactPage } from "@/modules/artifacts";
 import { brainEngine } from "@/modules/brain";
 import { cancelGreet, ChatFallback, ChatPanel, greet, hydrateChats, stopReply, useBusy } from "@/modules/chat";
 import { listen, listenEngine } from "@/modules/listen";
 import { llmEngine } from "@/modules/llm";
-import { MapPane, trackIfAllowed } from "@/modules/location";
-import { GraphOfThought, mind } from "@/modules/mind";
+import { trackIfAllowed } from "@/modules/location";
+import { mind } from "@/modules/mind";
 import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
-import { Sphere } from "@/modules/sphere";
+import { ArLink, Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
-import { SearchEngine } from "@/modules/search";
 import { OperatingSystem, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
 import { closeAllPanes } from "@/shared/pane";
@@ -24,6 +25,11 @@ import { bootInTurn, useStore } from "@/shared/store";
 
 // Speech waits until the mic is opened and stays on the CPU. The others start together.
 const ENGINES = [brainEngine, voiceEngine, llmEngine, listenEngine];
+
+// The pages shown as artifacts, after the ones that are files in .arcanus/artifacts/ (the Graph of Thought, the search
+// engine, the world map). AR is app code: the camera can't work in a sealed frame. To add a page, append it here: it
+// gets a tab in the Artifacts pane, and openArtifact(id) shows it.
+const PAGES: ArtifactPage[] = [{ id: "ar", label: "View in AR", icon: View, view: <ArLink /> }];
 
 export default function Page() {
   useEffect(() => {
@@ -80,16 +86,14 @@ function Home() {
     };
   }, [on, hydrated]);
 
-  // Left: the nav and one side pane. Center: the chat, over the orb. Right: the Operating System, or the world map.
+  // Left: the Artifacts (the Graph of Thought, the search engine, the world map, AR). Center: the chat, over the orb. Right: the Operating System.
   return (
     <main className="app-shell">
       <Stage />
       <AppNav />
       <Boundary fallback={null}>
-        <GraphOfThought />
+        <Artifacts pages={PAGES} />
         <OperatingSystem />
-        <SearchEngine />
-        <MapPane />
       </Boundary>
       <Boundary fallback={<ChatFallback />}>
         <ChatPanel />

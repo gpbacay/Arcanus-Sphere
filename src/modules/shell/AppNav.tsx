@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Info, MapPin, Network, Search, Settings, User, X } from "lucide-react";
+import { FolderOpen, Info, Settings, Shapes, User, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { account, passwordError, saveAccount, signOut } from "@/modules/account";
 import { pane, sectionOf, togglePane, TOP_ACTIONS, type PaneName } from "@/shared/pane";
@@ -14,13 +14,13 @@ import { voice } from "@/modules/voice";
 type DialogName = "about" | "settings" | "account";
 
 /**
- * The top bar: the mark, then Arcanus's Graph of Thought, Operating System, search engine and world map (side panes), then Account, About
+ * The top bar: the mark, then Arcanus's Artifacts (the Graph of Thought, the search engine, the world map, AR) and Operating System (side panes), then Account, About
  * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's tools.
  */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);
   // Which pages are open, in whatever section: one string, so the selector returns a primitive.
-  const shown = useStore(pane, (s) => (["mind", "os", "search", "map"] as PaneName[]).filter((p) => sectionOf(s, p)).join(" "));
+  const shown = useStore(pane, (s) => (["artifacts", "os"] as PaneName[]).filter((p) => sectionOf(s, p)).join(" "));
   const isOpen = (page: PaneName) => shown.split(" ").includes(page);
   const thinking = useStore(mind, (s) => s.thoughts.some((t) => t.status === "active"));
   return (
@@ -32,22 +32,16 @@ export function AppNav() {
       <button
         type="button"
         className="app-nav-btn"
-        aria-label="Graph of Thought"
-        title="Graph of Thought: what Arcanus is thinking, live"
-        aria-expanded={isOpen("mind")}
+        aria-label="Artifacts"
+        title="Artifacts: the Graph of Thought, the search engine, the world map and AR"
+        aria-expanded={isOpen("artifacts")}
         data-live={thinking || undefined}
-        onClick={() => togglePane("mind")}
+        onClick={() => togglePane("artifacts")}
       >
-        <Network size={17} aria-hidden />
+        <Shapes size={17} aria-hidden />
       </button>
       <button type="button" className="app-nav-btn" aria-label="Operating System" title="Operating System: files, editor, git and terminal" aria-expanded={isOpen("os")} onClick={() => togglePane("os")}>
         <FolderOpen size={17} aria-hidden />
-      </button>
-      <button type="button" className="app-nav-btn" aria-label="Search engine" title="Search engine: my files first, the web when needed" aria-expanded={isOpen("search")} onClick={() => togglePane("search")}>
-        <Search size={17} aria-hidden />
-      </button>
-      <button type="button" className="app-nav-btn" aria-label="World map" title="World map: where you and Arcanus are, live" aria-expanded={isOpen("map")} onClick={() => togglePane("map")}>
-        <MapPin size={17} aria-hidden />
       </button>
       <div className="app-nav-gap" />
       <button type="button" className="app-nav-btn" aria-label="Account" title="Account" aria-expanded={open === "account"} aria-haspopup="dialog" onClick={() => setOpen("account")}>
@@ -207,7 +201,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
       <p>Arcanus is a local assistant created by Gianne Bacay. It answers in this browser, speaks the reply, and the sphere moves with the voice.</p>
       <ul>
         <li>Hippocampus decides what a message needs.</li>
-        <li>The Graph of Thought shows what Arcanus is thinking and doing, live.</li>
+        <li>The Graph of Thought shows what Arcanus is thinking and doing, live. It is one of its artifacts, beside the search engine, the world map and AR.</li>
         <li>SmolLM2 writes the reply on this device.</li>
         <li>Paradee speaks it. The sphere reacts to that audio.</li>
         <li>Messages stay here. Models download once and are cached.</li>

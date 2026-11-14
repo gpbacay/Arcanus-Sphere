@@ -1,18 +1,13 @@
 "use client";
 
-import { Move3d, Orbit, PencilRuler, Power, RotateCcw, Rotate3d, Scale3d, View } from "lucide-react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
+import { Move3d, PencilRuler, Power, RotateCcw, Rotate3d, Scale3d } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useIsMobile } from "@/shared/hooks/use-mobile";
 import { TOP_ACTIONS } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { useStore } from "@/shared/store";
 import { PopMenu, type PopItem } from "@/shared/ui/pop-menu";
 import type { Tool } from "./SphereScene";
-
-const ArDialog = dynamic(() => import("./ArDialog"), { ssr: false });
 
 const EDITS = [
   { id: "move", label: "Move the orb", icon: Move3d },
@@ -21,12 +16,10 @@ const EDITS = [
 ] as const;
 
 /**
- * The studio's toolbar, at the right end of the top bar: switch Arcanus on or off, orbit the camera, edit the orb (move, rotate,
- * resize, or put it back, behind one button), and see it in AR.
+ * The studio's toolbar, at the right end of the top bar: switch Arcanus on or off, and edit the orb (move, rotate, resize, or
+ * put it back, behind one button). Choosing the checked edit again ends editing: the camera orbits again. AR is an artifact.
  */
 export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDraw: boolean; tool: Tool; onTool: (tool: Tool) => void; edited: boolean; onReset: () => void }) {
-  const mobile = useIsMobile();
-  const [qr, setQr] = useState(false);
   const on = useStore(power, (s) => s.on);
   const changing = useStore(power, (s) => s.changing);
 
@@ -41,7 +34,7 @@ export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDra
 
   const editing = tool !== "view";
   const edits: PopItem[] = [
-    ...EDITS.map(({ id, label, icon }) => ({ label, icon, checked: tool === id, run: () => onTool(id) })),
+    ...EDITS.map(({ id, label, icon }) => ({ label, icon, checked: tool === id, run: () => onTool(tool === id ? "view" : id) })),
     ...(edited ? [{ label: "Undo changes to the orb", icon: RotateCcw, run: onReset }] : []),
   ];
 
@@ -60,23 +53,8 @@ export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDra
         <Power size={17} />
       </button>
       {canDraw ? (
-        <>
-          <button type="button" className="icon-btn" aria-pressed={!editing} aria-label="Orbit the camera" title="Orbit the camera" onClick={() => onTool("view")}>
-            <Orbit size={17} />
-          </button>
-          <PopMenu label="Edit the orb" title="Edit the orb: move, rotate or resize it" className={editing ? "tool-on" : ""} trigger={<PencilRuler size={17} />} items={edits} />
-          {mobile ? (
-            <Link href="/ar" className="icon-btn" aria-label="View in AR" title="View in AR">
-              <View size={17} />
-            </Link>
-          ) : (
-            <button type="button" className="icon-btn" aria-label="View in AR" title="View in AR" onClick={() => setQr(true)}>
-              <View size={17} />
-            </button>
-          )}
-        </>
+        <PopMenu label="Edit the orb" title="Edit the orb: move, rotate or resize it" className={editing ? "tool-on" : ""} trigger={<PencilRuler size={17} />} items={edits} />
       ) : null}
-      {qr && <ArDialog onClose={() => setQr(false)} />}
     </div>,
     slot,
   );

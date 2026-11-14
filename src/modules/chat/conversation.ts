@@ -7,10 +7,10 @@ import { addressed, answersCall, asSelf, assemble, keepPronouns, keepYears, CALL
 import { listen } from "@/modules/listen";
 import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
-import { go } from "@/modules/web";
+import { go, SEARCH } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
 import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, linkedNotes, memories, plainLinks, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
-import { chatLine, openPane, pane } from "@/shared/pane";
+import { chatLine, openArtifact, openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
 import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
@@ -760,7 +760,7 @@ function command(chatId: string, input: string) {
   if (file) return later(file);
   if (name === "/browse") {
     if (!arg) {
-      openPane("search");
+      openArtifact(SEARCH);
       return out("The search engine is open. /browse <address or words> goes straight to the web.");
     }
     return later(async () => {

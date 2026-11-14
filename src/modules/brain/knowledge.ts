@@ -33,7 +33,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "browser",
     title: "Search engine: my files and the internet",
     content:
-      "My search engine, the magnifying glass in the top bar, searches my own file system first: my notes, memory, books, skills and source code, by file name and by line, with match case, whole word, patterns, and files to include or exclude. It searches as you type. Press Enter and ARC 1 reads what you asked: if it needs the internet and this device is online, I search the web too, and an address opens in my reader. Say search your files for a word and I find it. Offline, a web search becomes a search of my files. Say go to a site, for example go to youtube and search ASMR, and I open that in your browser. Paste a link or use /browse and I read the page. Your chats are never sent.",
+      "My search engine, the magnifying glass in my Artifacts pane, searches my own file system first: my notes, memory, books, skills and source code, by file name and by line, with match case, whole word, patterns, and files to include or exclude. It searches as you type. Press Enter and ARC 1 reads what you asked: if it needs the internet and this device is online, I search the web too, and an address opens in my reader. Say search your files for a word and I find it. Offline, a web search becomes a search of my files. Say go to a site, for example go to youtube and search ASMR, and I open that in your browser. Paste a link or use /browse and I read the page. Your chats are never sent.",
   },
   {
     id: "device",
