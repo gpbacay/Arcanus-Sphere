@@ -12,7 +12,7 @@ import { Hippocampus, type Example } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { syncShelf } from "./library";
 import { arc1 } from "./arc1";
-import { decide, routerMemory } from "./routes";
+import { ASK_WEB, GO, LINK, decide, routerMemory } from "./routes";
 import { CHAT, SKILLS, selfNotes } from "./skills";
 
 export interface Plan {
@@ -90,13 +90,16 @@ export const brainEngine: Engine = {
 
 const read = (text: string): ThoughtStep => ({ label: "Read the message", description: text.length > 140 ? `${text.slice(0, 140)}…` : text });
 
-/** Decide what `text` needs. Never throws: if a skill fails, the message goes to the language model. */
-export async function think(text: string): Promise<Plan> {
+/**
+ * Decide what `text` needs. Never throws: if a skill fails, the message goes to the language model.
+ * `local`: the question is about a file or artifact already open, so the web skill is not run.
+ */
+export async function think(text: string, opts?: { local?: boolean }): Promise<Plan> {
   const t0 = performance.now();
   const memory = await loadRouter();
   const decided = await decide(memory, text, SKILLS);
   const ms = Math.max(0, Math.round(performance.now() - t0));
-  const skill = SKILLS.find((s) => s.route === decided.route) ?? CHAT;
+  let skill = SKILLS.find((s) => s.route === decided.route) ?? CHAT;
   // A claim is certain: remember how it was worded, so similar requests are routed without one. Not math: its claims
   // are bare expressions, whose only words are numbers, and numbers would vote math for any message holding them. Not
   // device or source: they are decided by their claim alone (routes.ts).
@@ -121,6 +124,12 @@ export async function think(text: string): Promise<Plan> {
       ],
     },
   ];
+  // Voted for the web, but the question is about a file or artifact already open. "search the web", "go to" and a
+  // link still search.
+  if (opts?.local && skill.route === "web" && !ASK_WEB.test(text) && !GO.test(text) && !LINK.test(text)) {
+    trace.push({ label: "Open files", description: "This is about a file or artifact already open, so the web was not searched" });
+    skill = CHAT;
+  }
   let outcome = null;
   try {
     outcome = (await skill.run?.(text)) ?? null;

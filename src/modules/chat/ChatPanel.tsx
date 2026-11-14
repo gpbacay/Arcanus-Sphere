@@ -10,7 +10,7 @@ import { useStore } from "@/shared/store";
 import { PaneControls } from "@/shared/ui/pane-controls";
 import { MessageSquare } from "lucide-react";
 import { COMPOSER_ID, Composer } from "./Composer";
-import { discard, useBusy } from "./conversation";
+import { discard, releaseHeld, useBusy } from "./conversation";
 import { Icon } from "./parts";
 import { Thread } from "./Thread";
 import { chatStore, newChat, rename, select, selectCurrent, undo } from "./store";
@@ -104,6 +104,7 @@ function Header({ mood, collapsed = false, onToggle }: { mood: Mood; collapsed?:
 
   function startNew() {
     newChat();
+    releaseHeld();
     setRenaming(false);
     setMenuOpen(false);
     document.getElementById(COMPOSER_ID)?.focus();

@@ -21,7 +21,7 @@ export const KNOWLEDGE: { id: string; title: string; content: string }[] = [
     id: "harness",
     title: "Agent harness",
     content:
-      "I am an agent with my own harness. Skills decide what a message needs. Tools run when a message names them. A plugin adds tools through my harness. An MCP server connects over HTTP and its tools register the same way. Time and math stay local skills. Before each reply my harness fits what my model should read into a small budget: the skill being run, facts I found, ARCANUS.md, a page or file you handed me, and recalled notes. /context shows what my last reply read.",
+      "I am an agent with my own harness. Skills decide what a message needs. Tools run when a message names them. A plugin adds tools through my harness. An MCP server connects over HTTP and its tools register the same way. Time and math stay local skills. Before each reply my harness fits what my model should read into a small budget: the skill being run, facts I found, ARCANUS.md, a page or file you handed me, the files open in the editor, the artifact that is running, and recalled notes. A question about those is answered from them, not from a web search. /context shows what my last reply read.",
   },
   {
     id: "files",

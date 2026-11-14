@@ -2,17 +2,21 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { imageTargetData } from "./image-target";
 import { loadOrb, ORB_BLOOM, type OrbInputs } from "./orb";
 
 /**
- * Arcanus's orb in the real world, using the 8th Wall XR engine (XR8) for world tracking. The engine files are
- * copied to public/external/xr by `npm install` (scripts/copy-8thwall-engine.mjs).
+ * Arcanus's orb in the real world, using the 8th Wall XR engine (XR8). The engine files are copied to
+ * public/external/xr by `npm install` (scripts/copy-8thwall-engine.mjs).
  *
  * This product includes the XR Engine software developed by Niantic Spatial, Inc.
  * Copyright © 2026 Niantic Spatial, Inc. All rights reserved. License: https://github.com/8thwall/engine/blob/main/LICENSE
  *
- * Touch: drag the orb to move it along surfaces, tap a surface to put it there, pinch to resize, twist to turn.
- * Tap the orb to lock it where it is: no drag or surface tap moves it until you tap the orb (or anywhere) again.
+ * World tracking: drag the orb to move it along surfaces, tap a surface to put it there, pinch to resize, twist to
+ * turn. Tap the orb to lock it where it is: no drag or surface tap moves it until you tap the orb (or anywhere) again.
+ *
+ * Image tracking: the same orb, hidden until the camera sees the experience's picture, then held on that picture.
+ * The picture lies on XY with Z coming out of it; the orb sits one radius out along that Z, at 42% of the picture's width.
  */
 
 type Hit = { type: string; position: { x: number; y: number; z: number } };
@@ -72,11 +76,18 @@ function loadEngine(): Promise<Xr8> {
   return loading;
 }
 
-export type ArEvents = { onReady: () => void; onError: (message: string) => void; onLock?: (locked: boolean) => void };
+export type ArEvents = { onReady: () => void; onError: (message: string) => void; onLock?: (locked: boolean) => void; onSeen?: (seen: boolean) => void };
+
+export type ArMode = { kind: "world" } | { kind: "image"; imageUrl: string };
+
+type ImagePose = { name?: string; position?: { x: number; y: number; z: number }; rotation?: { x: number; y: number; z: number; w: number }; scale?: number };
+
+const IMAGE_FILL = 0.42; // the orb's diameter as a share of the target picture's width
 
 /** Starts the camera and the orb inside `container`. Resolves to a function that stops everything. */
-export async function startAr(container: HTMLElement, { onReady, onError, onLock }: ArEvents, inputs: OrbInputs = {}): Promise<() => void> {
-  const [xr8, orb] = await Promise.all([loadEngine(), loadOrb(inputs)]);
+export async function startAr(container: HTMLElement, { onReady, onError, onLock, onSeen }: ArEvents, inputs: OrbInputs = {}, mode: ArMode = { kind: "world" }): Promise<() => void> {
+  const [xr8, orb, target] = await Promise.all([loadEngine(), loadOrb(inputs), mode.kind === "image" ? imageTargetData(mode.imageUrl) : Promise.resolve(null)]);
+  if (target) orb.root.visible = false;
 
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
@@ -247,10 +258,13 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
     }
     grabbed = false;
   };
-  canvas.addEventListener("pointerdown", down);
-  canvas.addEventListener("pointermove", move);
-  canvas.addEventListener("pointerup", up);
-  canvas.addEventListener("pointercancel", up);
+  // Image tracking owns the orb's place: a pinch here would fight the pose written every frame.
+  if (!target) {
+    canvas.addEventListener("pointerdown", down);
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerup", up);
+    canvas.addEventListener("pointercancel", up);
+  }
 
   const name = "arcanus-orb";
   const stop = () => {
@@ -278,7 +292,38 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
     canvas.remove();
   };
 
-  xr8.XrController.configure({ disableWorldTracking: false });
+  // Image-only skips the room map: lower latency, and no motion-sensor prompt. World tracking clears any picture
+  // left from a previous run in this tab (the engine object survives the page).
+  xr8.XrController.configure(target ? { disableWorldTracking: true, imageTargetData: [target] } : { disableWorldTracking: false, imageTargetData: [] });
+
+  // The picture's pose, copied onto the orb. Z comes out of the picture, so the orb stands on it toward the camera.
+  let seen = false;
+  const pose = new THREE.Quaternion();
+  const spot = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const hold = (detail: ImagePose) => {
+    if (!target || detail.name !== target.name || !detail.position || !detail.rotation) return;
+    const width = typeof detail.scale === "number" && Number.isFinite(detail.scale) && detail.scale > 0 ? detail.scale : 1;
+    const rigScale = (IMAGE_FILL * width) / (2 * REST);
+    pose.set(detail.rotation.x, detail.rotation.y, detail.rotation.z, detail.rotation.w);
+    spot.set(detail.position.x, detail.position.y, detail.position.z);
+    normal.set(0, 0, 1).applyQuaternion(pose);
+    rig.position.copy(spot).addScaledVector(normal, REST * rigScale);
+    rig.quaternion.copy(pose);
+    rig.scale.setScalar(Math.max(rigScale, 0.0001));
+    if (orb.root.visible) return;
+    orb.root.visible = true;
+    if (seen) return;
+    seen = true;
+    onSeen?.(true);
+  };
+  const release = () => {
+    if (!orb.root.visible) return;
+    orb.root.visible = false;
+    if (!seen) return;
+    seen = false;
+    onSeen?.(false);
+  };
   xr8.addCameraPipelineModules([
     {
       name: "arcanus-bloom",
@@ -315,12 +360,12 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
         composer.addPass(new UnrealBloomPass(new THREE.Vector2(container.clientWidth, container.clientHeight), ORB_BLOOM.strength, ORB_BLOOM.radius, ORB_BLOOM.threshold));
         layout(); // sizes the renderer and the bloom plate alike: a plate at 1x on a 3x screen draws every trace fat and soft
         xr.scene.add(glow);
-        camera.position.set(0, CAMERA_HEIGHT, 0);
+        camera.position.set(0, target ? 3 : CAMERA_HEIGHT, 0); // 3 is the image-target sample's camera; world tracking keeps the room's scale
         xr8.XrController.updateCameraProjectionMatrix({ origin: camera.position, facing: camera.quaternion });
         onReady();
       },
       onCanvasSizeChange: () => layout(),
-      onUpdate: () => {
+      onUpdate: (frame: { processCpuResult?: { reality?: { detectedImages?: ImagePose[] } } }) => {
         const raw = clock.getDelta();
         const dt = Math.min(raw, 0.05);
         // Running under ~25 fps for two seconds straight: drop the resolution a step (1.5 -> 1.25 -> 1). It never goes
@@ -331,7 +376,14 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
           slow = 0;
           layout();
         }
-        if (camera && !placed) {
+        if (target) {
+          const detected = frame?.processCpuResult?.reality?.detectedImages;
+          if (Array.isArray(detected)) {
+            const hit = detected.find((item) => item?.name === target.name);
+            if (hit) hold(hit);
+            else release();
+          }
+        } else if (camera && !placed) {
           // First frame with a real camera pose: float the orb at the middle of the screen.
           placed = true;
           const ahead = new THREE.Vector3(0, 0, -START_DISTANCE).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
@@ -339,6 +391,15 @@ export async function startAr(container: HTMLElement, { onReady, onError, onLock
         }
         orb.update(dt);
       },
+      ...(target
+        ? {
+            listeners: [
+              { event: "reality.imagefound", process: ({ detail }: { detail: ImagePose }) => hold(detail) },
+              { event: "reality.imageupdated", process: ({ detail }: { detail: ImagePose }) => hold(detail) },
+              { event: "reality.imagelost", process: () => release() },
+            ],
+          }
+        : {}),
       onCameraStatusChange: ({ status }: { status: string }) => {
         if (status === "failed") onError("Arcanus needs your camera to appear in your space. Allow camera access and try again.");
       },

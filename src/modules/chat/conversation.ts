@@ -3,14 +3,14 @@
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { account } from "@/modules/account";
-import { addressed, answersCall, asSelf, assemble, keepPronouns, keepYears, CALL_TURNS, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED, slug } from "@/modules/harness";
+import { aboutOpen, addressed, answersCall, asSelf, assemble, deskSections, keepPronouns, keepYears, CALL_TURNS, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED, slug, type DeskArtifact, type DeskFile } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go, SEARCH } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
-import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, linkedNotes, memories, plainLinks, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
-import { chatLine, openArtifact, openPane, pane } from "@/shared/pane";
+import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, ide, instructions, linkedNotes, memories, plainLinks, readFile, remember, saveArtifact, shortPath, workspace, type Skill } from "@/modules/workspace";
+import { chatLine, openArtifact, openPane, pane, pin, shownAt } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
 import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
@@ -37,7 +37,10 @@ let viaVoice = false;
 // ------------------------------------------------------------------ context
 // What the model reads besides the message, most important first, fitted into a character budget (harness assemble):
 // the skill being run and the facts a skill found, then ARCANUS.md, then the page or file you handed Arcanus, then
-// recalled memory notes. SmolLM2 has 8k tokens of context, but on WebAssembly every token it reads costs time
+// the files open in the editor and the artifact that is running, then recalled memory notes. A file attached with @
+// is not one of those sections: it is placed immediately before the question, or a small model answers the question
+// and leaves the file unread. SmolLM2 has 8k tokens of
+// context, but on WebAssembly every token it reads costs time
 // before the first word, so the budget stays far below that. Older turns are cut short for the same reason.
 // ponytail: characters, not tokens (about 4 to 1 in English). Count tokens if the budget ever needs to be exact.
 const BUDGET = 3200;
@@ -64,6 +67,116 @@ const recited = (m: Msg) =>
 const STANDING = "Your user's standing instructions (ARCANUS.md)";
 const GUARD = "Guardrails you must never break (guardrails/rules.md)";
 
+/** Files picked with @, until their close button. `quiet` was removed and stays out of the reply until attached again. */
+export const held = new Store({ files: [] as string[], quiet: [] as string[] });
+
+export function attach(path: string) {
+  const name = path.split("/").pop() ?? path;
+  held.set({
+    files: held.state.files.includes(path) ? held.state.files : [...held.state.files, path],
+    quiet: held.state.quiet.filter((q) => q !== path && q !== name),
+  });
+}
+
+/** Take these off the next reply. A chip passes its path, and a running artifact's file name when that is the label. */
+export function detach(...ids: string[]) {
+  const drop = new Set(ids.filter(Boolean));
+  held.set({
+    files: held.state.files.filter((p) => !drop.has(p)),
+    quiet: [...new Set([...held.state.quiet, ...drop])],
+  });
+}
+
+/** A new or deleted conversation starts with no attachment chips. Open files stay quiet so their chips do not return. */
+export function releaseHeld() {
+  const front = ide.state.focus ? ide.state.activeRight : ide.state.active;
+  const id = shownAt(pane.state, "artifacts") ? pane.state.artifact : "";
+  const running = /\.html?$/i.test(id) ? id : "";
+  held.set({ files: [], quiet: [front, running].filter(Boolean) });
+  if (pane.state.pinned) pin(null);
+}
+
+const hushed = (path: string) => held.state.quiet.includes(path);
+
+// ponytail: 2400 characters of an attached file, sent with the question. A spoken turn can still cut it to its own budget.
+const ATTACH_BODY = 2400;
+const clipAttached = (text: string) => {
+  const t = text.trim();
+  if (t.length <= ATTACH_BODY) return t;
+  const head = t.slice(0, ATTACH_BODY);
+  const at = head.lastIndexOf("\n");
+  return `${(at > ATTACH_BODY / 2 ? head.slice(0, at) : head).trimEnd()}…`;
+};
+
+const FILE_LABEL = "File the user attached: ";
+// "what is this?" is about the attached file. A bare "it" is not: "is it raining?" is still a weather question.
+const ABOUT_ATTACHED = /\b(?:this|that|these|those|attached)\b|\bthe files?\b/i;
+
+/** The question names an attached file, or points at one ("this", "that"). */
+function aboutAttached(text: string) {
+  if (!held.state.files.length) return false;
+  if (ABOUT_ATTACHED.test(text)) return true;
+  const q = text.toLowerCase();
+  return held.state.files.some((path) => {
+    const base = (path.split("/").pop() ?? "").toLowerCase();
+    const stem = base.replace(/\.[^.]+$/, "").replace(/[-_.]+/g, " ").trim();
+    return Boolean((base && q.includes(base)) || (stem.length > 2 && q.includes(stem)));
+  });
+}
+
+/** What @ attached, read from the editor when the file is open so unsaved edits ride along. */
+async function attachedSections() {
+  const sections: { label: string; text: string; priority: number }[] = [];
+  for (const path of held.state.files) {
+    const tab = ide.state.tabs.find((t) => t.path === path);
+    // An open tab whose text is still "" has not loaded; the file on disk is the one the user attached.
+    const raw = (tab?.text?.trim() ? tab.text : "") || (await readFile(path).catch(() => "")) || "";
+    const text = clipAttached(plainLinks(raw));
+    if (text) sections.push({ label: `${FILE_LABEL}${shortPath(path)}`, text, priority: 0 });
+  }
+  return sections;
+}
+
+/** The attached files, then one line that binds the question to them. Empty when nothing was attached. */
+function attachedAsk(handed: { label: string; text: string }[]) {
+  if (!handed.length) return "";
+  const names = handed.map((s) => s.label.slice(FILE_LABEL.length)).join(", ");
+  return `${handed.map((s) => `${s.label}:\n${s.text}`).join("\n\n")}\n\nThe user attached ${names}. The question is about that file. Answer from it.`;
+}
+
+/** The editor tabs and the artifact running now, as context. `skip` paths already ride along as a pinned file, so their text is not repeated. */
+async function deskNow(skip: string[] = []): Promise<ReturnType<typeof deskSections>> {
+  const { tabs, focus, active, activeRight } = ide.state;
+  const front = focus ? activeRight : active;
+  const id = shownAt(pane.state, "artifacts") ? pane.state.artifact : "";
+  const html = /\.html?$/i.test(id) ? id : "";
+  const repeated = new Set(skip);
+  const closed = new Set(held.state.quiet);
+  const open: DeskFile[] = tabs
+    .filter((t) => !closed.has(t.path))
+    .map((t) => ({ path: t.path, text: repeated.has(t.path) ? "" : t.text, active: t.path === front }));
+  let artifact: DeskArtifact | null = null;
+  if (html && !closed.has(html)) {
+    const tab = tabs.find((t) => t.path.endsWith(`/${html}`));
+    const path = tab?.path ?? `${HOME}/artifacts/${html}`;
+    if (!closed.has(path)) {
+      const text = repeated.has(path) ? "" : (tab?.text ?? (await readFile(path).catch(() => "")) ?? "");
+      artifact = { name: html, text };
+    }
+  }
+  return deskSections(open, artifact);
+}
+
+/** Paths and the running artifact a question can be about, so it is not sent to the web. */
+function deskRef() {
+  const pinned = pane.state.pinned;
+  const id = shownAt(pane.state, "artifacts") ? pane.state.artifact : "";
+  return {
+    paths: [...ide.state.tabs.map((t) => t.path), ...held.state.files, ...(pinned && !pinned.href ? [pinned.label] : [])],
+    artifact: /\.html?$/i.test(id) ? id : "",
+  };
+}
+
 /** The conversation itself: not commands, and not the boot greeting. A reply that only recited the biography is dropped too, or the next reply copies it. */
 const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !recited(m));
 
@@ -73,7 +186,7 @@ const conversed = (prior: Msg[]) => prior.filter((m) => !m.kind && m.text && !re
  * that. Small, and laid out so SmolLM2 reads only the new turn. `from` is the thought the context is built for.
  */
 async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Promise<Built> {
-  const [notes, guard] = await Promise.all([memories().catch(() => []), guardrails().catch(() => "")]);
+  const [notes, guard, desk, handed] = await Promise.all([memories().catch(() => []), guardrails().catch(() => ""), deskNow(held.state.files), attachedSections()]);
   const recalled = recallNotes(user.text, notes);
   const own = plan.facts?.length && !plan.source ? plan.facts : [];
   const ownBlock = own.length ? `${own.map((f) => `- ${f}`).join("\n")}\n\n${ONLY_ASKED}` : "";
@@ -83,14 +196,20 @@ async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Pro
     [
       { label: GUARD, text: guard, priority: 0 }, // with the message, not the system prompt, so the KV cache holds
       { label: "Facts you may use", text: ownBlock, priority: 0 },
+      ...desk.map((s) => ({ ...s, priority: 1 })),
       { label: "Notes you remembered", text: recalled.map((n) => `- ${n.text}`).join("\n"), priority: 1 },
+      // Last, so the spoken question is read right after the file.
+      ...handed.map((s) => ({ ...s, text: `The question is about this file. Answer from it.\n\n${s.text}` })),
     ],
   );
   lastContext = { report, used, budget };
   const description = `${turns.length - 2} earlier turns · ${used.toLocaleString()} of ${budget.toLocaleString()} characters of notes`;
   const results = report.map(reportLine);
   const source = recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null;
-  const context = thought("aggregate", "Gathered what SmolLM2 will read", { parents: [from, source], detail: description, results });
+  const attached = handed.length
+    ? thought("retrieve", handed.length === 1 ? "Reading a file you attached" : `Reading ${handed.length} files you attached`, { parents: [from], results: held.state.files.map(shortPath) })
+    : null;
+  const context = thought("aggregate", "Gathered what SmolLM2 will read", { parents: [from, source, attached], detail: description, results });
   // Only its own facts are evidence: a recalled note may have nothing to do with the question.
   return { turns, step: { label: "Context", description, results }, evidence: own, context };
 }
@@ -98,22 +217,26 @@ async function buildLive(prior: Msg[], user: Msg, plan: Plan, from: string): Pro
 /** What a typed reply is written from. `from` is the thought the context is built for. */
 async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | undefined, from: string): Promise<Built> {
   const text = ask(user, skill);
+  const pinned = pane.state.pinned;
   // The user's books, for plain chat only: a skill, Arcanus's own facts or the web already say what to answer from.
-  const [guard, rules, notes, passages] = await Promise.all([
+  const [guard, rules, notes, passages, desk, handed] = await Promise.all([
     guardrails().catch(() => ""),
     instructions().catch(() => ""),
     memories().catch(() => []),
     !skill && plan.route === "chat" && !plan.facts ? recallPassages(text).catch(() => []) : [],
+    deskNow([...(pinned && !pinned.href ? [pinned.label] : []), ...held.state.files]),
+    attachedSections(),
   ]);
-  const pinned = pane.state.pinned;
   const recalled = recallNotes(text, notes);
   // What the notes being read link to ([[links]]), and what links to them: a subject split over small files is read whole.
-  const reading = [...(pinned && !pinned.href ? [pinned.label] : []), ...recalled.map((n) => `${HOME}/memory/${n.id}`)];
+  const front = ide.state.focus ? ide.state.activeRight : ide.state.active;
+  const reading = [...(pinned && !pinned.href ? [pinned.label] : []), ...(front && front !== pinned?.label && !hushed(front) ? [front] : []), ...recalled.map((n) => `${HOME}/memory/${n.id}`)];
   const linked = reading.length ? await linkedNotes(reading).catch(() => []) : [];
   const sources = [
     passages.length ? thought("retrieve", `Found ${passages.length} passages in your books`, { parents: [from], results: [...new Set(passages.map((p) => p.book))] }) : null,
     recalled.length ? thought("retrieve", `Recalled ${recalled.length} of your notes`, { parents: [from], results: recalled.map((n) => n.id) }) : null,
     pinned ? thought("retrieve", "Reading what you're showing me", { parents: [from], results: [pinned.label] }) : null,
+    handed.length ? thought("retrieve", handed.length === 1 ? "Reading a file you attached" : `Reading ${handed.length} files you attached`, { parents: [from], results: held.state.files.map(shortPath) }) : null,
     linked.length ? thought("retrieve", `Followed [[links]] to ${linked.length} notes`, { parents: [from], results: linked.map((n) => n.path) }) : null,
   ];
   const facts = factsBlock(plan.facts ?? [], plan.source);
@@ -123,6 +246,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
       { label: STANDING, text: rules, priority: 1 },
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
       { label: plan.source ?? "Facts you may use", text: facts, priority: 0 },
+      ...desk,
       { label: `What the user is showing you: ${pinned?.label}`, text: plainLinks(pinned?.text ?? ""), priority: 2 },
       {
         label: `From your user's books (${[...new Set(passages.map((p) => p.book))].join(", ")})`,
@@ -134,13 +258,18 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
     ],
     BUDGET
   );
-  lastContext = { report, used, budget: BUDGET };
+  // The file is not in `report`: it is sent with the question, so the budget cannot leave it out.
+  const seen = [...report, ...handed.map((s) => ({ label: s.label, chars: s.text.length, of: s.text.length }))];
+  lastContext = { report: seen, used, budget: BUDGET };
   // Your guardrails, then ARCANUS.md, ride with the system prompt; the rest goes with the message.
   const standing = sections.filter((s) => s.label === GUARD || s.label === STANDING);
   const quote = user.replyToId ? prior.find((m) => m.id === user.replyToId) : undefined;
+  // The file rides with the question, outside the budget, so a full context cannot drop it and a small model reads
+  // it last, as the thing "this" refers to.
   const content = [
     ...sections.filter((s) => !standing.includes(s)).map((s) => `${s.label}:\n${s.text}`),
     quote ? `About this earlier message: "${quote.text.slice(0, 300)}"` : "",
+    attachedAsk(handed),
     text,
   ]
     .filter(Boolean)
@@ -148,15 +277,20 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
   const history = conversed(prior)
     .slice(-HISTORY)
     .map((m): Turn => ({ role: m.role, content: m.text.length > HISTORY_CHARS ? `${m.text.slice(0, HISTORY_CHARS)}…` : m.text }));
-  const step: ThoughtStep | null = report.length
-    ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: report.map(reportLine) }
+  const lines = seen.map(reportLine);
+  const step: ThoughtStep | null = lines.length
+    ? { label: "Context", description: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`, results: lines }
     : null;
   const context = thought("aggregate", "Gathered what SmolLM2 will read", {
     parents: [from, ...sources],
     detail: `${used.toLocaleString()} of ${BUDGET.toLocaleString()} characters`,
-    results: report.map(reportLine),
+    results: lines,
   });
-  const evidence = [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])];
+  const files = handed.map((s) => s.text);
+  // A question about the attachment is corrected from the file. Anything else keeps a fact or a book passage first.
+  const evidence = aboutAttached(text)
+    ? [...files, ...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : [])]
+    : [...(plan.facts ?? []), ...passages.map((p) => p.text), ...(pinned ? [pinned.text] : []), ...files];
   return { turns: chatTurns(content, { history, standing: standing.map((s) => `${s.label}:\n${s.text}`).join("\n\n") || undefined, grounded: sections.some((s) => !standing.includes(s)) || Boolean(quote) }), step, evidence, context };
 }
 
@@ -168,6 +302,8 @@ function reportLine(r: Report[number]) {
         ? "guardrails/rules.md"
       : r.label.startsWith("Notes")
         ? "memory"
+        : r.label.startsWith(FILE_LABEL)
+        ? r.label.slice(FILE_LABEL.length)
         : r.label.startsWith("What the user")
           ? r.label.replace(/^.*?: /, "")
           : r.label.replace(/^Instructions for the /, "");
@@ -416,9 +552,14 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill = agentOf(c
         return;
       }
     }
+    const asked = call?.rest || user.text;
+    const ref = deskRef();
+    // A question about a file or artifact already open is not a web search, even when the vote says web.
+    // An attached file is what "this" means, so the question is not sent to the web or answered from a book instead.
+    const local = !skill && (aboutAttached(asked) || aboutOpen(asked, ref.paths, ref.artifact));
     const plan: Plan = skill
       ? { route: "skill", trace: [{ label: "Read the message", description: user.text }, { label: `Skill · /${skill.name}`, description: skill.path }] }
-      : await think(call?.rest || user.text);
+      : await think(asked, { local });
     trace = plan.trace;
     if (!skill) {
       const [, decided, ...rest] = plan.trace;
@@ -434,7 +575,7 @@ async function answer(chatId: string, prior: Msg[], user: Msg, skill = agentOf(c
       return;
     }
     // Fact lookup stays in the books you added. The web is only the web skill (search / look up / a link / go to).
-    if (!skill && plan.route === "chat" && !plan.facts?.length && asksForFact(user.text)) {
+    if (!skill && plan.route === "chat" && !plan.facts?.length && asksForFact(user.text) && !local) {
       const earlier = prior.findLast((m) => m.role === "user" && m.text && !m.kind)?.text ?? "";
       const query = lookupQuery(user.text, earlier);
       const passages = await recallPassages(query).catch(() => []);
@@ -725,7 +866,11 @@ function command(chatId: string, input: string) {
   const arg = input.slice(name.length).trim();
   if (live.state.reply) stop();
   chatStore.set({ replyTo: null, editingId: null });
-  if (name === "/clear") return newChat();
+  if (name === "/clear") {
+    newChat();
+    releaseHeld();
+    return;
+  }
   // A skill from .arcanus/skills runs as a message: Arcanus answers it with the skill's instructions in context.
   const skill = COMMANDS.some((c) => c.name === name) ? undefined : workspace.state.skills.find((s) => `/${s.name}` === name);
   if (skill && power.state.on) {
@@ -893,6 +1038,7 @@ export function discard(what: Removal) {
   const reply = live.state.reply;
   if (reply && (what.kind === "all" || (what.kind === "chat" && what.id === reply.chatId))) stop();
   remove(what);
+  if (what.kind !== "message") releaseHeld();
 }
 
 /**

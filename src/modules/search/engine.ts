@@ -2,11 +2,14 @@
 
 // Arcanus's search engine: its own file system first, the web when it is needed and there. Files are searched as you
 // type (they are on this device, so it takes milliseconds); pressing Enter also asks ARC 1 whether the query needs the
-// internet, and searches the web too when it does (or when no file matches) and the device is online. An address
+// internet, and searches the web too when it does (or when no file matches) and the device is online. A query about
+// a file or artifact already open does not: that stays in the files. An address
 // (example.com, http://localhost:3001) goes straight to the browser: one box for all three. The web side is the web module's browser, so what the chat's web skill reads shows here.
 import { searchIntent } from "@/modules/brain";
+import { aboutOpen } from "@/modules/harness";
 import { browser, go, toTarget } from "@/modules/web";
-import { searchFiles, type FileResults, type FindOptions } from "@/modules/workspace";
+import { ide, searchFiles, type FileResults, type FindOptions } from "@/modules/workspace";
+import { pane, shownAt } from "@/shared/pane";
 import { Store } from "@/shared/store";
 
 /** Why the web was or wasn't searched: ARC 1's choice, no file matched, or offline. */
@@ -49,7 +52,10 @@ export async function runSearch(query = engine.state.query) {
   }
   const [files, intent] = await Promise.all([findFiles(q), searchIntent(q)]);
   if (q !== engine.state.query.trim()) return; // typed on since
-  const wanted = intent?.where === "web" || !files?.files.length;
+  // A query about a file or artifact already open stays in the files. The browser is not opened for it.
+  const artifact = shownAt(pane.state, "artifacts") ? pane.state.artifact : "";
+  const local = aboutOpen(q, ide.state.tabs.map((t) => t.path), /\.html?$/i.test(artifact) ? artifact : "");
+  const wanted = !local && (intent?.where === "web" || !files?.files.length);
   const web: WebWhy = !wanted ? "not needed" : !navigator.onLine ? "offline" : intent?.where === "web" ? "arc1" : "no files";
   engine.set({ intent: intent && { where: intent.where, by: intent.by }, web });
   if (web === "arc1" || web === "no files") void go(`search:${q}`).catch(() => undefined);

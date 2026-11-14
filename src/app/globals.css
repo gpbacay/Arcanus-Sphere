@@ -892,6 +892,11 @@ textarea.field {
   color: var(--accent);
   white-space: nowrap;
 }
+.attachment .icon-btn {
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+}
 .commands {
   display: flex;
   flex-direction: column;
@@ -901,15 +906,28 @@ textarea.field {
   background: var(--glass-solid);
   animation: dock-up 0.2s var(--ease) both;
 }
+.commands p {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
 .commands button {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  min-width: 0;
   padding: 6px 8px;
   border-radius: var(--r-sm);
   text-align: left;
   font-size: 11.5px;
   color: var(--text-muted);
+}
+.commands button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .commands button[aria-selected="true"] {
   background: var(--accent-soft);
@@ -917,6 +935,10 @@ textarea.field {
 }
 .commands code {
   min-width: 72px;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   color: var(--accent);
 }
@@ -1815,6 +1837,7 @@ textarea.field {
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
   scrollbar-width: none;
+  user-select: none;
 }
 .tab {
   display: flex;
@@ -1841,6 +1864,27 @@ textarea.field {
 .tab .icon-btn {
   width: 22px;
   height: 22px;
+}
+.tab [draggable="true"] {
+  cursor: grab;
+}
+.tab[data-dragging] {
+  opacity: 0.45;
+}
+.tab[data-dragging] [draggable="true"] {
+  cursor: grabbing;
+}
+.tab[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.tab[data-active][data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 1px 0 var(--accent);
+}
+.tab[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+.tab[data-active][data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent), inset 0 1px 0 var(--accent);
 }
 .tab-dirty {
   flex: none;
@@ -2482,23 +2526,72 @@ textarea.field {
   font-size: 12px;
 }
 
-/* View in AR (an artifact): the QR code to scan, which opens the AR page on a phone. */
+/* View in AR: the experiences on this computer, and the QR code that opens the selected one on a phone. */
 .ar-link {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 16px;
-  text-align: center;
+  align-items: stretch;
+  gap: 14px;
+  padding: 12px;
+  text-align: left;
 }
 .ar-link > * {
   flex: none;
 }
-.ar-link .field {
+.ar-experiences {
+  margin: 0;
+}
+.ar-experiences .ar-exp-name {
+  flex: 1;
+}
+.ar-experiences .pane-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ar-experiences .icon-btn[data-danger] {
+  width: auto;
+  padding: 0 8px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+.pane-body .ar-create,
+.pane-body .ar-rename {
+  margin: 0;
+}
+.ar-rename {
+  flex: 1;
+  min-width: 0;
+}
+.ar-create .row,
+.ar-share .row {
+  max-width: none;
+  flex-wrap: wrap;
+}
+.ar-share .row {
+  justify-content: center;
+}
+.ar-share .row .btn-primary {
+  margin-left: 0;
+}
+.ar-share {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+.ar-share .field,
+.ar-share p,
+.ar-share .row {
+  width: 100%;
   max-width: 320px;
 }
-.ar-link p {
-  max-width: 320px;
+.ar-share p {
   margin: 0;
   color: var(--text-muted);
   font-size: 12.5px;
@@ -2507,15 +2600,82 @@ textarea.field {
   color: var(--think);
   font-size: 11.5px;
 }
-.ar-link .row {
-  width: 100%;
-  max-width: 320px;
-}
-.ar-qr {
+.ar-qr,
+.ar-marker {
   padding: 6px;
   border-radius: var(--r-sm);
   background: #fff;
   box-shadow: 0 0 0 1px var(--line-strong), 0 0 30px -8px rgba(111, 224, 255, 0.45);
+}
+.ar-marker {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+}
+.ar-create {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.ar-create p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+.ar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.ar-field .field {
+  max-width: none;
+}
+.ar-types {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ar-type {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+.ar-type svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.ar-type strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ar-type small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.ar-type[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ar-type:hover {
+  background: var(--surface-2);
+}
+.ar-file {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2717,10 +2877,12 @@ textarea.field {
   text-align: center;
 }
 .ar-card h1 {
+  max-width: 300px;
   margin: 0;
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 .ar-card p {
   max-width: 300px;

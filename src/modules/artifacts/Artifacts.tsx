@@ -65,6 +65,11 @@ function ArtifactsPane({ pages, at, wide, front }: { pages: ArtifactPage[]; at: 
     const fallback = pane.state.artifactBack;
     if (fallback && ids.split("\n").includes(fallback)) pickArtifact(fallback);
   }, [ready, files, chosen, ids]);
+  // The first tab can be on screen before a click stores it. The reply's context reads that stored id.
+  const shown = active?.id ?? "";
+  useEffect(() => {
+    if (shown && shown !== pane.state.artifact) pickArtifact(shown);
+  }, [shown]);
   const file = active?.file;
 
   function arrows(e: KeyboardEvent) {

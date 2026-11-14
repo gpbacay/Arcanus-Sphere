@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { addressed, answersCall, argsFor, asSelf, assemble, BUILT_IN_GUARDRAILS, callTool, stripComments, featuresReply, greeting, identityBrief, introduction, keepPronouns, keepYears, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseAgents, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
+import { aboutOpen, addressed, answersCall, argsFor, asSelf, assemble, BUILT_IN_GUARDRAILS, callTool, deskSections, stripComments, featuresReply, greeting, identityBrief, introduction, keepPronouns, keepYears, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseAgents, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -116,4 +116,28 @@ assert.deepEqual(parseAgents("# Agents\n<!-- ## fake\nnot a role -->\n## Planner
   { name: "planner", description: "Plans it.", body: "Plans it.\nFive steps." },
   { name: "code-reviewer", description: "Checks it.", body: "Checks it." },
 ]);
+// Open editor files and the running artifact are context. A question about them is not a web search.
+const open = [
+  { path: ".arcanus/source/src/modules/artifacts/bridge.ts", text: "export function connect() {\n  return 1;\n}", active: true },
+  { path: ".arcanus/notes/weather.html", text: "x".repeat(2000), active: false },
+];
+const art = { name: "graph-of-thought.html", text: "<title>Graph of Thought</title>\n<body>hi</body>" };
+const desk = deskSections(open, art);
+assert.equal(desk.length, 1);
+assert.match(desk[0].text, /bridge\.ts/);
+assert.match(desk[0].text, /\* \.arcanus\/source\/src\/modules\/artifacts\/bridge\.ts/);
+assert.match(desk[0].text, /export function connect/);
+assert.match(desk[0].text, /Graph of Thought/);
+assert.equal(desk[0].text.includes("x".repeat(100)), false);
+assert.equal(deskSections([], null).length, 0);
+const same = deskSections([{ path: ".arcanus/artifacts/graph-of-thought.html", text: "<title>Graph</title>", active: true }], art);
+assert.equal(same[0].text.match(/<title>/g)?.length, 1); // the open tab and the running artifact are one file
+assert.equal(aboutOpen("what does this file do", [open[0].path], ""), true);
+assert.equal(aboutOpen("explain graph of thought", [], "graph-of-thought.html"), true);
+assert.equal(aboutOpen("what is weather.html", [open[1].path], ""), true);
+assert.equal(aboutOpen("what's the weather", [open[1].path], ""), false);
+assert.equal(aboutOpen("what are your files", [], ""), true);
+assert.equal(aboutOpen("search the web for cats", [], "graph-of-thought.html"), false);
+assert.equal(aboutOpen("how does the bridge file work", [open[0].path], ""), true);
+
 console.log("harness ok");

@@ -459,3 +459,79 @@ export function assemble(sections: Section[], budget: number): Assembled {
     used: budget - left,
   };
 }
+
+// What is already open: the editor's tabs, and the artifact the Artifacts pane is running. A question about those is
+// answered from this text. The web is the wrong place for a file that is on screen.
+export type DeskFile = { path: string; text: string; active: boolean };
+export type DeskArtifact = { name: string; text: string };
+
+// ponytail: 1200 characters of the file in front. Raise it if answers miss the part that was asked about.
+const DESK_BODY = 1200;
+const clipDesk = (text: string) => {
+  const t = text.trim();
+  if (t.length <= DESK_BODY) return t;
+  const head = t.slice(0, DESK_BODY);
+  const at = head.lastIndexOf("\n");
+  return `${(at > DESK_BODY / 2 ? head.slice(0, at) : head).trimEnd()}…`;
+};
+
+/** One context section: every open path, then the text of the file in front and of the artifact running, when they differ. */
+export function deskSections(open: DeskFile[], artifact: DeskArtifact | null): Section[] {
+  const files = open.filter((f) => f.path);
+  if (!files.length && !artifact?.name) return [];
+  const active = files.find((f) => f.active) ?? null;
+  const artFile = artifact ? files.find((f) => f.path === artifact.name || f.path.endsWith(`/${artifact.name}`)) : undefined;
+  const lines = [
+    files.length ? `Open in the editor:\n${files.map((f) => `${f === active ? "* " : "- "}${f.path}`).join("\n")}` : "",
+    artifact?.name ? `Artifact running: ${artifact.name}` : "",
+  ].filter(Boolean);
+  const bodies: string[] = [];
+  const seen = new Set<string>();
+  const add = (path: string, text: string) => {
+    const body = text.trim();
+    if (!body || seen.has(path)) return;
+    seen.add(path);
+    bodies.push(`${path}\n${clipDesk(body)}`);
+  };
+  if (active) add(active.path, active.text);
+  if (artifact?.name) add(artFile?.path ?? artifact.name, artFile?.text || artifact.text);
+  return [
+    {
+      label: "Open files and the running artifact",
+      text: [
+        "Answer questions about these from the text below. They are already open here, so they are not looked up on the web.",
+        ...lines,
+        ...bodies,
+      ].join("\n\n"),
+      priority: 2,
+    },
+  ];
+}
+
+const DEICTIC =
+  /\b(?:this|that|current|open|active|showing)\s+(?:file|files|tab|tabs|artifact|artifacts|page|code)\b|\b(?:file|files|tab|tabs|artifact|artifacts|page|code)\s+(?:(?:i|you|we) have\s+)?(?:open|running|showing)\b|\bwhat(?:'s| is| are) (?:open|running|showing)\b|\b(?:in )?the editor\b|\b(?:your|my|arcanus'?s?) (?:own\s+)?files?\b|\brunning artifacts?\b|\b(?:this|the) artifacts?\b/i;
+const FILEISH = /\b(?:file|files|artifact|artifacts|editor|code|tab|tabs|open|running)\b/i;
+const NOT_A_FILE = new Set(["", "editor", "ar"]);
+
+function deskNeedles(path: string): string[] {
+  const base = (path.split("/").pop() ?? "").toLowerCase();
+  if (!base || NOT_A_FILE.has(base)) return [];
+  const stem = base.replace(/\.[^.]+$/, "").replace(/[-_.]+/g, " ").trim();
+  return stem && stem !== base ? [base, stem] : [base];
+}
+
+/**
+ * The question is about a file or artifact already open (or about Arcanus's own files), so a web search would leave
+ * the thing on screen. A single ordinary word ("weather") does not count unless the question also talks about a file.
+ */
+export function aboutOpen(text: string, paths: string[], artifact = ""): boolean {
+  if (DEICTIC.test(text)) return true;
+  const q = text.toLowerCase();
+  const fileish = FILEISH.test(text);
+  for (const needle of [...paths.flatMap(deskNeedles), ...deskNeedles(artifact)]) {
+    if (!q.includes(needle)) continue;
+    if (needle.includes(".") || needle.includes(" ")) return true;
+    if (fileish && new RegExp(`(?:^|\\W)${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`).test(q)) return true;
+  }
+  return false;
+}

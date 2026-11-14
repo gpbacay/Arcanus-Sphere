@@ -3,6 +3,7 @@
 // The search engine's file side: every file in Arcanus's file system, by name and by line (find.ts matches). The
 // browser's folders are walked and read here; the source is searched where it lives, by git grep on the server, which
 // is far faster than reading each file across the network.
+import { Store } from "@/shared/store";
 import { HOME, SOURCE, list, read, workspace } from "./fs";
 import { admits, fileHit, matcher, ranked, type FileHit, type FindOptions, type LineHit } from "./find";
 import { searchSource, source, sourceFiles } from "./source";
@@ -92,3 +93,39 @@ export async function searchFiles(query: string, o: FindOptions = {}, onLocal?: 
 
 /** Where Arcanus's own files start, for a hit's path shown short ("memory/a.md" for ".arcanus/memory/a.md"). */
 export const shortPath = (path: string) => (path.startsWith(`${SOURCE}/`) ? `source/${path.slice(SOURCE.length + 1)}` : path.startsWith(`${HOME}/`) ? path.slice(HOME.length + 1) : path);
+
+// Names for the composer's @ menu. The file itself is read later, when the reply is built.
+// Arcanus's own files are published as soon as they are listed; the source joins them when the server answers.
+// ponytail: kept 30s. A file deleted in that window can still be offered.
+const textName = (path: string) => TEXT.test(path.split("/").pop() ?? "");
+export const fileCatalog = new Store({ paths: [] as string[], ready: false });
+let catalog: { key: string; at: number; pending: boolean; list: Promise<string[]> } | null = null;
+const namesKey = () => `${workspace.state.kind}:${source.state.available ? 1 : 0}`;
+
+/** Every text file in Arcanus's file system, by path. A walk already going is reused. */
+export function fileNames(): Promise<string[]> {
+  const key = namesKey();
+  if (catalog && catalog.key === key && (catalog.pending || Date.now() - catalog.at < 30_000)) return catalog.list;
+  const entry = { key, at: 0, pending: true, list: Promise.resolve([] as string[]) };
+  entry.list = (async () => {
+    let paths: string[] = [];
+    try {
+      const found: string[] = [];
+      await walk(workspace.state.kind === "home" ? HOME : "", found);
+      paths = [...new Set(found.filter(textName))];
+      if (catalog === entry) fileCatalog.set({ paths, ready: true });
+      if (source.state.available && catalog === entry) {
+        const src = await sourceFiles().catch(() => [] as string[]);
+        paths = [...new Set([...paths, ...src.filter(textName).map((file) => `${SOURCE}/${file}`)])];
+        if (catalog === entry) fileCatalog.set({ paths, ready: true });
+      }
+    } catch {
+      if (catalog === entry) fileCatalog.set({ paths: [], ready: true });
+    }
+    entry.pending = false;
+    entry.at = Date.now();
+    return paths;
+  })();
+  catalog = entry;
+  return entry.list;
+}

@@ -6,6 +6,7 @@
 import { openArtifact, openPane, osDrawsEditor, pane, type State } from "@/shared/pane";
 import { Store } from "@/shared/store";
 import { read, remove, SOURCE, write } from "./fs";
+import { joinedGraph, keptGraph, openedGraph, shiftTabs } from "./tabs";
 
 /** The editor groups side by side, VS Code's split: 0 on the left (always there), 1 on the right (while it has a tab). */
 export type Group = 0 | 1;
@@ -25,8 +26,10 @@ export const ide = new Store({
   /** The tab shown in the right group, and the group a file opened from the explorer or the chat goes into. */
   activeRight: "",
   focus: 0 as Group,
-  /** The panes beside the files (the knowledge graph) and beside the terminal (git's changes and its graph), open to start. */
+  /** The panes beside the files (the knowledge graph) and beside the terminal (git's changes and its graph), open to start.
+   *  graphAt: how many left-group files sit to the left of the knowledge graph. */
   graphOpen: true,
+  graphAt: 0,
   changesOpen: true,
   gitGraphOpen: true,
   /** The right column's width and the Git Graph's height in it, in pixels: both dragged by an edge. */
@@ -110,16 +113,28 @@ export function closeTerminal(id: number) {
 const tidy = (path: string) => path.split("/").filter(Boolean).join("/");
 /** The tabs, with each group still showing its tab if it has it, else its last one. A group left empty gives up the focus. */
 function settle(tabs: Tab[]) {
-  const { active, activeRight, focus } = ide.state;
+  const { active, activeRight, focus, tabs: prev, graphAt } = ide.state;
   const pick = (g: Group, now: string) => (tabs.some((t) => t.path === now && t.in.includes(g)) ? now : (tabs.filter((t) => t.in.includes(g)).at(-1)?.path ?? ""));
   const right = pick(1, activeRight);
-  ide.set({ tabs, active: pick(0, active), activeRight: right, focus: right ? focus : 0 });
+  ide.set({ tabs, active: pick(0, active), activeRight: right, focus: right ? focus : 0, graphAt: keptGraph(prev, tabs, graphAt) });
 }
 export const show = (g: Group, path: string) => ide.set(g ? { activeRight: path, focus: 1 } : { active: path, focus: 0 });
 /** Open a tab in a group as well (the Split button: the file shown on the left opens on the right too). */
 export function openIn(g: Group, path: string) {
-  ide.set({ tabs: ide.state.tabs.map((t) => (t.path === path && !t.in.includes(g) ? { ...t, in: [...t.in, g] } : t)) });
+  const tab = ide.state.tabs.find((t) => t.path === path);
+  if (tab && !tab.in.includes(g)) {
+    ide.set({
+      tabs: ide.state.tabs.map((t) => (t === tab ? { ...t, in: [...t.in, g] } : t)),
+      ...(g === 0 ? { graphAt: joinedGraph(ide.state.tabs, path, ide.state.graphAt) } : {}),
+    });
+  }
   show(g, path);
+}
+/** Drag a tab to just before `before` in its group, or to the end. `id` is a path, or the knowledge graph. */
+export function moveTab(g: Group, id: string, before: string | null) {
+  const { tabs, graphAt, graphOpen } = ide.state;
+  const next = shiftTabs(tabs, g, graphAt, graphOpen && g === 0, id, before);
+  if (next.tabs !== tabs || next.graphAt !== graphAt) ide.set(next);
 }
 
 const patch = (path: string, change: Partial<Tab>) => ide.set({ tabs: ide.state.tabs.map((t) => (t.path === path ? { ...t, ...change } : t)) });
@@ -134,7 +149,7 @@ export async function openFile(at: string) {
   if (text === null) throw new Error(`${path} isn't a file I can open.`);
   const g = ide.state.focus;
   const open = ide.state.tabs.find((t) => t.path === path);
-  if (!open) ide.set({ tabs: [...ide.state.tabs, { path, text, saved: text, in: [g] }] });
+  if (!open) ide.set({ tabs: [...ide.state.tabs, { path, text, saved: text, in: [g] }], graphAt: openedGraph(ide.state.tabs, g, ide.state.graphAt) });
   else if (open.text === open.saved) patch(path, { text, saved: text });
   openIn(g, path);
   ide.set({ dir: path.split("/").slice(0, -1).join("/") });
