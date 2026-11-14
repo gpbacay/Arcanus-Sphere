@@ -21,6 +21,22 @@ export function sourceParts(path: string): string[] {
   return list;
 }
 
+/** Where This PC, the computer's own disks, is mounted in Arcanus's files: at the top, beside .arcanus. */
+export const PC = "This PC";
+
+/**
+ * A place on This PC, the computer's own disks, as the parts path.join takes: "C:/Users/me" -> ["C:\\", "Users", "me"].
+ * A drive is its letter and a colon; a computer without drive letters has one disk, "root", which is /. Throws on ".."
+ * and on a first part that isn't a drive. "" is This PC itself: no place on a disk.
+ */
+export function diskParts(path: string): string[] {
+  const [drive, ...rest] = path.split(/[\\/]+/).filter(Boolean);
+  if (!drive) throw new Error("This PC is its drives: open one.");
+  const top = /^[a-z]:$/i.test(drive) ? `${drive.toUpperCase()}\\` : drive === "root" ? "/" : "";
+  if (!top || rest.some((part) => part === ".." || part.includes("\0"))) throw new Error(`Not a place on this computer: ${path}`);
+  return [top, ...rest];
+}
+
 // ------------------------------------------------------------------ git
 
 const GIT = ["status", "diff", "log", "show", "add", "restore", "commit", "branch", "switch", "checkout", "stash", "pull", "push", "fetch", "merge", "reset", "rm", "mv", "tag", "blame", "grep", "ls-files", "rev-parse", "remote"];
@@ -82,12 +98,15 @@ export function sourceCommand(input: string): SourceCommand | null {
  * workspace. A drive ("C:\", "arcanus:") means the top, as it does in cmd; ".." never climbs out of it.
  */
 export function resolve(cwd: string, arg: string): string {
-  const drive = arg.match(/^[a-z][\w-]*:(.*)$/i);
+  const drive = arg.match(/^([a-z][\w-]*):(.*)$/i);
   const absolute = drive ? true : /^[\\/]/.test(arg);
-  const out = absolute ? [] : cwd.split("/").filter(Boolean);
-  for (const part of (drive ? drive[1] : arg).split(/[\\/]+/).filter(Boolean)) {
-    if (part === "..") out.pop();
-    else if (part !== ".") out.push(part);
+  // A drive letter is that disk of This PC: "C:\Users" is This PC/C:/Users, and ".." stops at the drive.
+  const disk = drive?.[1].length === 1 ? [PC, `${drive[1].toUpperCase()}:`] : [];
+  const out = absolute ? [...disk] : cwd.split("/").filter(Boolean);
+  for (const part of (drive ? drive[2] : arg).split(/[\\/]+/).filter(Boolean)) {
+    if (part === "..") {
+      if (out.length > disk.length) out.pop();
+    } else if (part !== ".") out.push(part);
   }
   return out.join("/");
 }

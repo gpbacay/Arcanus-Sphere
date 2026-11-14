@@ -5,21 +5,23 @@
 // The one exception is map tiles, and only from the tile servers, by tile number.
 //
 // In the artifact (seal.ts gives every page these):
-//   arcanus.on(topic, (data) => …)         topics: "mind", "search", "gps"
+//   arcanus.on(topic, (data) => …)         topics: "mind", "search", "gps", and "live" (after arcanus.call("live.watch"))
 //   await arcanus.call(name, ...args)       calls: the CALLS below
 import maplibrePkg from "maplibre-gl/package.json";
 import { askLocation, gps, nearPlace, placeName, recalibrate } from "@/modules/location";
 import { clearMind, mind, processes } from "@/modules/mind";
 import { engine, findFiles, runSearch } from "@/modules/search";
-import { browser, go, reload, step } from "@/modules/web";
+import { browser, go, live, liveInput, liveNav, liveResize, readLive, reload, step, watchLive } from "@/modules/web";
 import { openFile, saveArtifact, shortPath, type FindOptions } from "@/modules/workspace";
 import { pane, pin } from "@/shared/pane";
 import { errorText } from "@/shared/store";
 
 type Subscribable = { subscribe: (fn: () => void) => () => void };
 
-/** What an artifact is told, each under its name, whenever one of its stores changes. */
-const TOPICS: Record<string, { stores: Subscribable[]; read: () => unknown }> = {
+/** What an artifact is told, each under its name, whenever one of its stores changes. `asked`: only once it called "<name>.watch". */
+const TOPICS: Record<string, { stores: Subscribable[]; read: () => unknown; asked?: boolean }> = {
+  // The live browser: its newest frame (a JPEG, base64) and where it is. Frames come only while someone watches.
+  live: { stores: [live], read: () => live.state, asked: true },
   // Every thought, and its layout (src/modules/mind/layout.ts).
   mind: {
     stores: [mind],
@@ -109,6 +111,14 @@ const CALLS: Record<string, (...args: never[]) => unknown> = {
   "chat.pin": onGesture((page: { label: string; text: string; href: string } | null) =>
     pin(page ? { label: String(page.label), text: String(page.text), href: webAddress(page.href) } : null),
   ),
+  // The live browser. A press, a key or a page read waits for your own press or key; moving and scrolling don't.
+  "live.input": (event: Record<string, unknown>) => {
+    if ((event.type === "mousePressed" || event.type === "keyDown" || event.action === "text") && !activated()) throw new Error("That needs a press or a key in the artifact first.");
+    return liveInput(event);
+  },
+  "live.nav": (action: string) => liveNav(action === "back" || action === "forward" ? action : "reload"),
+  "live.resize": (width: number, height: number, dpr: number) => liveResize(Number(width), Number(height), Number(dpr)),
+  "live.read": onGesture(() => readLive()),
   "location.ask": () => askLocation(),
   "location.recalibrate": () => recalibrate(),
   "mind.clear": () => clearMind(),
@@ -125,15 +135,18 @@ const CALLS: Record<string, (...args: never[]) => unknown> = {
 export function connect(frame: () => Window | null | undefined) {
   const post = (message: unknown, transfer: Transferable[] = []) => frame()?.postMessage(message, "*", transfer); // "*": a sealed frame has no origin to name
 
-  const sendTopic = async (name: string) => post({ ...((await TOPICS[name].read()) as object), arcanus: name });
+  const asked = new Map<string, () => void>(); // the topics this frame asked for, and how to stop each
+  const wanted = (name: string) => !TOPICS[name].asked || asked.has(name);
+  const sendTopic = async (name: string) => wanted(name) && post({ ...((await TOPICS[name].read()) as object), arcanus: name });
   const sendAll = () => Object.keys(TOPICS).forEach((name) => void sendTopic(name));
+  const WATCH: Record<string, () => () => void> = { live: watchLive };
 
   // A reply being written changes its thought with every word: one message a frame per topic is all a page can draw.
   const queued = new Map<string, number>();
   const offs = Object.entries(TOPICS).flatMap(([name, { stores }]) =>
     stores.map((store) =>
       store.subscribe(() => {
-        if (!queued.has(name)) queued.set(name, requestAnimationFrame(() => (queued.delete(name), void sendTopic(name))));
+        if (wanted(name) && !queued.has(name)) queued.set(name, requestAnimationFrame(() => (queued.delete(name), void sendTopic(name))));
       }),
     ),
   );
@@ -144,6 +157,18 @@ export function connect(frame: () => Window | null | undefined) {
     if (arcanus === "clear-mind") return clearMind(); // the first artifacts' way of saying it
     if (arcanus !== "call") return;
     try {
+      // "<topic>.watch": start or stop being told a topic that is sent only on asking.
+      const topic = typeof name === "string" && name.endsWith(".watch") ? name.slice(0, -6) : "";
+      if (topic && Object.hasOwn(WATCH, topic)) {
+        if (args?.[0] === false) {
+          asked.get(topic)?.();
+          asked.delete(topic);
+        } else if (!asked.has(topic)) {
+          asked.set(topic, WATCH[topic]());
+          void sendTopic(topic);
+        }
+        return post({ arcanus: "reply", id, result: null });
+      }
       const run = Object.hasOwn(CALLS, name) ? CALLS[name] : null;
       if (!run) throw new Error(`Arcanus has no call named ${name}.`);
       const result = await (run as (...a: unknown[]) => unknown)(...(Array.isArray(args) ? args : []));
@@ -158,6 +183,7 @@ export function connect(frame: () => Window | null | undefined) {
     sendAll,
     off() {
       offs.forEach((off) => off());
+      asked.forEach((stop) => stop());
       queued.forEach((frameId) => cancelAnimationFrame(frameId));
       window.removeEventListener("message", heard);
     },

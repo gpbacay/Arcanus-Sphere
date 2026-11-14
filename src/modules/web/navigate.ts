@@ -7,7 +7,7 @@ export type WebCall = { name: "open_browser" | "search_web" | "read_page"; argum
 export const WEB_TOOLS = [
   {
     name: "open_browser",
-    description: "Open a website in the user's own browser. Use when they say go to, open, or navigate to a site, including searching on that site.",
+    description: "Open a website in my browser. Use when they say go to, open, or navigate to a site, including searching on that site.",
     parameters: [
       { name: "site", type: "string", description: "The site to open, such as youtube, github, or a url", required: true },
       { name: "query", type: "string", description: "What to search for on that site", required: false },
@@ -46,7 +46,10 @@ const known = (site: string) => {
   return SITES.find((s) => s.names.includes(key));
 };
 
-/** An address the user's browser can open. A known site with a query uses that site's search. */
+/** A website Arcanus knows by name ("youtube"), so "open youtube" means the site, never an app. */
+export const isSite = (site: string) => !!known(site);
+
+/** An address a browser can open. A known site with a query uses that site's search. */
 export function browserUrl(site: string, query = ""): string {
   const q = query.trim().replace(/^(?:search(?:\s+for)?|look up|find)\s+/i, "").trim();
   const raw = site.trim();

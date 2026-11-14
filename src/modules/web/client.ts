@@ -1,15 +1,19 @@
 "use client";
 
-// Arcanus's browser: history, the page or results in view, and the calls to the relay (src/app/api/web). The chat's
-// web skill drives the same browser, so what Arcanus reads is what the search engine (an artifact) shows.
+// Arcanus's browser: history, the page or results in view. A page opens in the live browser (live.ts), a real one on
+// this computer, and is read from what it shows; where that can't run, the relay (src/app/api/web) brings its text for
+// the reader. Searches always go through the relay. The chat's web skill drives the same browser, so what Arcanus
+// reads is what the search engine (an artifact) shows.
 import type { Page, Result } from "@/shared/html";
 import { openArtifact } from "@/shared/pane";
 import { Store, errorText } from "@/shared/store";
+import { openLive } from "./live";
 
 /** The search engine's tab: its file in .arcanus/artifacts/. */
 export const SEARCH = "search-engine.html";
 
-export type View = { kind: "page"; page: Page } | { kind: "results"; query: string; results: Result[]; engine: string; brief?: string };
+/** `live`: the page is in the live browser, shown as it is; otherwise it is in the reader, as text. */
+export type View = { kind: "page"; page: Page; live?: boolean } | { kind: "results"; query: string; results: Result[]; engine: string; brief?: string };
 
 export const browser = new Store({
   view: null as View | null,
@@ -21,10 +25,11 @@ export const browser = new Store({
   at: -1,
 });
 
-/** "example.com/x" or "https://…" is an address; anything else is a search. */
+/** "example.com/x" or "https://…" is an address; anything else is a search. file:<path> (a file of my source), disk:<path> (a file on This PC) and
+ *  data:text/html,… (a page from my other files) are pages only the live browser opens: see openFile in workspace. */
 export function toTarget(input: string): string {
   const text = input.trim();
-  if (/^search:/.test(text) || /^https?:\/\//i.test(text)) return text;
+  if (/^(?:search|file|disk):/.test(text) || /^https?:\/\/|^data:text\/html[;,]/i.test(text)) return text;
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(text)) return `https://${text}`;
   return `search:${text}`;
 }
@@ -41,6 +46,12 @@ async function relay<T>(params: string): Promise<T> {
   return data as T;
 }
 
+async function page(url: string): Promise<View> {
+  const shown = await openLive(url);
+  if (!shown && !/^https?:/i.test(url)) throw new Error("A file opens only in my live browser: Arcanus at localhost, with a Chromium-based browser installed.");
+  return shown ? { kind: "page", page: shown, live: true } : { kind: "page", page: await relay<Page>(`url=${encodeURIComponent(url)}`) };
+}
+
 let seq = 0;
 async function load(target: string): Promise<View> {
   const mine = ++seq;
@@ -49,7 +60,7 @@ async function load(target: string): Promise<View> {
     const query = target.startsWith("search:") ? target.slice(7) : "";
     const view: View = query
       ? { kind: "results", query, ...(await relay<{ results: Result[]; engine: string; brief?: string }>(`q=${encodeURIComponent(query)}`)) }
-      : { kind: "page", page: await relay<Page>(`url=${encodeURIComponent(target)}`) };
+      : await page(target);
     if (mine === seq) browser.set({ view, loading: "" });
     return view;
   } catch (err) {
@@ -87,20 +98,4 @@ export async function browse(url: string): Promise<Page> {
 export async function search(query: string) {
   const view = await go(`search:${query}`);
   return view.kind === "results" ? view : { results: [] as Result[], engine: "", query, brief: undefined as string | undefined };
-}
-
-/** Open an address in the user's browser. A popup blocker falls through to the device service, which launches it on this computer. */
-export async function openUserBrowser(url: string) {
-  const popped = window.open(url, "_blank", "noopener,noreferrer");
-  if (!popped) await fetch("/api/device", { method: "POST", headers: { "x-arcanus": "device", "content-type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => undefined);
-  const { history, at } = browser.state;
-  const next = [...history.slice(0, at + 1), url];
-  browser.set({
-    history: next,
-    at: next.length - 1,
-    loading: "",
-    error: "",
-    view: { kind: "page", page: { url, title: "Opened in your browser", text: `Opened in your browser.\n\n[${url}](${url})` } },
-  });
-  openArtifact(SEARCH);
 }

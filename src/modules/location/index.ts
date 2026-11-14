@@ -10,6 +10,9 @@ import { nearest, steady, whereLine, type Fix, type Near, type Place } from "./g
 
 export { coordinates, placeName, type Fix, type Near } from "./geo";
 
+/** The world map's tab: its file in .arcanus/artifacts/. */
+export const MAP = "world-map.html";
+
 /** off: not asked yet · asking: waiting for the first fix · live: fixes coming in · denied / unavailable: no fix. */
 export type GpsStatus = "off" | "asking" | "live" | "denied" | "unavailable";
 /** `prompting`: the browser's permission prompt is up, waiting for the user. */

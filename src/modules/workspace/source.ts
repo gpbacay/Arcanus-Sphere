@@ -33,22 +33,25 @@ export async function connectSource() {
   if (found) source.set({ available: true, ...found });
 }
 
-/** The same six operations fs.ts has for a browser folder, on the source. Paths are relative to the project. */
-export const sourceFs = {
-  list: async (path: string) => (await call<{ entries: Entry[] }>({ op: "list", path })).entries,
+/** The same six operations fs.ts has for a browser folder, on the source (paths relative to the project), or with
+ *  `pc` on This PC (paths start with the drive: "C:/Users"). */
+const files = (pc: boolean) => ({
+  list: async (path: string) => (await call<{ entries: Entry[] }>({ op: "list", path, pc })).entries,
   read: (path: string) =>
-    call<{ text: string }>({ op: "read", path }).then(
+    call<{ text: string }>({ op: "read", path, pc }).then(
       (r) => r.text,
       (err: { status?: number }) => {
         if (err.status === 404) return null;
         throw err;
       },
     ),
-  write: (path: string, text: string) => call({ op: "write", path, text }),
-  makeFolder: (path: string) => call({ op: "mkdir", path }),
-  remove: (path: string) => call({ op: "remove", path }),
-  rename: (path: string, to: string) => call({ op: "rename", path, to }),
-};
+  write: (path: string, text: string) => call({ op: "write", path, text, pc }),
+  makeFolder: (path: string) => call({ op: "mkdir", path, pc }),
+  remove: (path: string) => call({ op: "remove", path, pc }),
+  rename: (path: string, to: string) => call({ op: "rename", path, to, pc }),
+});
+export const sourceFs = files(false);
+export const pcFs = files(true);
 
 /** Every file of the source that git tracks or would track. */
 export const sourceFiles = async () => (await call<{ files: string[] }>({ op: "files" })).files;
@@ -67,6 +70,24 @@ export const githubAccount = {
   repos: async () => (await call<{ repos: Repo[] }>({ op: "github-repos" })).repos,
   create: async (name: string, isPrivate: boolean) => (await call<{ repo: Repo }>({ op: "github-create", name, private: isPrivate })).repo,
 };
+
+/** One line in this computer's shell, in `path`: a folder of the source, or of This PC with `pc`. npm i, npm run dev,
+ *  python x.py. What it prints goes to `out` as it comes, colours taken off; it resolves when the program ends, or
+ *  when `signal` stops it (Ctrl+C). */
+export async function runShell(path: string, line: string, out: (text: string) => void, signal: AbortSignal, pc = false) {
+  try {
+    const res = await fetch("/api/source", { method: "POST", headers: { "x-arcanus": "source", "content-type": "application/json" }, body: JSON.stringify({ op: "run", path, line, pc }), signal });
+    if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? `My source answered ${res.status}.`);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      out(value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n"));
+    }
+  } catch (err) {
+    if (!signal.aborted) throw err;
+  }
+}
 
 /** One git command on the source. `code` is git's exit code: 0 when it worked. */
 export async function sourceGit(args: string[]) {

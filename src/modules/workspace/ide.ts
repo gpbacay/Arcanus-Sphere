@@ -1,11 +1,11 @@
 "use client";
 
-// What the Operating System has open: the folder being browsed, the files open in the editor as tabs, and whether it shows
-// the files or git. Kept outside React so the chat's commands (/open, /source) and Arcanus's own skills can open a
+// What the Operating System has open: the folder being browsed, the files open in the editor as tabs, and which panels are
+// open beside them. Kept outside React so the chat's commands (/open, /source) and Arcanus's own skills can open a
 // file in the editor, and so open tabs survive closing the pane.
-import { openPane, pane, shownAt } from "@/shared/pane";
+import { openArtifact, openPane, pane, shownAt, type State } from "@/shared/pane";
 import { Store } from "@/shared/store";
-import { read, write } from "./fs";
+import { read, remove, SOURCE, write } from "./fs";
 
 export type Tab = { path: string; text: string; saved: string; /** a markdown file shown as it reads, not as source */ preview?: boolean };
 /** One line of a terminal: what was typed ("in", with the prompt it was typed at), or what came back ("out", or "err"). */
@@ -19,17 +19,23 @@ export const ide = new Store({
   tabs: [] as Tab[],
   /** The path of the tab being edited, or "" while the folder is shown. */
   active: "",
-  view: "files" as "files" | "git" | "graph",
+  /** The panes beside the files (the knowledge graph) and beside the terminal (git's changes and its graph), open to start. */
+  graphOpen: true,
+  changesOpen: true,
+  gitGraphOpen: true,
+  /** The right column's width and the Git Graph's height in it, in pixels: both dragged by an edge. */
+  sideW: 260,
+  gitGraphH: 240,
   /** The explorer: the folders open in its tree, the row last picked, and the folder a new file or folder goes in. */
   expanded: [] as string[],
   selected: "",
   into: "",
-  /** The terminals open at once (none until one is asked for), the id of the one shown, the next id (an id is only a key:
+  /** The terminals open at once (one to start), the id of the one shown, the next id (an id is only a key:
    *  a terminal is named by its place in the list), whether the panel is open, and its share of the pane's height. */
-  terms: [] as Term[],
-  term: 0,
-  nextTerm: 1,
-  termOpen: false,
+  terms: [blank(1)] as Term[],
+  term: 1,
+  nextTerm: 2,
+  termOpen: true,
   termH: 1 / 3,
   /** Folders to go Back and Forward to, the nearest last. */
   back: [] as string[],
@@ -48,12 +54,16 @@ ide.subscribe(() => {
   if (!travelling) ide.set({ back: [...back, from].slice(-50), forward: [] });
 });
 
-/** The folder shows beside the editor when there is room: the Operating System is expanded, or in the center. */
-const split = () => (pane.state.expanded !== null && pane.state[pane.state.expanded] === "os") || shownAt(pane.state, "os") === "center";
+/** The center (open files, the knowledge graph) has room beside the files: the Operating System is expanded, or in the center. */
+const split = (s: State) => (s.expanded !== null && s[s.expanded] === "os") || shownAt(s, "os") === "center";
+/** The Operating System is shown in a side section, not expanded: its center is an Artifacts tab instead. */
+export const centerAway = (s: State = pane.state) => !!shownAt(s, "os") && !split(s);
+/** Bring the center into view: the Artifacts' Editor tab, while it is away from the Operating System. */
+export const showCenter = () => centerAway() && openArtifact("editor");
 
 /** Go Back (-1) or Forward (1) a folder. Narrow, the folder list comes back over the editor. */
 export function travel(step: -1 | 1) {
-  const { dir, back, forward, active } = ide.state;
+  const { dir, back, forward } = ide.state;
   const to = (step < 0 ? back : forward).at(-1);
   if (to === undefined) return;
   travelling = true;
@@ -61,11 +71,12 @@ export function travel(step: -1 | 1) {
     dir: to,
     back: step < 0 ? back.slice(0, -1) : [...back, dir],
     forward: step < 0 ? [...forward, dir] : forward.slice(0, -1),
-    view: "files",
-    active: split() ? active : "",
   });
   travelling = false;
 }
+
+/** The program each terminal is running in the shell, if any: aborting it is Ctrl+C. */
+export const running = new Map<number, AbortController>();
 
 export const patchTerm = (id: number, change: (t: Term) => Partial<Term>) =>
   ide.set({ terms: ide.state.terms.map((t) => (t.id === id ? { ...t, ...change(t) } : t)) });
@@ -87,6 +98,7 @@ export function closeTerminal(id: number) {
   const { terms, term } = ide.state;
   const at = terms.findIndex((t) => t.id === id);
   if (at < 0) return;
+  running.get(id)?.abort();
   const rest = terms.filter((t) => t.id !== id);
   ide.set({ terms: rest, term: term === id ? (rest[Math.min(at, rest.length - 1)]?.id ?? 0) : term, termOpen: rest.length ? ide.state.termOpen : false });
 }
@@ -102,13 +114,14 @@ export async function openFile(at: string) {
   const open = ide.state.tabs.find((t) => t.path === path);
   if (!open) ide.set({ tabs: [...ide.state.tabs, { path, text, saved: text }] });
   else if (open.text === open.saved) patch(path, { text, saved: text });
-  ide.set({ active: path, view: "files", dir: path.split("/").slice(0, -1).join("/") });
+  ide.set({ active: path, dir: path.split("/").slice(0, -1).join("/") });
   openPane("os");
+  showCenter();
 }
 
 /** Show a folder in the Operating System. */
 export function openDir(dir: string) {
-  ide.set({ dir: tidy(dir), active: "", view: "files" });
+  ide.set({ dir: tidy(dir), active: "" });
   openPane("os");
 }
 
@@ -120,6 +133,20 @@ export async function saveTab(path: string) {
   if (!tab || tab.text === tab.saved) return;
   await write(path, tab.text);
   patch(path, { saved: tab.text });
+}
+
+/** Close a file's tab, asking first when it has unsaved edits. */
+export function closeFile(path: string) {
+  const tab = ide.state.tabs.find((t) => t.path === path);
+  if (tab && tab.text !== tab.saved && !window.confirm(`Close ${path.split("/").pop()} without saving your changes?`)) return;
+  closeTab(path);
+}
+
+/** Delete a file or folder, once confirmed, and close its tabs. (Arcanus's source is in git, so that can be undone.) */
+export async function discard(path: string) {
+  if (!window.confirm(`Delete ${path}?${path.startsWith(`${SOURCE}/`) ? "" : " This can't be undone."}`)) return;
+  await remove(path);
+  closeTab(path);
 }
 
 /** Close a tab, and any tab inside it when it is a folder that was removed or renamed. */

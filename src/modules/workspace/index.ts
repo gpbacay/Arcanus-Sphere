@@ -1,5 +1,7 @@
 // Public API of the workspace module: Arcanus's own files (.arcanus/), its source code and git, and the Operating System pane.
 export { OperatingSystem } from "./OperatingSystem";
+export { EDITOR_PAGE } from "./Center";
+export { centerAway } from "./ide";
 export { FILE_COMMANDS, fileCommand, sourceAction } from "./terminal";
 export { searchFiles, shortPath, type FileResults } from "./search";
 export type { FileHit, FindOptions, LineHit } from "./find";

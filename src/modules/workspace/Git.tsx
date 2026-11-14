@@ -4,13 +4,14 @@
 // sync with the remote, the commit graph, and GitHub. It is git on the computer Arcanus runs from (source.ts), so it
 // shows the same repository your terminal and editor do, and pushes with the same sign-in.
 import { ArrowDown, ArrowUp, Check, ChevronDown, Cloud, CloudUpload, ExternalLink, FileCode, GitBranch, RefreshCw, Undo2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { errorText, useStore } from "@/shared/store";
+import { Grip } from "@/shared/ui/grip";
 import { Info } from "@/shared/ui/info";
 import { PopMenu } from "@/shared/ui/pop-menu";
 import { SOURCE, git, remove, workspace } from "./fs";
 import { lanes, type Row } from "./graph";
-import { openFile } from "./ide";
+import { ide, openFile } from "./ide";
 import { githubAccount, source, sourceGit, type Repo } from "./source";
 
 type Change = { code: string; path: string };
@@ -51,13 +52,17 @@ async function read(): Promise<State> {
   };
 }
 
-export function Git() {
+/** Git beside the terminal: the branch and its sync, then the Changes and Git Graph accordions that are switched on. */
+export function Git({ changes = true, graph: showGraph = true }: { changes?: boolean; graph?: boolean }) {
   const version = useStore(workspace, (s) => s.version);
   const [state, setState] = useState<State | null>(null);
   const [shown, setShown] = useState<{ title: string; text: string } | null>(null);
   const [message, setMessage] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const graphH = useStore(ide, (s) => s.gitGraphH);
+  const graphBox = useRef<HTMLOListElement>(null);
+  const sizeGraph = (h: number) => ide.set({ gitGraphH: Math.min(900, Math.max(60, h)) });
 
   useEffect(() => {
     let current = true;
@@ -115,7 +120,7 @@ export function Git() {
   const graph = lanes(state.commits);
 
   return (
-    <div className="pane-body scm">
+    <div className="scm">
       <div className="scm-sync">
         <GitBranch size={14} aria-hidden />
         <span className="truncate" title={state.upstream ? `${state.branch}, following ${state.upstream}` : `${state.branch}, not on a remote yet`}>
@@ -141,118 +146,142 @@ export function Git() {
         )}
       </div>
 
-      <details className="scm-section" open>
-        <summary>Changes</summary>
-        <form
-          className="scm-commit"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void commit(false);
-          }}
-        >
-          <textarea
-            className="field"
-            rows={2}
-            value={message}
-            placeholder={`Message (Ctrl+Enter to commit on "${state.branch}")`}
-            aria-label="Commit message"
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && e.ctrlKey && (e.preventDefault(), void commit(false))}
-          />
-          <div className="scm-commit-btn">
-            <button type="submit" className="btn btn-primary" disabled={busy || !message.trim() || !state.changes.length} title="Stage every change and commit it">
-              <Check size={14} aria-hidden /> Commit
-            </button>
-            <PopMenu
-              label="More commit actions"
-              disabled={busy || !message.trim() || !state.changes.length}
-              className="btn btn-primary"
-              trigger={<ChevronDown size={14} />}
-              items={[{ label: state.upstream ? "Commit & Push" : "Commit & Publish", icon: CloudUpload, run: () => commit(true) }]}
-            />
-          </div>
-        </form>
-        {note ? (
-          <pre className="git-note" role="status">
-            {note}
-          </pre>
-        ) : null}
-        <h3 className="scm-title">
-          Changes <span className="scm-count">{state.changes.length}</span>
-        </h3>
-        {state.changes.length ? (
-          <ul className="entries scm-changes">
-            {state.changes.map((change) => {
-              const cut = change.path.lastIndexOf("/");
-              return (
-                <li key={change.path} data-code={change.code}>
-                  <button type="button" title={`${change.path} · ${WHAT[change.code] ?? change.code}`} aria-pressed={shown?.title === change.path} onClick={() => void show(change)}>
-                    <span className="truncate">{change.path.slice(cut + 1)}</span>
-                    <span className="scm-dir truncate">{cut > 0 ? change.path.slice(0, cut).replace(/\//g, "\\") : ""}</span>
+      {changes || shown ? (
+        <div className="pane-body scm-scroll">
+          {changes ? (
+            <details className="scm-section" open>
+              <summary>Changes</summary>
+              <form
+                className="scm-commit"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void commit(false);
+                }}
+              >
+                <textarea
+                  className="field"
+                  rows={2}
+                  value={message}
+                  placeholder={`Message (Ctrl+Enter to commit on "${state.branch}")`}
+                  aria-label="Commit message"
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && e.ctrlKey && (e.preventDefault(), void commit(false))}
+                />
+                <div className="scm-commit-btn">
+                  <button type="submit" className="btn btn-primary" disabled={busy || !message.trim() || !state.changes.length} title="Stage every change and commit it">
+                    <Check size={14} aria-hidden /> Commit
                   </button>
-                  {change.code !== "D" ? (
-                    <button type="button" className="icon-btn scm-hover" aria-label={`Open ${change.path}`} title="Open in the editor" onClick={() => void openFile(`${SOURCE}/${change.path}`).catch((err) => setNote(errorText(err)))}>
-                      <FileCode size={14} />
-                    </button>
-                  ) : null}
-                  <button type="button" className="icon-btn scm-hover" aria-label={`Discard changes to ${change.path}`} title="Discard this change" disabled={busy} onClick={() => void discard(change)}>
-                    <Undo2 size={14} />
-                  </button>
-                  <span className="scm-letter" title={WHAT[change.code] ?? change.code}>
-                    {LETTER[change.code] ?? change.code}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="pane-note">Nothing has changed since the last commit.</p>
-        )}
-      </details>
+                  <PopMenu
+                    label="More commit actions"
+                    disabled={busy || !message.trim() || !state.changes.length}
+                    className="btn btn-primary"
+                    trigger={<ChevronDown size={14} />}
+                    items={[{ label: state.upstream ? "Commit & Push" : "Commit & Publish", icon: CloudUpload, run: () => commit(true) }]}
+                  />
+                </div>
+              </form>
+              {note ? (
+                <pre className="git-note" role="status">
+                  {note}
+                </pre>
+              ) : null}
+              <h3 className="scm-title">
+                Changes <span className="scm-count">{state.changes.length}</span>
+              </h3>
+              {state.changes.length ? (
+                <ul className="entries scm-changes">
+                  {state.changes.map((change) => {
+                    const cut = change.path.lastIndexOf("/");
+                    return (
+                      <li key={change.path} data-code={change.code}>
+                        <button type="button" title={`${change.path} · ${WHAT[change.code] ?? change.code}`} aria-pressed={shown?.title === change.path} onClick={() => void show(change)}>
+                          <span className="truncate">{change.path.slice(cut + 1)}</span>
+                          <span className="scm-dir truncate">{cut > 0 ? change.path.slice(0, cut).replace(/\//g, "\\") : ""}</span>
+                        </button>
+                        {change.code !== "D" ? (
+                          <button type="button" className="icon-btn scm-hover" aria-label={`Open ${change.path}`} title="Open in the editor" onClick={() => void openFile(`${SOURCE}/${change.path}`).catch((err) => setNote(errorText(err)))}>
+                            <FileCode size={14} />
+                          </button>
+                        ) : null}
+                        <button type="button" className="icon-btn scm-hover" aria-label={`Discard changes to ${change.path}`} title="Discard this change" disabled={busy} onClick={() => void discard(change)}>
+                          <Undo2 size={14} />
+                        </button>
+                        <span className="scm-letter" title={WHAT[change.code] ?? change.code}>
+                          {LETTER[change.code] ?? change.code}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="pane-note">Nothing has changed since the last commit.</p>
+              )}
+            </details>
+          ) : null}
 
-      {shown ? (
-        <pre className="diff" aria-label={shown.title}>
-          {shown.text.split("\n").map((line, i) => (
-            <span key={i} data-line={line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : undefined}>
-              {line}
-              {"\n"}
-            </span>
-          ))}
-        </pre>
+          {shown ? (
+            <pre className="diff" aria-label={shown.title}>
+              {shown.text.split("\n").map((line, i) => (
+                <span key={i} data-line={line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : undefined}>
+                  {line}
+                  {"\n"}
+                </span>
+              ))}
+            </pre>
+          ) : null}
+
+          {changes ? (
+            <details className="scm-section" open>
+              <summary>GitHub</summary>
+              <GitHub />
+            </details>
+          ) : null}
+        </div>
       ) : null}
 
-      <details className="scm-section" open>
-        <summary>Graph</summary>
-        {state.commits.length ? (
-          <ol className="scm-graph">
-            {state.commits.map((c, i) => (
-              <li key={c.hash}>
-                <button
-                  type="button"
-                  title={`${c.hash.slice(0, 7)} · ${c.author} · ${c.when}`}
-                  aria-pressed={shown?.title === c.hash}
-                  onClick={() =>
-                    void sourceGit(["show", "--stat", "--format=%H%nAuthor: %an <%ae>%nDate:   %ad%n%n%B", c.hash]).then(({ out }) => setShown({ title: c.hash, text: out }))
-                  }
-                >
-                  <Lanes row={graph.rows[i]} width={graph.width} head={c.refs.some((r) => r.startsWith("HEAD"))} />
-                  <span className="truncate">{c.subject}</span>
-                  {c.refs.map((ref) => (
-                    <RefBadge key={ref} name={ref} />
-                  ))}
-                </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="pane-note">No commits yet.</p>
-        )}
-      </details>
-
-      <details className="scm-section" open>
-        <summary>GitHub</summary>
-        <GitHub />
-      </details>
+      {showGraph ? (
+        <details className="scm-section scm-graph-section" open>
+          {changes ? (
+            <Grip
+              label="Resize the Git Graph"
+              value={graphH}
+              min={60}
+              max={900}
+              drag={(_, y) => {
+                const list = graphBox.current?.getBoundingClientRect();
+                const section = graphBox.current?.parentElement?.getBoundingClientRect();
+                if (list && section) sizeGraph(list.bottom - y - (list.top - section.top)); // the grip is the section's top edge
+              }}
+              nudge={(step) => sizeGraph(graphH - step * 20)}
+            />
+          ) : null}
+          <summary>Git Graph</summary>
+          {state.commits.length ? (
+            <ol className="scm-graph" ref={graphBox} style={changes ? { height: graphH } : undefined}>
+              {state.commits.map((c, i) => (
+                <li key={c.hash}>
+                  <button
+                    type="button"
+                    title={`${c.hash.slice(0, 7)} · ${c.author} · ${c.when}`}
+                    aria-pressed={shown?.title === c.hash}
+                    onClick={() =>
+                      void sourceGit(["show", "--stat", "--format=%H%nAuthor: %an <%ae>%nDate:   %ad%n%n%B", c.hash]).then(({ out }) => setShown({ title: c.hash, text: out }))
+                    }
+                  >
+                    <Lanes row={graph.rows[i]} width={graph.width} head={c.refs.some((r) => r.startsWith("HEAD"))} />
+                    <span className="truncate">{c.subject}</span>
+                    {c.refs.map((ref) => (
+                      <RefBadge key={ref} name={ref} />
+                    ))}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="pane-note">No commits yet.</p>
+          )}
+        </details>
+      ) : null}
     </div>
   );
 }

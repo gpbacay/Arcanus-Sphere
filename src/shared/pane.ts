@@ -18,7 +18,7 @@ const HOME: Record<Page, Section> = { chat: "center", artifacts: "left", os: "ri
 
 type Layout = Record<Section, Page | null>;
 /** `artifact`: the Artifacts page's open tab, a file's name ("search-engine.html") or a built-in page ("ar"); "" is the first tab. */
-type State = Layout & { expanded: Side | null; pinned: Pinned | null; artifact: string };
+export type State = Layout & { expanded: Side | null; pinned: Pinned | null; artifact: string };
 
 // The Artifacts on the Graph of Thought (left), the chat (center) and the Operating System (right) from the start; a phone shows the chat alone (app/page.tsx).
 export const pane = new Store<State>({ left: "artifacts", center: "chat", right: "os", expanded: null, pinned: null, artifact: "" });

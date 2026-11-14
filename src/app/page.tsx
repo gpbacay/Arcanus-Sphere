@@ -17,9 +17,9 @@ import { offlineReady } from "@/modules/offline";
 import { AppNav } from "@/modules/shell";
 import { ArLink, Sphere } from "@/modules/sphere";
 import { voice, voiceEngine } from "@/modules/voice";
-import { OperatingSystem, workspaceReady } from "@/modules/workspace";
+import { centerAway, EDITOR_PAGE, OperatingSystem, workspaceReady } from "@/modules/workspace";
 import { Boundary } from "@/shared/boundary";
-import { closeAllPanes } from "@/shared/pane";
+import { closeAllPanes, pane } from "@/shared/pane";
 import { power, restorePower } from "@/shared/power";
 import { bootInTurn, useStore } from "@/shared/store";
 
@@ -53,6 +53,7 @@ export default function Page() {
 /** Arcanus for the signed-in account: its conversations and its files are read here, never before. */
 function Home() {
   const on = useStore(power, (s) => s.on);
+  const away = useStore(pane, (s) => centerAway(s));
   const [hydrated, setHydrated] = useState(false); // the boot message goes into a conversation, so it waits for them
 
   useEffect(() => {
@@ -92,7 +93,8 @@ function Home() {
       <Stage />
       <AppNav />
       <Boundary fallback={null}>
-        <Artifacts pages={PAGES} />
+        {/* The Operating System in a side section, not expanded, has no room for its center: it is an Artifacts tab. */}
+        <Artifacts pages={away ? [EDITOR_PAGE, ...PAGES] : PAGES} />
         <OperatingSystem />
       </Boundary>
       <Boundary fallback={<ChatFallback />}>

@@ -6,10 +6,12 @@ import { Hippocampus } from "./arcane/hippocampus.mjs";
 import { Occipital } from "./arcane/occipital.mjs";
 import { connectionNote, KNOWLEDGE } from "./knowledge";
 import { callTool, connectMcp, featuresReply, introduction, listTools, matchTool, personalityReply, type Tool } from "@/modules/harness";
-import { browse, browserUrl, commandTool, mergeCall, openUserBrowser, search, WEB_TOOLS } from "@/modules/web";
+import { browse, browserUrl, commandTool, isSite, mergeCall, search, SEARCH, WEB_TOOLS } from "@/modules/web";
 import { deviceCommand, openApp, operate } from "@/modules/device";
 import { lore, searchFiles, shortPath, sourceAction, sourceCommand } from "@/modules/workspace";
-import { coordinates, gps, noFixReason, whereabouts } from "@/modules/location";
+import { coordinates, gps, MAP, noFixReason, whereabouts } from "@/modules/location";
+import { engine, findFiles } from "@/modules/search";
+import { openArtifact } from "@/shared/pane";
 import { plainText } from "@/shared/html";
 import { errorText } from "@/shared/store";
 import { chooseTool, cityIn, schemaParameters, toolArguments } from "./arc1";
@@ -50,6 +52,10 @@ const route = (name: string) => ROUTES.find((r) => r.route === name)!;
 
 /** The search engine on my files, said as a reply: how many files hold it, and where. Composed from the results. */
 async function findInFiles(query: string, label: string): Promise<Outcome & { found: number }> {
+  // The search engine shows the same search, opened if it wasn't: what Arcanus uses, you see.
+  engine.set({ query, scope: "all" });
+  void findFiles(query);
+  openArtifact(SEARCH);
   try {
     const { files, matches } = await searchFiles(query);
     if (!files.length) return { found: 0, step: { label, description: query, results: ["nothing found"] }, reply: `"${query}" isn't anywhere in my files.` };
@@ -140,6 +146,7 @@ export const SKILLS: Skill[] = [
       // From this device's GPS, said as it is: a small model would garble coordinates. Arcanus runs here, so "where are
       // you" is the same place.
       const self = /\b(?:where (?:in the world )?are you|your (?:current |live |exact |gps )?(?:location|position|coordinates|whereabouts)|what (?:city|town|country|place) are you in)\b/i.test(text);
+      openArtifact(MAP); // the map shows where, opened if it wasn't
       const line = await whereabouts(self);
       const fix = gps.state.fix;
       return {
@@ -211,15 +218,16 @@ export const SKILLS: Skill[] = [
       }
       try {
         if (call.name === "open_browser") {
-          // "open notepad": an installed app of exactly that name comes before a website.
+          // "open notepad": an installed app of exactly that name comes before a website. A site Arcanus knows
+          // ("open youtube") never does: an app installed from it (a browser's web app) would leave Arcanus's browser.
           const site = call.arguments.site ?? "";
-          const app = !call.arguments.query && site && !/[./:]/.test(site) ? await openApp(site, true).catch(() => null) : null;
+          const app = !call.arguments.query && site && !/[./:]/.test(site) && !isSite(site) ? await openApp(site, true).catch(() => null) : null;
           if (app) return { step: { label: "Opened an app", description: `${by} · ${site}`, results: [app] }, reply: `Opened ${app}.` };
-          const url = browserUrl(site, call.arguments.query ?? "");
-          await openUserBrowser(url);
+          // In Arcanus's own browser, the search engine's reader. Its ↗ button opens the page in yours.
+          const page = await browse(browserUrl(site, call.arguments.query ?? ""));
           return {
-            step: { label: "Opened in your browser", description: `${by} · open_browser`, results: [url] },
-            reply: `Opened it in your browser: ${url}`,
+            step: { label: "Opened in my browser", description: `${by} · open_browser`, results: [page.url] },
+            reply: `Opened ${page.title} in my browser.`,
           };
         }
         if (call.name === "read_page" && call.arguments.url) {

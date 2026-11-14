@@ -23,12 +23,10 @@ const TOOLS = new Set(["list_apps", "get_app_state", "click", "perform_secondary
 
 // ------------------------------------------------------------------ specs
 
-function specs(): Specs {
-  const cpus = os.cpus();
-  let name = os.version();
-  if (process.platform === "win32" && Number(os.release().split(".")[2]) >= 22000) name = name.replace("Windows 10", "Windows 11"); // the registry still says 10
-  const roots = process.platform === "win32" ? "CDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => `${l}:\\`).filter((r) => existsSync(r)) : ["/"];
-  const disks = roots.flatMap((root) => {
+/** This computer's drives (C:, D: … or / without drive letters): how big each is, and how much is free. */
+export function disks() {
+  const roots = process.platform === "win32" ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => `${l}:\\`).filter((r) => existsSync(r)) : ["/"];
+  return roots.flatMap((root) => {
     try {
       const s = statfsSync(root);
       return s.blocks ? [{ path: root.replace(/\\$/, ""), total: s.blocks * s.bsize, free: s.bavail * s.bsize }] : [];
@@ -36,13 +34,19 @@ function specs(): Specs {
       return [];
     }
   });
+}
+
+function specs(): Specs {
+  const cpus = os.cpus();
+  let name = os.version();
+  if (process.platform === "win32" && Number(os.release().split(".")[2]) >= 22000) name = name.replace("Windows 10", "Windows 11"); // the registry still says 10
   return {
     host: os.hostname(),
     user: os.userInfo().username,
     os: { name, release: os.release(), arch: os.arch() },
     cpu: { model: cpus[0]?.model.trim() ?? "unknown", cores: cpus.length },
     memory: { total: os.totalmem(), free: os.freemem() },
-    disks,
+    disks: disks(),
     uptime: os.uptime(),
   };
 }

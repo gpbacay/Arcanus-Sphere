@@ -7,30 +7,42 @@
 //   POST /api/source { op: "files" }          -> { files }         (every file git tracks or would track)
 //   POST /api/source { op: "search", query, matchCase?, wholeWord?, regex?, limit? } -> { hits, more } (git grep)
 //   POST /api/source { op: "git", args }      -> { out, code }     (one git command, see gitArgs)
+//   POST /api/source { op: "run", path, line } -> the output, streamed as it comes (one shell line in that folder:
+//                                                npm i, npm run dev, python x.py …); closing the request kills it
 //   POST /api/source { op: "github" }         -> { login, remote, stale? }   (who this computer's git is signed in to GitHub as)
 //   POST /api/source { op: "github-connect", token } -> { login }  (kept in git's credential store, never sent back)
 //   POST /api/source { op: "github-disconnect" } | { op: "github-repos" } -> { repos } | { op: "github-create", name, private }
 //
-// Like /api/device it is a pages/ route that answers only this machine (shared/loopback.ts). Paths never leave the
-// project and never enter .git, node_modules, .next or a .env file (workspace/command.ts). With `next dev`, a saved
+// With pc: true, list, read, write, mkdir, remove, rename and run work on This PC instead: the computer's own drives,
+// a path starting with one ("C:/Users"); listing "" lists the drives.
+//
+// Like /api/device it is a pages/ route that answers only this machine (shared/loopback.ts). Paths in the source never
+// leave the project and never enter .git, node_modules, .next or a .env file (workspace/command.ts). With `next dev`, a saved
 // file is the running code a moment later.
 // ponytail: a symlink inside the project that points outside it is followed. Check realpath if the project ever holds one.
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { NextApiRequest, NextApiResponse } from "next";
 // eslint-disable-next-line no-restricted-imports -- the public API also carries the browser client; the server needs only this pure part
-import { gitArgs, hidden, sourceParts } from "@/modules/workspace/command";
+import { diskParts, gitArgs, hidden, sourceParts } from "@/modules/workspace/command";
 import { fromThisMachine } from "@/shared/loopback";
+import { disks } from "./device";
 
 const ROOT = process.cwd();
 const MAX_READ = 2_000_000;
 const MAX_HITS = 200;
 
-export const config = { api: { bodyParser: { sizeLimit: "4mb" } } }; // a file is up to 2 MB, and JSON escapes it
+// A file is up to 2 MB, and JSON escapes it. What a command prints (npm run dev, for hours) has no limit.
+export const config = { api: { bodyParser: { sizeLimit: "4mb" }, responseLimit: false } };
 
-function at(rel: unknown, needsName = false) {
+function at(rel: unknown, needsName = false, pc = false) {
   if (typeof rel !== "string") throw new Error("A path is needed.");
+  if (pc) {
+    const parts = diskParts(rel);
+    if (needsName && parts.length < 2) throw new Error("That is a whole drive, not a file or folder on it.");
+    return path.join(...parts);
+  }
   const parts = sourceParts(rel);
   if (needsName && !parts.length) throw new Error("That is my whole source, not a file or folder in it.");
   return path.join(ROOT, ...parts);
@@ -49,6 +61,47 @@ function git(args: string[]) {
       },
     ),
   );
+}
+
+/** A program and everything it started: npm run dev is a shell, then npm, then node. */
+function kill(child: ChildProcess) {
+  if (!child.pid) return;
+  if (process.platform === "win32") execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => undefined);
+  else {
+    try {
+      process.kill(-child.pid, "SIGTERM"); // its process group: it was started detached, as the group's leader
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * The environment a program run from the terminal gets: this server's, without what Next and npm set for this server
+ * itself. A PORT left in makes `next dev` insist on 3000 (taken, by Arcanus) instead of moving to 3001; NODE_ENV would
+ * make a build a development one.
+ */
+const OWN = /^(?:PORT|NODE_ENV|TURBOPACK|INIT_CWD|NEXT_RUNTIME|NEXT_DEPLOYMENT_ID|NEXT_PRIVATE_\w+|__NEXT_\w+|npm_lifecycle_\w+|npm_package_\w+)$/i;
+const shellEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.test(name)));
+
+/** One line in this computer's shell (cmd on Windows, sh elsewhere), in `cwd`, its output streamed back as it comes.
+ *  Nothing to type into it: a program that asks a question gets no answer. Closing the request (Ctrl+C) kills it. */
+function run(cwd: string, line: string, res: NextApiResponse) {
+  res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache, no-transform", "content-encoding": "none" });
+  const child = spawn(line, {
+    cwd,
+    shell: true,
+    windowsHide: true,
+    detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...shellEnv(), NO_COLOR: "1", FORCE_COLOR: "0", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" },
+  });
+  const end = (text = "") => res.writableEnded || res.end(text);
+  child.stdout?.on("data", (chunk) => res.write(chunk));
+  child.stderr?.on("data", (chunk) => res.write(chunk));
+  child.on("error", (err) => end(`${err.message}\n`));
+  child.on("close", (code) => end(code ? `\nExited with code ${code}.\n` : ""));
+  res.on("close", () => child.exitCode === null && child.signalCode === null && kill(child));
 }
 
 /** `git credential <action>` for github.com, its key=value lines on stdin. It never prompts: there is no one at this terminal. */
@@ -134,14 +187,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.json({ name: path.basename(ROOT), branch: branch.code ? "" : branch.out });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST." });
-    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; query?: unknown; args?: unknown; matchCase?: unknown; wholeWord?: unknown; regex?: unknown; limit?: unknown; token?: unknown; name?: unknown; private?: unknown };
+    const body = (req.body ?? {}) as { op?: unknown; path?: unknown; to?: unknown; text?: unknown; line?: unknown; query?: unknown; args?: unknown; matchCase?: unknown; wholeWord?: unknown; regex?: unknown; limit?: unknown; token?: unknown; name?: unknown; private?: unknown; pc?: unknown };
+    const pc = body.pc === true;
     switch (body.op) {
       case "list": {
-        const found = await fs.readdir(at(body.path ?? ""), { withFileTypes: true });
-        return res.json({ entries: found.filter((e) => !hidden(e.name)).map((e) => ({ name: e.name, kind: e.isDirectory() ? "directory" : "file" })) });
+        if (pc && !body.path) return res.json({ entries: disks().map((d) => ({ name: d.path === "/" ? "root" : d.path, kind: "directory", free: d.free, total: d.total })) });
+        const found = await fs.readdir(at(body.path ?? "", false, pc), { withFileTypes: true });
+        return res.json({ entries: found.filter((e) => pc || !hidden(e.name)).map((e) => ({ name: e.name, kind: e.isDirectory() ? "directory" : "file" })) });
       }
       case "read": {
-        const file = at(body.path, true);
+        const file = at(body.path, true, pc);
         const stat = await fs.stat(file);
         if (!stat.isFile()) return res.status(404).json({ error: `${body.path} is a folder.` });
         if (stat.size > MAX_READ) throw new Error(`${path.basename(file)} is too large to open as text (${Math.round(stat.size / 1e6)} MB).`);
@@ -151,19 +206,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       case "write": {
         if (typeof body.text !== "string") throw new Error("Text is needed.");
-        const file = at(body.path, true);
+        const file = at(body.path, true, pc);
         await fs.mkdir(path.dirname(file), { recursive: true });
         await fs.writeFile(file, body.text);
         return res.json({ ok: true });
       }
       case "mkdir":
-        await fs.mkdir(at(body.path, true), { recursive: true });
+        await fs.mkdir(at(body.path, true, pc), { recursive: true });
         return res.json({ ok: true });
       case "remove":
-        await fs.rm(at(body.path, true), { recursive: true });
+        await fs.rm(at(body.path, true, pc), { recursive: true });
         return res.json({ ok: true });
       case "rename": {
-        const [from, to] = [at(body.path, true), at(body.to, true)];
+        const [from, to] = [at(body.path, true, pc), at(body.to, true, pc)];
         // Windows ignores case, so "Page.tsx" -> "page.tsx" finds itself there: that is a rename, not a clash.
         const taken = from.toLowerCase() !== to.toLowerCase() && (await fs.stat(to).then(() => true, () => false));
         if (taken) throw new Error(`${body.to} is already there.`);
@@ -194,14 +249,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       case "git":
         return res.json(await git(gitArgs(body.args)));
+      case "run": {
+        if (typeof body.line !== "string" || !body.line.trim()) throw new Error("A command is needed.");
+        const cwd = at(body.path ?? "", false, pc);
+        if (!(await fs.stat(cwd)).isDirectory()) throw new Error(`${body.path} is a file, not a folder.`);
+        return run(cwd, body.line, res);
+      }
       default: {
         const answer = await githubOp(body);
         if (answer) return res.json(answer);
-        return res.status(400).json({ error: "Send { op } as list, read, write, mkdir, remove, rename, files, search, git, or github, github-connect, github-disconnect, github-repos, github-create." });
+        return res.status(400).json({ error: "Send { op } as list, read, write, mkdir, remove, rename, files, search, git, run, or github, github-connect, github-disconnect, github-repos, github-create." });
       }
     }
   } catch (err) {
     const missing = (err as NodeJS.ErrnoException)?.code === "ENOENT";
-    return res.status(missing ? 404 : 500).json({ error: missing ? "That isn't in my source." : err instanceof Error ? err.message : String(err) });
+    return res.status(missing ? 404 : 500).json({ error: missing ? "That isn't there." : err instanceof Error ? err.message : String(err) });
   }
 }

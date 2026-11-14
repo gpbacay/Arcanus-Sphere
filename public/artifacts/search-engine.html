@@ -2,15 +2,19 @@
   Search engine: an Arcanus artifact.
 
   Arcanus's files by name and by line, like a code editor's search, and the web when it is needed. Web pages arrive
-  as text through Arcanus's relay and show in reader view. The chat's web skill drives the same browser, so what
-  Arcanus reads shows here.
+  live: a real browser on this computer, shown frame by frame here and driven by your mouse and keys. Where that
+  can't run, a page's text comes through Arcanus's relay and shows in reader view. The chat's web skill drives the
+  same browser, so what Arcanus reads shows here.
 
   It runs sealed, like every artifact (see graph-of-thought.html), and reaches Arcanus through the bridge:
     arcanus.on("search", (s) => …)    s: { query, options, scope, searching, web, files, browser, reading }
     arcanus.call("search.set", { query?, options?, scope? }), arcanus.call("search.files"), arcanus.call("search.run")
     arcanus.call("web.go", address), arcanus.call("web.step", -1 | 1), arcanus.call("web.reload")
     arcanus.call("file.open", path), arcanus.call("file.save", title, text), arcanus.call("chat.pin", page | null)
-  A web link pressed opens in a tab of your browser. The full list is in src/modules/artifacts/bridge.ts.
+    arcanus.call("live.watch"), then arcanus.on("live", (l) => …)   l: { frame, url, title, back, forward, loading }
+    arcanus.call("live.input", event), arcanus.call("live.nav", "back" | "forward" | "reload"),
+    arcanus.call("live.resize", width, height, dpr), arcanus.call("live.read")
+  A web link pressed outside the reader (the ↗ beside Back, Forward and Reload) opens in a tab of your browser. The full list is in src/modules/artifacts/bridge.ts.
 
   This file is the copy Arcanus ships (public/artifacts/). Edit yours freely: the ⋮ menu beside the tabs restores it.
 -->
@@ -410,6 +414,52 @@
     color: var(--accent);
   }
 
+  /* —— The live browser: its bar, and the page itself, frame by frame —— */
+  .live {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .live-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-bar .address {
+    flex: 1;
+    margin: 0 6px;
+    font: 11.5px var(--font-mono);
+    color: var(--text-muted);
+  }
+  .live-bar[data-loading] .address {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .screen {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: #fff;
+  }
+  .screen img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: top left;
+    user-select: none;
+    -webkit-user-drag: none;
+    outline: none;
+  }
+  /* Until the first frame arrives there is no picture: nothing shows rather than a broken image. */
+  .screen img:not([src]) {
+    visibility: hidden;
+  }
+
   /* —— For a page in the reader: hand it to Arcanus, save it, or open it in a tab —— */
   .actions {
     display: flex;
@@ -460,10 +510,20 @@
 
 <main id="body" aria-live="polite"></main>
 
+<section class="live" id="live" aria-label="Arcanus's browser" hidden>
+  <div class="live-bar" id="live-bar">
+    <button type="button" class="icon-btn" id="live-back" aria-label="Back" title="Back" data-icon="arrow-left"></button>
+    <button type="button" class="icon-btn" id="live-forward" aria-label="Forward" title="Forward" data-icon="arrow-right"></button>
+    <button type="button" class="icon-btn" id="live-reload" aria-label="Reload" title="Reload" data-icon="rotate-cw"></button>
+    <span class="address truncate" id="live-address"></span>
+    <a class="icon-btn" id="live-out" aria-label="Open in your browser" title="Open in your browser" data-icon="external-link"></a>
+  </div>
+  <div class="screen" id="screen-box"><img id="screen" alt="" tabindex="0" draggable="false" /></div>
+</section>
+
 <div class="actions" id="actions" hidden>
   <button type="button" class="btn" id="pin" title="Arcanus reads this page with every message until you remove it"></button>
   <button type="button" class="btn" id="save"></button>
-  <a class="icon-btn" id="tab" aria-label="Open in a new tab" title="Open in a new tab" data-icon="external-link"></a>
   <span class="status truncate" id="status" role="status"></span>
 </div>
 
@@ -593,13 +653,19 @@
   function draw() {
     const { view, loading, error, back, forward, here } = s.browser;
     const page = view?.kind === "page" ? view.page : null;
-    $("sub").textContent = page ? page.title : view?.kind === "results" ? `Web · ${view.engine}` : "Files first · ARC 1";
+    const isLive = !!(page && view.live && !loading && s.scope !== "files");
+    $("live").hidden = !isLive;
+    $("body").hidden = isLive;
+    drawLive();
+    $("sub").textContent = isLive ? L.title || page.title : page ? page.title : view?.kind === "results" ? `Web · ${view.engine}` : "Files first · ARC 1";
     if (document.activeElement !== $("query")) $("query").value = s.query;
     $("go").disabled = !s.query.trim();
     for (const el of document.querySelectorAll("[data-option]")) el.setAttribute("aria-pressed", String(!!s.options[el.dataset.option]));
     for (const el of document.querySelectorAll("[data-scope]")) el.setAttribute("aria-checked", String(s.scope === el.dataset.scope));
     for (const el of document.querySelectorAll("[data-glob]")) if (document.activeElement !== el) el.value = s.options[el.dataset.glob] ?? "";
 
+    // What you see here, in your own browser: the page, or the same search on DuckDuckGo (where the results come from).
+    const outside = page ? page.url : view?.kind === "results" ? `https://duckduckgo.com/?q=${encodeURIComponent(view.query)}` : "";
     let html = s.scope !== "web" && s.query.trim() ? filesView() : "";
     if (WHY[s.web]) html += `<p class="why">${WHY[s.web]}</p>`;
     if (s.scope !== "files" && (view || loading || error)) {
@@ -607,6 +673,7 @@
         <button type="button" class="icon-btn" data-step="-1" aria-label="Back"${back ? "" : " disabled"}>${icon("arrow-left", 14)}</button>
         <button type="button" class="icon-btn" data-step="1" aria-label="Forward"${forward ? "" : " disabled"}>${icon("arrow-right", 14)}</button>
         <button type="button" class="icon-btn" id="reload" aria-label="Reload"${here ? "" : " disabled"}>${icon("rotate-cw", 13)}</button>
+        ${outside ? `<a class="icon-btn" href="${esc(outside)}" aria-label="Open in your browser" title="Open in your browser">${icon("external-link", 13)}</a>` : ""}
       </span></h3>${webView()}</section>`;
     }
     $("body").innerHTML = html;
@@ -614,16 +681,16 @@
 
     $("actions").hidden = !page || s.scope === "files";
     if (page) {
-      const reading = s.reading === page.url;
+      const reading = s.reading === (isLive ? L.url || page.url : page.url);
       $("pin").setAttribute("aria-pressed", String(reading));
       $("pin").innerHTML = `${icon("message-square-text", 14)} ${reading ? "Arcanus is reading this" : "Ask Arcanus"}`;
       $("save").innerHTML = `${icon("save", 14)} Save`;
-      $("tab").href = page.url;
     }
   }
 
   $("body").addEventListener("click", (e) => {
     const at = e.target.closest("[data-go], [data-open], [data-fold], [data-step], #reload");
+    // ↗ falls through to the seal, which opens it in a tab of your browser.
     if (!at) return;
     e.preventDefault(); // a link here opens in the reader, not a tab
     if (at.dataset.go !== undefined) arcanus.call("web.go", at.href).catch(() => {});
@@ -637,18 +704,90 @@
 
   let shownPage = null;
   const page = () => (s.browser.view?.kind === "page" ? s.browser.view.page : null);
-  $("pin").addEventListener("click", () => {
-    const p = page();
+  // The page as it is: in the live browser it may have moved on since it opened, so it is read again.
+  const current = () => (s.browser.view?.live ? arcanus.call("live.read") : Promise.resolve(page()));
+  $("pin").addEventListener("click", async () => {
+    const p = await current().catch(() => null);
     if (p) arcanus.call("chat.pin", s.reading === p.url ? null : { label: p.title, text: plain(p.text), href: p.url }).catch(() => {});
   });
   $("save").addEventListener("click", async () => {
-    const p = page();
-    if (!p) return;
     try {
+      const p = await current();
+      if (!p) return;
       $("status").textContent = `Saved ${await arcanus.call("file.save", p.title, `# ${p.title}\n\n${p.url}\n\n${plain(p.text)}\n`)}`;
     } catch (err) {
       $("status").textContent = err.message;
     }
+  });
+
+  // —— The live browser ——
+  let L = { frame: "", url: "", title: "", back: false, forward: false, loading: false };
+  let shownFrame = "";
+  function drawLive() {
+    if ($("live").hidden) return;
+    $("live-address").textContent = L.url.replace(/^https?:\/\/(www\.)?/, "");
+    $("live-address").title = L.url;
+    $("live-out").href = L.url || "about:blank";
+    $("live-bar").toggleAttribute("data-loading", L.loading);
+    $("live-back").disabled = !L.back && !s.browser.back; // past the page's first, back goes to the results
+    $("live-forward").disabled = !L.forward;
+  }
+  arcanus.on("live", (state) => {
+    L = state;
+    if (L.frame && L.frame !== shownFrame) $("screen").src = `data:image/jpeg;base64,${(shownFrame = L.frame)}`;
+    drawLive();
+    if (!$("live").hidden) $("sub").textContent = L.title || $("sub").textContent;
+  });
+  arcanus.call("live.watch").catch(() => {});
+  $("live-back").addEventListener("click", () => (L.back ? arcanus.call("live.nav", "back") : arcanus.call("web.step", -1)));
+  $("live-forward").addEventListener("click", () => arcanus.call("live.nav", "forward"));
+  $("live-reload").addEventListener("click", () => arcanus.call("live.nav", "reload"));
+
+  // The page is as big as its box here, so a point on the picture is the same point on the page.
+  let sizing = 0;
+  new ResizeObserver(([entry]) => {
+    const { width, height } = entry.contentRect;
+    clearTimeout(sizing);
+    if (width > 0 && height > 0) sizing = setTimeout(() => arcanus.call("live.resize", width, height, devicePixelRatio), 120);
+  }).observe($("screen-box"));
+
+  const screen = $("screen");
+  const BUTTON = ["left", "middle", "right"];
+  const mods = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+  const mouse = (type, e, extra = {}) =>
+    arcanus.call("live.input", { action: "mouse", type, x: e.offsetX, y: e.offsetY, modifiers: mods(e), buttons: e.buttons, ...extra }).catch(() => {});
+  screen.addEventListener("mousedown", (e) => {
+    screen.focus();
+    mouse("mousePressed", e, { button: BUTTON[e.button] ?? "left", clickCount: e.detail || 1 });
+  });
+  screen.addEventListener("mouseup", (e) => mouse("mouseReleased", e, { button: BUTTON[e.button] ?? "left", clickCount: e.detail || 1 }));
+  let moving = 0;
+  screen.addEventListener("mousemove", (e) => {
+    if (moving) return;
+    moving = requestAnimationFrame(() => (moving = 0)); // one move a frame is all a page can show
+    mouse("mouseMoved", e, { button: e.buttons & 1 ? "left" : "none" });
+  });
+  screen.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    mouse("mouseWheel", e, { deltaX: e.deltaX, deltaY: e.deltaY });
+  }, { passive: false });
+  screen.addEventListener("contextmenu", (e) => e.preventDefault());
+  const key = (type, e) => {
+    if (e.isComposing) return;
+    e.preventDefault();
+    const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey;
+    const text = type === "keyDown" ? (printable ? e.key : e.key === "Enter" ? "\r" : undefined) : undefined;
+    arcanus.call("live.input", { action: "key", type: type === "keyDown" && !text ? "rawKeyDown" : type, key: e.key, code: e.code, keyCode: e.keyCode, modifiers: mods(e), text }).catch(() => {});
+  };
+  screen.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return; // pasting is the paste event's
+    key("keyDown", e);
+  });
+  screen.addEventListener("keyup", (e) => key("keyUp", e));
+  screen.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const text = e.clipboardData?.getData("text/plain");
+    if (text) arcanus.call("live.input", { action: "text", text }).catch(() => {});
   });
 
   arcanus.on("search", (state) => {

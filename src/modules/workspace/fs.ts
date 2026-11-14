@@ -13,14 +13,16 @@
 // The root is either Arcanus's private home in this browser (the Origin Private File System, every browser) or a
 // folder on this device you open (File System Access API, Chrome and Edge). Nothing here leaves the device.
 // .arcanus/source is not in either: it is mounted from the server Arcanus runs from, at localhost only, so the same
-// list, read, write, rename and remove work on the code that is running.
+// list, read, write, rename and remove work on the code that is running. So is This PC, beside .arcanus: the
+// computer's own drives (C:, D: …), every folder on them, from the same server.
 // ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Operating System.
 import { scopedHome, scopedKey } from "@/modules/account";
 import { BUILT_IN_GUARDRAILS, parseAgents, parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
 import { kept } from "@/shared/idb";
 import { Store, errorText } from "@/shared/store";
 import { plainLinks } from "./links";
-import { connectSource, source, sourceFs, sourceGit } from "./source";
+import { PC } from "./command";
+import { connectSource, pcFs, source, sourceFs, sourceGit } from "./source";
 
 type Dir = FileSystemDirectoryHandle;
 type Permissioned = Dir & {
@@ -29,7 +31,8 @@ type Permissioned = Dir & {
   values(): AsyncIterable<FileSystemHandle>;
 };
 
-export type Entry = { name: string; kind: "file" | "directory" };
+/** `free` and `total`, in bytes, on a drive of This PC. */
+export type Entry = { name: string; kind: "file" | "directory"; free?: number; total?: number };
 export type Skill = SkillFile & { path: string };
 
 export const HOME = ".arcanus";
@@ -37,6 +40,7 @@ export const HOME = ".arcanus";
 export const SOURCE = `${HOME}/source`;
 /** Arcanus's guardrails: built-in.md (the ones in its code) and rules.md (yours, read before every reply). */
 export const GUARDRAILS = `${HOME}/guardrails`;
+export { PC };
 const MAX_READ = 2_000_000;
 
 export const workspace = new Store({
@@ -135,30 +139,40 @@ const missing = (err: unknown) => err instanceof DOMException && (err.name === "
 
 const tidy = (path: string) => path.split("/").filter(Boolean).join("/");
 /** A path's place inside Arcanus's source ("" is its root) when the path is under .arcanus/source, otherwise null. */
-function inSource(path: string) {
+export function inSource(path: string) {
   const clean = tidy(path);
   return clean === SOURCE ? "" : clean.startsWith(`${SOURCE}/`) ? clean.slice(SOURCE.length + 1) : null;
+}
+/** A path on the computer's disk, and the operations that reach it: in the source, or on This PC ("" is This PC
+ *  itself, its drives). Null for a path in a browser folder. */
+export function onDisk(path: string) {
+  const clean = tidy(path);
+  const src = inSource(clean);
+  if (src !== null) return { at: src, on: sourceFs, pc: false };
+  if (clean === PC || clean.startsWith(`${PC}/`)) return { at: clean.slice(PC.length + 1), on: pcFs, pc: true };
+  return null;
 }
 /** "source/src/app" is short for ".arcanus/source/src/app": what the chat's file commands accept. */
 export const expand = (path: string) => tidy(path).replace(/^source(?=\/|$)/, SOURCE);
 
 export async function list(path = ""): Promise<Entry[]> {
-  const src = inSource(path);
+  const disk = onDisk(path);
   const entries: Entry[] = [];
-  if (src !== null) entries.push(...(await sourceFs.list(src)));
+  if (disk) entries.push(...(await disk.on.list(disk.at)));
   else {
     const dir = (await dirAt(parts(path), false)) as Permissioned;
     for await (const handle of dir.values()) entries.push({ name: handle.name, kind: handle.kind });
     // The source is mounted here, not stored here: it shows beside Arcanus's other files.
     if (source.state.available && tidy(path) === HOME && !entries.some((e) => e.name === "source")) entries.push({ name: "source", kind: "directory" });
+    if (source.state.available && !tidy(path) && !entries.some((e) => e.name === PC)) entries.push({ name: PC, kind: "directory" });
   }
   return entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
 }
 
 /** A file's text, or null when it isn't there. */
 export async function read(path: string): Promise<string | null> {
-  const src = inSource(path);
-  if (src !== null) return src ? sourceFs.read(src) : null;
+  const disk = onDisk(path);
+  if (disk) return disk.at ? disk.on.read(disk.at) : null;
   const names = parts(path);
   const name = names.pop();
   if (!name) return null;
@@ -173,8 +187,8 @@ export async function read(path: string): Promise<string | null> {
 }
 
 export async function write(path: string, text: string) {
-  const src = inSource(path);
-  if (src !== null) await sourceFs.write(src, text);
+  const disk = onDisk(path);
+  if (disk) await disk.on.write(disk.at, text);
   else {
     const names = parts(path);
     const name = names.pop();
@@ -188,15 +202,15 @@ export async function write(path: string, text: string) {
 }
 
 export async function makeFolder(path: string) {
-  const src = inSource(path);
-  if (src !== null) await sourceFs.makeFolder(src);
+  const disk = onDisk(path);
+  if (disk) await disk.on.makeFolder(disk.at);
   else await dirAt(parts(path), true);
   changed();
 }
 
 export async function remove(path: string) {
-  const src = inSource(path);
-  if (src !== null) await sourceFs.remove(src);
+  const disk = onDisk(path);
+  if (disk) await disk.on.remove(disk.at);
   else {
     const names = parts(path);
     const name = names.pop();
@@ -206,10 +220,10 @@ export async function remove(path: string) {
   changed();
 }
 
-/** Rename or move. In the source, anything; in a browser folder, a text file. */
+/** Rename or move. Within the source or within This PC, anything; otherwise a text file. */
 export async function rename(from: string, to: string) {
-  const [a, b] = [inSource(from), inSource(to)];
-  if (a !== null && b !== null) await sourceFs.rename(a, b);
+  const [a, b] = [onDisk(from), onDisk(to)];
+  if (a && b && a.on === b.on) await a.on.rename(a.at, b.at);
   else {
     // ponytail: a browser folder has no rename that every browser supports, so the file is copied as text and the
     // old one removed. Folders and files that aren't text stay put; use handle.move() once it covers them everywhere.
@@ -424,7 +438,7 @@ async function readSkills() {
   if (mine === reading) workspace.set({ skills, agents, brief });
 }
 
-function changed() {
+export function changed() {
   workspace.set({ version: workspace.state.version + 1 });
   void readSkills();
 }

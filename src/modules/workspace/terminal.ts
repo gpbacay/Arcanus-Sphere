@@ -5,11 +5,39 @@
 // is a single action you asked for; Arcanus never chains them on its own.
 // The language model is not in here. SmolLM2 is far too small to write working code, so Arcanus edits its code with
 // exact text: yours in the editor, or /write and /replace. Add a model-written edit when a model that can code is on board.
-import { chatLine, pin } from "@/shared/pane";
+import { go } from "@/modules/web";
+import { chatLine, openArtifact, pin } from "@/shared/pane";
 import { redirect, resolve, words, type SourceCommand } from "./command";
-import { GUARDRAILS, HOME, SOURCE, expand, git, list, makeFolder, read, remove, rename, write } from "./fs";
+import { GUARDRAILS, HOME, PC, SOURCE, changed, expand, git, list, makeFolder, onDisk, read, remove, rename, write } from "./fs";
 import { closeTab, ide, openDir, openFile } from "./ide";
-import { searchSource, source, sourceFiles, sourceGit } from "./source";
+import { runShell, searchSource, source, sourceFiles, sourceGit } from "./source";
+
+/**
+ * Open an HTML file, and say where it went. One of my artifacts (.arcanus/artifacts/) opens as its tab in the
+ * Artifacts pane: it draws with my colours and fonts and works through my bridge, which a plain browser doesn't have.
+ * Any other page opens in my browser: from the disk when it is there (my source, This PC), so its css and scripts load
+ * with it, otherwise as the page it holds. A page written as an artifact gets my colours and fonts handed in, as the
+ * Artifacts pane does, so it looks as it should (what it asks Arcanus for gets no answer there).
+ */
+export async function browseFile(path: string): Promise<string> {
+  const artifact = expand(path).match(new RegExp(`^${HOME.replace(".", "\\.")}/artifacts/([^/]+\\.html?)$`, "i"));
+  if (artifact) {
+    if ((await read(expand(path))) === null) throw new Error(`${path} isn't a file.`);
+    openArtifact(artifact[1]);
+    return "the Artifacts pane";
+  }
+  const text = await read(path);
+  if (text === null) throw new Error(`${path} isn't a file.`);
+  const bridged = /\barcanus\.(?:call|on)\(/.test(text);
+  const disk = onDisk(path);
+  if (disk?.at && !bridged) await go(`${disk.pc ? "disk" : "file"}:${disk.at}`);
+  else {
+    // Loaded when needed: the artifacts module imports this one, so a static import would be a cycle.
+    const head = bridged ? await (await import("@/modules/artifacts")).seal() : "";
+    await go(`data:text/html;charset=utf-8,${encodeURIComponent(head + text)}`);
+  }
+  return "my browser";
+}
 
 export const FILE_COMMANDS = [
   { name: "/source", hint: "Open my own source code, and say what state it is in" },
@@ -133,7 +161,10 @@ export function fileCommand(name: string, arg: string, cwd = ""): (() => Promise
 export type Result = { out: string; cwd?: string; clear?: boolean; exit?: boolean };
 
 /** A folder as the prompt shows it: arcanus:\.arcanus\source> */
-export const promptOf = (cwd: string) => `arcanus:\\${cwd.replace(/\//g, "\\")}>`;
+export const promptOf = (cwd: string) => {
+  const drive = cwd.match(/^This PC\/([A-Z]:)(.*)$/); // a folder on This PC shows as cmd shows it: C:\Users>
+  return drive ? `${drive[1]}\\${drive[2].slice(1).replace(/\//g, "\\")}>` : `arcanus:\\${cwd.replace(/\//g, "\\")}>`;
+};
 const shown = (path: string) => promptOf(path).slice(0, -1);
 
 const HELP: [string, string][] = [
@@ -149,6 +180,7 @@ const HELP: [string, string][] = [
   ["MOVE", "Moves a file."],
   ["RD", "Removes a folder. /S removes what is in it too."],
   ["REN", "Renames a file."],
+  ["START", "Opens a file: a page (.html) in my browser, anything else in my editor."],
   ["TIME", "Shows the time."],
   ["TYPE", "Shows what is in a file."],
   ["VER", "Shows what this is."],
@@ -160,10 +192,12 @@ const HELP: [string, string][] = [
   ["GIT", "Runs git on my source."],
   ["SOURCE", "Opens my source code, and says what state it is in."],
 ];
+/** On the disk (my source, This PC), a line none of the above takes runs in this computer's own shell. */
+const SHELL = "In source\\ and on This PC (cd C:\\), anything else runs in the computer's own shell: npm i, npm run dev, node, python. Ctrl+C stops it.";
 /** What the terminal runs: the builtins above, and my own programs, which are the file commands of the chat. */
 const PROGRAMS = ["open", "read", "write", "replace", "find", "git", "source"];
 const NAMES = HELP.map(([n]) => n.toLowerCase());
-const PROTECTED = [HOME, SOURCE, GUARDRAILS];
+const PROTECTED = [HOME, SOURCE, GUARDRAILS, PC];
 const NO_FILE = "The system cannot find the file specified.";
 const NO_PATH = "The system cannot find the path specified.";
 
@@ -171,7 +205,7 @@ const isFolder = (path: string) => list(path).then(() => true, () => false);
 const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
 const nameOf = (path: string) => path.split("/").pop() ?? path;
 const guarded = (path: string) => {
-  if (!path || PROTECTED.includes(path)) throw new Error("Access is denied.");
+  if (!path || PROTECTED.includes(path) || dirOf(path) === PC) throw new Error("Access is denied."); // a drive is never deleted
 };
 
 /** The commands cmd has, on Arcanus's files. Null when `name` isn't one of them. */
@@ -198,7 +232,17 @@ async function builtin(name: string, arg: string, cwd: string): Promise<Result |
     case "time":
       return { out: `${flags.has("/t") ? "" : "The current time is: "}${new Date().toLocaleTimeString()}` };
     case "help":
-      return { out: `For more on a command, see its line here.\n${HELP.map(([n, d]) => `${n.padEnd(8)} ${d}`).join("\n")}\nThe other commands of the chat start with /, like /remember: they go to the chat.` };
+      return { out: `For more on a command, see its line here.\n${HELP.map(([n, d]) => `${n.padEnd(8)} ${d}`).join("\n")}\n${SHELL}\nThe other commands of the chat start with /, like /remember: they go to the chat.` };
+    case "start": {
+      if (!rest) throw new Error("The syntax of the command is incorrect.");
+      const path = at(rest.replace(/^"|"$/g, ""));
+      if ((await read(path)) === null) throw new Error(NO_FILE);
+      if (/\.html?$/i.test(path)) {
+        return { out: `Opened ${nameOf(path)} in ${await browseFile(path)}.` };
+      }
+      await openFile(path);
+      return { out: `Opened ${nameOf(path)} in my editor.` };
+    }
     case "echo":
       return { out: arg === "." ? "" : arg || "ECHO is on." }; // "echo." is the blank line
     case "dir": {
@@ -285,8 +329,9 @@ async function builtin(name: string, arg: string, cwd: string): Promise<Result |
 /**
  * A line typed in the Operating System's terminal, run as cmd would on Arcanus's files, in the folder `cwd`. A line
  * starting with / is the chat's: a file command like /ls runs here, anything else (a /skill, /remember) goes to the chat.
+ * Under the source, a line no command here takes runs in the computer's shell, its output going to `out` as it comes.
  */
-export async function runLine(typed: string, cwd: string): Promise<Result> {
+export async function runLine(typed: string, cwd: string, out?: (text: string) => void, signal?: AbortSignal): Promise<Result> {
   const line = typed.trim();
   if (line.startsWith("/")) {
     const [first, ...rest] = line.split(/\s+/);
@@ -305,7 +350,13 @@ export async function runLine(typed: string, cwd: string): Promise<Result> {
     const run = fileCommand(`/${name}`, arg, cwd);
     if (run) result = { out: await run() };
   }
-  if (!result) throw new Error(`'${m?.[1] ?? command.split(/\s/)[0]}' is not recognized as an internal or external command,\noperable program or batch file.`);
+  const disk = onDisk(cwd);
+  if (!result && disk && (disk.at || !disk.pc) && source.state.available && out && signal) {
+    await runShell(disk.at, line, out, signal, disk.pc); // the whole line: the shell does its own > and 2>&1
+    changed(); // npm i, a build: the files may be different now
+    return { out: "" };
+  }
+  if (!result) throw new Error(`'${m?.[1] ?? command.split(/\s/)[0]}' is not recognized as an internal or external command,\noperable program or batch file.${source.state.available ? "\nPrograms like npm and node run in source\\ and on This PC (cd C:\\)." : ""}`);
   if (to) {
     const file = expand(resolve(cwd, to));
     guarded(file);

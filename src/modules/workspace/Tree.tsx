@@ -3,11 +3,11 @@
 // The Operating System's explorer, as an editor's: the folder as a tree, folders opening in place with a chevron, a
 // guide line for each level, an icon for each kind of file, and git's marks on what changed in Arcanus's source (the
 // letter on a file, a dot on each folder above it).
-import { ChevronRight, EllipsisVertical, File, FileCode, FileImage, FileJson, FileText, Folder, FolderOpen, Pencil, Trash2, type LucideIcon } from "lucide-react";
+import { ChevronRight, EllipsisVertical, File, FileCode, FileImage, FileJson, FileText, Folder, FolderOpen, HardDrive, Monitor, Pencil, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { errorText, useStore } from "@/shared/store";
 import { PopMenu } from "@/shared/ui/pop-menu";
-import { SOURCE, list, workspace, type Entry } from "./fs";
+import { PC, SOURCE, list, workspace, type Entry } from "./fs";
 import { ide } from "./ide";
 import { source, sourceGit } from "./source";
 
@@ -24,6 +24,9 @@ const iconOf = (name: string): LucideIcon =>
 /** The letter an editor shows: an untracked file is U, a conflict ! (git's own U). */
 const LETTER: Record<string, string> = { "?": "U", U: "!" };
 const WHAT: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed", "?": "untracked", U: "in conflict" };
+
+/** Bytes as the computer's own explorer counts them: 49.5 GB. */
+const gb = (bytes = 0) => `${(bytes / 2 ** 30).toFixed(1)} GB`;
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (path: string) => path.split("/").slice(0, -1).join("/");
@@ -102,14 +105,15 @@ export function Tree({ root, fresh, kept, onOpen, onRename, onDelete, onError }:
       const folder = entry.kind === "directory";
       const isOpen = folder && open.has(path);
       const mark = marks[path];
-      const Icon = folder ? (isOpen ? FolderOpen : Folder) : iconOf(entry.name);
+      const drive = entry.total !== undefined; // a drive of This PC
+      const Icon = path === PC ? Monitor : drive ? HardDrive : folder ? (isOpen ? FolderOpen : Folder) : iconOf(entry.name);
       const why = kept(path);
       return [
         <li key={path} data-path={path} data-folder={folder || undefined} data-git={mark}>
           <button
             type="button"
             className="tree-row"
-            title={mark && mark !== "folder" ? `${path} · ${WHAT[mark] ?? mark}` : path}
+            title={drive ? `${entry.name} · ${gb(entry.free)} free of ${gb(entry.total)}` : mark && mark !== "folder" ? `${path} · ${WHAT[mark] ?? mark}` : path}
             aria-expanded={folder ? isOpen : undefined}
             aria-current={path === active || undefined}
             data-selected={path === selected || undefined}
@@ -120,7 +124,8 @@ export function Tree({ root, fresh, kept, onOpen, onRename, onDelete, onError }:
             ))}
             <ChevronRight size={12} className="tree-chev" aria-hidden data-open={isOpen || undefined} style={folder ? undefined : { visibility: "hidden" }} />
             <Icon size={14} className="tree-icon" aria-hidden />
-            <span className="truncate">{entry.name}</span>
+            <span className="truncate">{drive ? `Local Disk (${entry.name})` : entry.name}</span>
+            {drive && entry.total ? <meter className="tree-meter" min={0} max={entry.total} value={entry.total - (entry.free ?? 0)} high={entry.total * 0.9} aria-label={`${gb(entry.free)} free of ${gb(entry.total)}`} /> : null}
             {mark === "folder" ? <span className="tree-dot" role="img" aria-label="has changes" /> : mark ? <span className="tree-git">{LETTER[mark] ?? mark}</span> : null}
           </button>
           <PopMenu

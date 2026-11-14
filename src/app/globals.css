@@ -1517,16 +1517,6 @@ textarea.field {
   .os-nav > .crumbs + .icon-btn {
     margin-left: auto; /* New file onward to the right, Back/Forward/Home on the left */
   }
-  /* Side by side has no room: the folders sit over the file, a third of the height. */
-  .os-pane[data-split] .ide {
-    flex-direction: column;
-  }
-  .os-pane[data-split] .ide > .explorer:not(:only-child) {
-    width: auto;
-    max-height: 35%;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
 }
 .os-status {
   display: flex;
@@ -1537,18 +1527,96 @@ textarea.field {
   font-size: 11px;
   color: var(--text-faint);
 }
+.os-status {
+  align-items: center;
+}
 .os-status span:first-child {
   flex: 1;
   min-width: 0;
 }
+.os-status .icon-btn {
+  width: auto;
+  height: 18px;
+  padding: 0 4px;
+  font: inherit;
+  color: inherit;
+}
+.os-status .icon-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
 /* The terminal: a panel along the foot of the pane, half its height to start and dragged by its top edge. A bar with
    the buttons, the screen where the prompt sits right after the last answer (each answer closed by a tick and how long
    it took), and, with several terminals open, a list of them down the right. */
+/* Four regions: the files on the left, the open file or the knowledge graph in the center, Changes and Git Graph down
+   the right from top to foot, and the terminal under the left and center only. */
+.os-body,
 .os-main {
   display: flex;
   flex: 1;
-  flex-direction: column;
   min-height: 0;
+}
+.os-work,
+.os-center {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.os-files {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+/* Beside the center, the files are as wide as their tree. */
+.os-files:not(:only-child) {
+  flex: none;
+  width: max-content;
+  min-width: 200px;
+  max-width: 40%;
+  border-right: 1px solid var(--line);
+}
+.os-files > .explorer {
+  flex: 1;
+}
+.os-center > .editor {
+  flex: 1;
+  min-height: 0;
+}
+.tab svg {
+  flex: none;
+}
+.os-side {
+  position: relative;
+  display: flex;
+  flex: 0 0 var(--side-w, 260px); /* about the file tree's width to start; its left edge drags */
+  flex-direction: column;
+  max-width: 70%;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+}
+@container (max-width: 520px) {
+  .os-body,
+  .os-main {
+    flex-direction: column;
+  }
+  .os-files:not(:only-child) {
+    width: auto;
+    max-width: none;
+    max-height: 35%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .os-side > .grip {
+    display: none;
+  }
+  .os-side {
+    flex-basis: 40%;
+    max-width: none;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
 }
 .term-panel {
   position: relative;
@@ -1722,20 +1790,6 @@ textarea.field {
   opacity: 1;
 }
 
-/* The IDE: open files as tabs, the folder, and the code editor. Wide, the pane covers the stage and shows both. */
-.ide {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-.ide > .pane-body {
-  min-width: 0;
-}
-.os-pane[data-split] .ide > .explorer:not(:only-child) {
-  flex: none;
-  width: 240px;
-  border-right: 1px solid var(--line);
-}
 .tabs {
   display: flex;
   overflow-x: auto;
@@ -1786,9 +1840,53 @@ textarea.field {
   border-color: var(--accent);
 }
 
-/* Source control, as an editor lays it out: the branch and its sync, then sections that fold (Changes, Graph, GitHub). */
+/* Version control beside the terminal: the branch and its sync, then sections that fold (Changes, Git Graph, GitHub). */
 .scm {
-  padding-top: 4px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 12px 0;
+  overflow: auto; /* the Git Graph alone, at its full length */
+}
+/* Changes, a diff and GitHub scroll together; the Git Graph under them keeps its height, dragged by its top edge. */
+.scm-scroll {
+  margin: 0 -12px;
+  padding-top: 0;
+}
+.scm-graph-section {
+  position: relative;
+  flex: none;
+}
+.scm-graph-section .scm-graph {
+  overflow: auto;
+}
+/* A bar along an edge to drag, as the terminal's top edge is. */
+.grip {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+.grip[aria-orientation="horizontal"] {
+  top: -3px;
+  right: 0;
+  left: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+.grip[aria-orientation="vertical"] {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.grip:hover,
+.grip:focus-visible,
+.grip:active {
+  background: var(--accent);
+  box-shadow: none;
+  outline: none;
 }
 .scm-sync,
 .scm-account,
@@ -3056,6 +3154,13 @@ button.md-wiki:hover {
   font-size: 11px;
   font-weight: 600;
   text-align: center;
+}
+/* A drive of This PC: how full it is, as the computer's own explorer shows it. */
+.tree-meter {
+  flex: none;
+  width: 44px;
+  height: 6px;
+  margin: 0 4px;
 }
 .tree-dot {
   flex: none;
