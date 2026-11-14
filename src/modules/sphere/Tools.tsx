@@ -1,35 +1,32 @@
 "use client";
 
-import { EllipsisVertical, Move3d, Orbit, Power, RotateCcw, Rotate3d, Scale3d, View } from "lucide-react";
+import { Move3d, Orbit, PencilRuler, Power, RotateCcw, Rotate3d, Scale3d, View } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
 import { TOP_ACTIONS } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { useStore } from "@/shared/store";
+import { PopMenu, type PopItem } from "@/shared/ui/pop-menu";
 import type { Tool } from "./SphereScene";
 
 const ArDialog = dynamic(() => import("./ArDialog"), { ssr: false });
 
-const TOOLS = [
-  { id: "view", label: "Orbit the camera", Icon: Orbit },
-  { id: "move", label: "Move the orb", Icon: Move3d },
-  { id: "rotate", label: "Rotate the orb", Icon: Rotate3d },
-  { id: "scale", label: "Resize the orb", Icon: Scale3d },
+const EDITS = [
+  { id: "move", label: "Move the orb", icon: Move3d },
+  { id: "rotate", label: "Rotate the orb", icon: Rotate3d },
+  { id: "scale", label: "Resize the orb", icon: Scale3d },
 ] as const;
 
 /**
- * The studio's toolbar, folded behind one ⋮ button at the right end of the top bar: switch Arcanus on or off, pick how a drag acts
- * on the orb, see it in AR, and, once the orb has been moved, rotated or resized, put it back.
+ * The studio's toolbar, at the right end of the top bar: switch Arcanus on or off, orbit the camera, edit the orb (move, rotate,
+ * resize, or put it back, behind one button), and see it in AR.
  */
 export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDraw: boolean; tool: Tool; onTool: (tool: Tool) => void; edited: boolean; onReset: () => void }) {
   const mobile = useIsMobile();
-  const menuId = useId();
-  const [open, setOpen] = useState(false);
   const [qr, setQr] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   const on = useStore(power, (s) => s.on);
   const changing = useStore(power, (s) => s.changing);
 
@@ -42,70 +39,42 @@ export function SphereTools({ canDraw, tool, onTool, edited, onReset }: { canDra
     if (found !== slot) setSlot(found);
   });
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => !ref.current?.contains(event.target as Node) && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [open]);
-
-  const pick = (fn: () => void) => () => {
-    fn();
-    setOpen(false);
-  };
+  const editing = tool !== "view";
+  const edits: PopItem[] = [
+    ...EDITS.map(({ id, label, icon }) => ({ label, icon, checked: tool === id, run: () => onTool(id) })),
+    ...(edited ? [{ label: "Undo changes to the orb", icon: RotateCcw, run: onReset }] : []),
+  ];
 
   if (!slot) return null;
   return createPortal(
-    <div className="stage-tools" ref={ref} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+    <div className="stage-tools">
       <button
         type="button"
         className="icon-btn power-btn"
         data-changing={changing || undefined}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={menuId}
-        aria-label="Arcanus and 3D orb tools"
-        title="Arcanus and 3D orb tools"
-        onClick={() => setOpen((v) => !v)}
+        aria-pressed={on}
+        aria-label={on ? "Turn Arcanus off" : "Turn Arcanus on"}
+        title={on ? "Turn Arcanus off" : "Turn Arcanus on"}
+        onClick={() => setPower(!on)}
       >
-        <EllipsisVertical size={18} />
+        <Power size={17} />
       </button>
-      {open ? (
-        <div id={menuId} role="menu" className="menu tools-menu" aria-label="Arcanus and 3D orb tools">
-          <button type="button" role="menuitemcheckbox" aria-checked={on} className="menu-item" onClick={pick(() => setPower(!on))}>
-            <span>{on ? "Turn Arcanus off" : "Turn Arcanus on"}</span>
-            <Power size={16} />
+      {canDraw ? (
+        <>
+          <button type="button" className="icon-btn" aria-pressed={!editing} aria-label="Orbit the camera" title="Orbit the camera" onClick={() => onTool("view")}>
+            <Orbit size={17} />
           </button>
-          {canDraw ? (
-            <>
-              <div className="menu-sep" />
-              {TOOLS.map(({ id, label, Icon }) => (
-                <button key={id} type="button" role="menuitemradio" aria-checked={tool === id} className="menu-item" onClick={pick(() => onTool(id))}>
-                  <span>{label}</span>
-                  <Icon size={16} />
-                </button>
-              ))}
-              {edited ? (
-                <button type="button" role="menuitem" className="menu-item" onClick={pick(onReset)}>
-                  <span>Undo changes to the orb</span>
-                  <RotateCcw size={16} />
-                </button>
-              ) : null}
-              <div className="menu-sep" />
-              {mobile ? (
-                <Link href="/ar" role="menuitem" className="menu-item">
-                  <span>View in AR</span>
-                  <View size={16} />
-                </Link>
-              ) : (
-                <button type="button" role="menuitem" className="menu-item" onClick={pick(() => setQr(true))}>
-                  <span>View in AR</span>
-                  <View size={16} />
-                </button>
-              )}
-            </>
-          ) : null}
-        </div>
+          <PopMenu label="Edit the orb" title="Edit the orb: move, rotate or resize it" className={editing ? "tool-on" : ""} trigger={<PencilRuler size={17} />} items={edits} />
+          {mobile ? (
+            <Link href="/ar" className="icon-btn" aria-label="View in AR" title="View in AR">
+              <View size={17} />
+            </Link>
+          ) : (
+            <button type="button" className="icon-btn" aria-label="View in AR" title="View in AR" onClick={() => setQr(true)}>
+              <View size={17} />
+            </button>
+          )}
+        </>
       ) : null}
       {qr && <ArDialog onClose={() => setQr(false)} />}
     </div>,

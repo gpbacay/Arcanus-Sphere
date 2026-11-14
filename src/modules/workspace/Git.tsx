@@ -6,6 +6,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronDown, Cloud, CloudUpload, ExternalLink, FileCode, GitBranch, RefreshCw, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { errorText, useStore } from "@/shared/store";
+import { Info } from "@/shared/ui/info";
 import { PopMenu } from "@/shared/ui/pop-menu";
 import { SOURCE, git, remove, workspace } from "./fs";
 import { lanes, type Row } from "./graph";
@@ -363,10 +364,15 @@ function GitHub() {
           })();
         }}
       >
-        <p className="pane-note">
-          {account.stale ? "The GitHub sign-in this computer's git had no longer works. " : ""}Connect your GitHub to push Arcanus&apos;s code to your own repository. Make a token with
-          the <code>repo</code> scope; it is kept in git&apos;s credential store on this computer, the one your terminal uses, and never stored in this browser.
-        </p>
+        <div className="pane-note scm-intro">
+          <span>{account.stale ? "This computer's GitHub sign-in no longer works." : "Connect GitHub to push Arcanus's code."}</span>
+          <Info label="About the GitHub token">
+            <p>
+              Connect your GitHub to push Arcanus&apos;s code to your own repository. Make a token with the <code>repo</code> scope; it is kept in
+              git&apos;s credential store on this computer, the one your terminal uses, and never stored in this browser.
+            </p>
+          </Info>
+        </div>
         <a className="scm-link" href="https://github.com/settings/tokens/new?scopes=repo&description=Arcanus" target="_blank" rel="noreferrer">
           <ExternalLink size={13} aria-hidden /> Create a token on GitHub
         </a>

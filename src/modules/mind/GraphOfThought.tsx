@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, EllipsisVertical, Network, Trash2 } from "lucid
 import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePlace, type Section } from "@/shared/pane";
 import { useStore } from "@/shared/store";
+import { Info } from "@/shared/ui/info";
 import { PaneControls } from "@/shared/ui/pane-controls";
 import { processes, type Process, type Step } from "./layout";
 import { clearMind, mind, type Thought } from "./mind";
@@ -57,6 +58,12 @@ function GraphPane({ at, wide }: { at: Section | null; wide: boolean }) {
         <span className="pane-sub" aria-live="polite">
           {running ? `${running} running` : "idle"} · {thoughts.length} thoughts
         </span>
+        <Info label="About the Graph of Thought">
+          <p>
+            Arcanus&apos;s mind, live: what it hears, recalls, decides, writes, checks and says, as it happens. Each thought is a node of
+            ARCANE&apos;s Graph of Thought, and the thoughts it came from are its edges.
+          </p>
+        </Info>
         <GraphMenu />
         <button type="button" className="icon-btn" aria-label={min ? "Expand Graph of Thought" : "Minimize Graph of Thought"} title={min ? "Expand" : "Minimize"} aria-expanded={!min} onClick={() => setMin((v) => !v)}>
           {min ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
@@ -84,10 +91,7 @@ function GraphPane({ at, wide }: { at: Section | null; wide: boolean }) {
             {group("Conversation", all.filter((p) => !p.init))}
           </>
         ) : (
-          <p className="pane-note">
-            Arcanus&apos;s mind, live: what it hears, recalls, decides, writes, checks and says, as it happens. Each thought is a node of
-            ARCANE&apos;s Graph of Thought, and the thoughts it came from are its edges.
-          </p>
+          <p className="pane-note">No thoughts yet.</p>
         )}
       </div>
     </section>

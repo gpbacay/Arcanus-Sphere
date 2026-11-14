@@ -1024,7 +1024,7 @@ textarea.field {
   }
 }
 
-/* —— Top bar buttons: the mark, then the panes, the dialogs, and (last) the orb's ⋮ tools —— */
+/* —— Top bar buttons: the mark, then the panes, the dialogs, and (last) the orb's tools —— */
 .app-nav-brand {
   display: flex;
   align-items: center;
@@ -1363,7 +1363,7 @@ textarea.field {
   overflow-wrap: anywhere;
 }
 
-/* —— Top bar: the mark, every pane and dialog button, and the orb's ⋮ tools at the right end —— */
+/* —— Top bar: the mark, every pane and dialog button, and the orb's tools at the right end —— */
 .app-topbar {
   position: absolute;
   top: var(--gap);
@@ -1389,10 +1389,10 @@ textarea.field {
   padding-left: 6px;
   border-left: 1px solid var(--line);
 }
-/* 3D orb tools: one ⋮ button; sphere/Tools.tsx puts it in the top bar's slot. */
+/* 3D orb tools: power, orbit, edit (move/rotate/resize behind one menu) and AR; sphere/Tools.tsx puts them in the top bar's slot. */
 .stage-tools {
-  position: relative;
   display: flex;
+  gap: 2px;
 }
 .stage-tools .icon-btn {
   width: 36px;
@@ -1401,22 +1401,12 @@ textarea.field {
 .power-btn[data-changing] svg {
   animation: pulse 0.5s ease-in-out infinite;
 }
-.stage-tools .icon-btn[aria-expanded="true"] {
+.stage-tools .icon-btn[aria-pressed="true"]:not(.power-btn),
+.stage-tools .tool-on {
   background: var(--accent-soft);
   color: var(--accent);
 }
-/* The tools menu drops down from the ⋮ button, right-aligned with it. */
-.tools-menu {
-  left: auto;
-  right: 0;
-  width: 230px;
-  background: var(--glass-sheen), #0a0f16; /* solid: inside the top bar's glass a second blur doesn't apply, and a pane's text showed through the list */
-}
-.tools-menu .menu-item {
-  min-height: 34px;
-}
-.tools-menu .menu-item[aria-checked="true"] {
-  background: var(--accent-soft);
+.pop-menu .menu-item[aria-checked="true"] {
   color: var(--accent);
 }
 
@@ -1640,27 +1630,41 @@ textarea.field {
 .pop-menu .menu-item {
   justify-content: flex-start;
 }
-/* What is in .arcanus: behind the Operating System's info button, in the middle of the window. */
-.os-info {
+/* An ⓘ button's text (Info): instructions kept out of the pane, in the middle of the window. */
+.info-pop {
   position: fixed;
   inset: 0;
   width: min(360px, calc(100vw - 32px));
   height: fit-content;
+  max-height: calc(100dvh - 32px);
   margin: auto;
   padding: 12px 14px;
+  overflow-y: auto;
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-muted);
   background: var(--glass-sheen), #0a0f16;
 }
-.os-info:not(:popover-open) {
+.info-pop p {
+  margin: 0;
+}
+.info-pop p + p,
+.info-pop ul + p {
+  margin-top: 8px;
+}
+.scm-intro {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.info-pop:not(:popover-open) {
   display: none;
 }
-.os-info ul {
+.info-pop ul {
   margin: 6px 0 8px;
   padding-left: 16px;
 }
-.os-info code {
+.info-pop code {
   font-family: var(--font-mono);
   color: var(--text);
 }
@@ -1696,10 +1700,47 @@ textarea.field {
   width: 28px;
   height: 28px;
 }
+/* The path stays on one line and scrolls sideways, so it never runs under the buttons after it. */
 .os-nav .crumbs {
   flex: 1;
+  flex-wrap: nowrap;
   min-width: 0;
   margin: 0 0 0 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.os-nav .crumbs > * {
+  flex: none;
+}
+/* A narrow pane (a phone, or a slim section): the buttons in one row, the path on its own row under them. */
+.os-pane {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .os-nav {
+    flex-wrap: wrap;
+  }
+  .os-nav .crumbs {
+    order: 1;
+    flex-basis: 100%;
+    margin: 2px 0 0;
+    padding: 2px 4px;
+    border-top: 1px solid var(--line);
+  }
+  .os-nav > .crumbs + .icon-btn {
+    margin-left: auto; /* New file onward to the right, Back/Forward/Home on the left */
+  }
+  /* Side by side has no room: the folders sit over the file, a third of the height. */
+  .os-pane[data-split] .ide {
+    flex-direction: column;
+  }
+  .os-pane[data-split] .ide > .explorer:not(:only-child) {
+    width: auto;
+    max-height: 35%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }
 .os-status {
   display: flex;
@@ -2231,6 +2272,22 @@ textarea.field {
 }
 .editor .pane-actions {
   margin: 8px -12px -10px;
+}
+.icon-btn-primary {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.icon-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hot);
+  color: var(--accent-ink);
+  box-shadow: var(--accent-glow);
+}
+@media (hover: none) {
+  .pane-actions .icon-btn {
+    width: 34px;
+    height: 34px; /* a finger-sized target on touch screens */
+  }
 }
 .pane-actions .btn:disabled {
   opacity: 0.4;
@@ -2856,7 +2913,7 @@ textarea.field {
     height: 100dvh;
     padding-top: env(safe-area-inset-top);
   }
-  /* One strip across the top: the mark, every pane and dialog button, and the ⋮ at the right end. */
+  /* One strip across the top: the mark, every pane and dialog button, and the orb's tools at the right end. */
   .app-topbar {
     grid-area: nav;
     position: relative;
@@ -2864,7 +2921,7 @@ textarea.field {
     margin: 8px 8px 0;
     padding: 0 2px 0 8px;
     gap: 0;
-    z-index: 45; /* above a side pane (40), which covers the screen under the strip: the ⋮ menu drops over it */
+    z-index: 45; /* above a side pane (40), which covers the screen under the strip: the edit menu drops over it */
   }
   .app-nav-brand {
     margin-right: 2px;
@@ -2878,8 +2935,18 @@ textarea.field {
     margin-left: auto;
     padding-left: 2px;
   }
-  .app-nav-btn {
-    width: 36px;
+  /* Eleven buttons don't fit a phone at full size: smaller, and the strip scrolls sideways if the screen is narrower still. */
+  .app-topbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .app-topbar > *,
+  .stage-tools > * {
+    flex: none;
+  }
+  .app-nav-btn,
+  .stage-tools .icon-btn {
+    width: 32px;
     height: 36px;
   }
 

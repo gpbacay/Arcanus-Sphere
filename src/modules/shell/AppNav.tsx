@@ -15,7 +15,7 @@ type DialogName = "about" | "settings" | "account";
 
 /**
  * The top bar: the mark, then Arcanus's Graph of Thought, Operating System, search engine and world map (side panes), then Account, About
- * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's ⋮ tools.
+ * and Settings (dialogs), and at the right end a slot (TOP_ACTIONS) the studio fills with the orb's tools.
  */
 export function AppNav() {
   const [open, setOpen] = useState<DialogName | null>(null);

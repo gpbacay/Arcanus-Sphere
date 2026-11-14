@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, ChevronsDownUp, Code, Eye, FilePlus, FolderPlus, House, Info, MessageSquareText, Monitor, RotateCw, Save, Trash2, Waypoints, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronsDownUp, Code, Eye, FilePlus, FolderPlus, FolderTree, House, MessageSquareText, Monitor, RotateCw, Save, Trash2, Waypoints, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { chatLine, closePane, pin, toggleExpand, usePlace, type Section } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
 import { Breadcrumb, type Crumb } from "@/shared/ui/breadcrumb";
+import { Info } from "@/shared/ui/info";
 import { Markdown, WikiLinks } from "@/shared/ui/markdown";
 import { PaneControls } from "@/shared/ui/pane-controls";
 import { GUARDRAILS, HOME, SOURCE, addBooks, backToHome, canOpenFolder, makeFolder, openFolder, reconnect, remove, rename, workspace, write } from "./fs";
@@ -400,10 +401,7 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
           >
             <Waypoints size={15} />
           </button>
-          <button type="button" className="icon-btn" aria-label="What is in .arcanus" title="What is in .arcanus" popoverTarget="os-info">
-            <Info size={15} />
-          </button>
-          <div id="os-info" popover="auto" className="menu os-info">
+          <Info label="What is in .arcanus">
             <p>
               Arcanus keeps its own files in <code>.arcanus/</code>:
             </p>
@@ -419,7 +417,7 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
             <p>
               Write <code>[[a note&apos;s name]]</code> in a note to link it to another; the graph button shows the links, and Arcanus reads a note&apos;s links with it.
             </p>
-          </div>
+          </Info>
         </div>
       ) : null}
       <input
@@ -481,28 +479,36 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
                 )}
                 <div className="pane-actions">
                   {split ? null : (
-                    <button type="button" className="btn" onClick={() => ide.set({ active: "" })}>
-                      Files
+                    <button type="button" className="icon-btn" aria-label="Files" title="Files" onClick={() => ide.set({ active: "" })}>
+                      <FolderTree size={15} />
                     </button>
                   )}
                   {/\.(md|markdown)$/i.test(tab.path) ? (
-                    <button type="button" className="btn" aria-pressed={!!tab.preview} title={tab.preview ? "Back to the text" : "See it as it reads"} onClick={() => togglePreview(tab.path)}>
-                      {tab.preview ? <Code size={14} aria-hidden /> : <Eye size={14} aria-hidden />} {tab.preview ? "Edit" : "Preview"}
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-pressed={!!tab.preview}
+                      aria-label="Preview"
+                      title={tab.preview ? "Back to the text" : "Preview: see it as it reads"}
+                      onClick={() => togglePreview(tab.path)}
+                    >
+                      {tab.preview ? <Code size={15} /> : <Eye size={15} />}
                     </button>
                   ) : null}
                   <button
                     type="button"
-                    className="btn"
-                    title="Arcanus reads this file with every message until you remove it"
+                    className="icon-btn"
+                    aria-label="Ask Arcanus about this file"
+                    title="Ask Arcanus: it reads this file with every message until you remove it"
                     onClick={() => pin({ label: tab.path, text: tab.text })}
                   >
-                    <MessageSquareText size={14} aria-hidden /> Ask Arcanus
+                    <MessageSquareText size={15} />
                   </button>
                   <button type="button" className="icon-btn" aria-label={`Delete ${tab.path}`} title="Delete" onClick={act(() => discard(tab.path))}>
                     <Trash2 size={15} />
                   </button>
-                  <button type="button" className="btn btn-primary" disabled={tab.text === tab.saved} title="Ctrl+S" onClick={act(() => saveTab(tab.path))}>
-                    <Save size={14} aria-hidden /> Save
+                  <button type="button" className="icon-btn icon-btn-primary" aria-label="Save" disabled={tab.text === tab.saved} title="Save (Ctrl+S)" onClick={act(() => saveTab(tab.path))}>
+                    <Save size={15} />
                   </button>
                 </div>
               </div>

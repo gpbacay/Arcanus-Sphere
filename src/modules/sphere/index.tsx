@@ -70,7 +70,7 @@ export function Sphere({ analyser, state, on = true, working = false }: { analys
       ) : (
         orb
       )}
-      {/* The ⋮ holds the power switch too, so it stays when there is no WebGL (a phone's, often): then it offers only that. */}
+      {/* The power switch stays when there is no WebGL (a phone's, often): then it is the only tool. */}
       <SphereTools
         canDraw={canDraw}
         tool={tool}

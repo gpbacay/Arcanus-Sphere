@@ -7,6 +7,7 @@ import { openFile, saveArtifact, shortPath, type FileHit, type FindOptions } fro
 import { plainText, type Page } from "@/shared/html";
 import { pane, pin, usePlace, type Section } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
+import { Info } from "@/shared/ui/info";
 import { PaneControls } from "@/shared/ui/pane-controls";
 import { engine, findFiles, runSearch, type Scope, type WebWhy } from "./engine";
 
@@ -70,6 +71,12 @@ function SearchPane({ place, wide }: { place: Section | null; wide: boolean }) {
         <Search size={16} aria-hidden />
         <h2>Search engine</h2>
         <span className="pane-sub truncate">{view?.kind === "page" ? view.page.title : view?.kind === "results" ? `Web · ${view.engine}` : "Files first · ARC 1"}</span>
+        <Info label="How search works">
+          <p>
+            Search my files as you type: notes, memory, books, skills and my own source code, by name and by line. Press Enter and ARC 1 reads what you
+            asked: if it needs the internet, and the device is online, I search the web too. An address opens in the reader. Your chats never go there.
+          </p>
+        </Info>
         <PaneControls page="search" title="the search engine" />
       </header>
 
@@ -124,12 +131,6 @@ function SearchPane({ place, wide }: { place: Section | null; wide: boolean }) {
       </form>
 
       <div className="pane-body reader search-body" aria-busy={searching || Boolean(loading)}>
-        {!query.trim() && !shownWeb ? (
-          <p className="pane-note">
-            Search my files as you type: notes, memory, books, skills and my own source code, by name and by line. Press Enter and ARC 1 reads what you
-            asked: if it needs the internet, and the device is online, I search the web too. An address opens in the reader. Your chats never go there.
-          </p>
-        ) : null}
 
         {scope !== "web" && query.trim() ? <FileResultsView /> : null}
 
