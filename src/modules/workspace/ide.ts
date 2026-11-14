@@ -7,7 +7,10 @@ import { openArtifact, openPane, pane, shownAt, type State } from "@/shared/pane
 import { Store } from "@/shared/store";
 import { read, remove, SOURCE, write } from "./fs";
 
-export type Tab = { path: string; text: string; saved: string; /** a markdown file shown as it reads, not as source */ preview?: boolean };
+/** The editor groups side by side, VS Code's split: 0 on the left (always there), 1 on the right (while it has a tab). */
+export type Group = 0 | 1;
+/** An open file. One per path, shared by the groups it is open in (`in`), so an edit in one shows in the other. */
+export type Tab = { path: string; text: string; saved: string; in: Group[]; /** a markdown file shown as it reads, not as source */ preview?: boolean };
 /** One line of a terminal: what was typed ("in", with the prompt it was typed at), or what came back ("out", or "err"). */
 export type Line = { kind: "in"; text: string; at: string } | { kind: "out" | "err"; text: string };
 /** A terminal: what was typed and answered, the line being typed, the folder it is in, and whether a command is running. */
@@ -19,6 +22,9 @@ export const ide = new Store({
   tabs: [] as Tab[],
   /** The path of the tab being edited, or "" while the folder is shown. */
   active: "",
+  /** The tab shown in the right group, and the group a file opened from the explorer or the chat goes into. */
+  activeRight: "",
+  focus: 0 as Group,
   /** The panes beside the files (the knowledge graph) and beside the terminal (git's changes and its graph), open to start. */
   graphOpen: true,
   changesOpen: true,
@@ -104,17 +110,36 @@ export function closeTerminal(id: number) {
 }
 
 const tidy = (path: string) => path.split("/").filter(Boolean).join("/");
+/** The tabs, with each group still showing its tab if it has it, else its last one. A group left empty gives up the focus. */
+function settle(tabs: Tab[]) {
+  const { active, activeRight, focus } = ide.state;
+  const pick = (g: Group, now: string) => (tabs.some((t) => t.path === now && t.in.includes(g)) ? now : (tabs.filter((t) => t.in.includes(g)).at(-1)?.path ?? ""));
+  const right = pick(1, activeRight);
+  ide.set({ tabs, active: pick(0, active), activeRight: right, focus: right ? focus : 0 });
+}
+export const show = (g: Group, path: string) => ide.set(g ? { activeRight: path, focus: 1 } : { active: path, focus: 0 });
+/** Open a tab in a group as well (the Split button: the file shown on the left opens on the right too). */
+export function openIn(g: Group, path: string) {
+  ide.set({ tabs: ide.state.tabs.map((t) => (t.path === path && !t.in.includes(g) ? { ...t, in: [...t.in, g] } : t)) });
+  show(g, path);
+}
+
 const patch = (path: string, change: Partial<Tab>) => ide.set({ tabs: ide.state.tabs.map((t) => (t.path === path ? { ...t, ...change } : t)) });
 
-/** Open a file in the editor, in the Operating System. A tab with unsaved edits keeps them; otherwise it shows the file as it is now. */
+/**
+ * Open a file in the editor, in the Operating System, in the group last used. A tab with unsaved edits keeps them;
+ * otherwise it shows the file as it is now.
+ */
 export async function openFile(at: string) {
   const path = tidy(at);
   const text = await read(path);
   if (text === null) throw new Error(`${path} isn't a file I can open.`);
+  const g = ide.state.focus;
   const open = ide.state.tabs.find((t) => t.path === path);
-  if (!open) ide.set({ tabs: [...ide.state.tabs, { path, text, saved: text }] });
+  if (!open) ide.set({ tabs: [...ide.state.tabs, { path, text, saved: text, in: [g] }] });
   else if (open.text === open.saved) patch(path, { text, saved: text });
-  ide.set({ active: path, dir: path.split("/").slice(0, -1).join("/") });
+  openIn(g, path);
+  ide.set({ dir: path.split("/").slice(0, -1).join("/") });
   openPane("os");
   showCenter();
 }
@@ -135,9 +160,10 @@ export async function saveTab(path: string) {
   patch(path, { saved: tab.text });
 }
 
-/** Close a file's tab, asking first when it has unsaved edits. */
-export function closeFile(path: string) {
+/** Close a file's tab in a group. Its last tab going, it asks first when the file has unsaved edits. */
+export function closeFile(path: string, g: Group = 0) {
   const tab = ide.state.tabs.find((t) => t.path === path);
+  if (tab && tab.in.some((other) => other !== g)) return settle(ide.state.tabs.map((t) => (t === tab ? { ...t, in: t.in.filter((x) => x !== g) } : t)));
   if (tab && tab.text !== tab.saved && !window.confirm(`Close ${path.split("/").pop()} without saving your changes?`)) return;
   closeTab(path);
 }
@@ -151,6 +177,5 @@ export async function discard(path: string) {
 
 /** Close a tab, and any tab inside it when it is a folder that was removed or renamed. */
 export function closeTab(path: string) {
-  const tabs = ide.state.tabs.filter((t) => t.path !== path && !t.path.startsWith(`${path}/`));
-  ide.set({ tabs, active: tabs.some((t) => t.path === ide.state.active) ? ide.state.active : (tabs.at(-1)?.path ?? "") });
+  settle(ide.state.tabs.filter((t) => t.path !== path && !t.path.startsWith(`${path}/`)));
 }

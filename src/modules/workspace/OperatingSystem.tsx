@@ -126,7 +126,7 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
   const swap = (run: () => Promise<unknown>) =>
     act(async () => {
       await run();
-      ide.set({ dir: "", tabs: [], active: "" });
+      ide.set({ dir: "", tabs: [], active: "", activeRight: "", focus: 0 });
       ide.set({ back: [], forward: [] }); // the folders visited were in the root being left
     });
   /** Bring the folder list into view (narrow, the editor covers it) for the name field. */

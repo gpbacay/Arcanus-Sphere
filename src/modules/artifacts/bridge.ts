@@ -31,12 +31,11 @@ const TOPICS: Record<string, { stores: Subscribable[]; read: () => unknown; aske
   search: {
     stores: [engine, browser, pane],
     read: () => {
-      const { query, options, scope, files, searching, web } = engine.state;
+      const { query, options, files, searching, web } = engine.state;
       const { view, loading, error, history, at } = browser.state;
       return {
         query,
         options,
-        scope,
         searching,
         web,
         files: files && { ...files, files: files.files.map((f) => ({ ...f, short: shortPath(f.path) })) },
@@ -94,11 +93,10 @@ function lib(name: string) {
 }
 
 const CALLS: Record<string, (...args: never[]) => unknown> = {
-  "search.set": ({ query, options, scope }: { query?: string; options?: FindOptions; scope?: "all" | "files" | "web" }) =>
+  "search.set": ({ query, options }: { query?: string; options?: FindOptions }) =>
     engine.set({
       ...(typeof query === "string" ? { query } : {}),
       ...(options ? { options } : {}),
-      ...(scope === "all" || scope === "files" || scope === "web" ? { scope } : {}),
     }),
   "search.files": () => void findFiles(), // on this device: as you type
   "search.run": onGesture(() => runSearch()), // the web too, when ARC 1 says so

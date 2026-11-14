@@ -1579,7 +1579,25 @@ textarea.field {
 .os-files > .explorer {
   flex: 1;
 }
-.os-center > .editor {
+/* The editor groups side by side (VS Code's split), each as wide as the other. */
+.os-center {
+  flex-direction: row;
+}
+.os-group {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.os-group + .os-group {
+  border-left: 1px solid var(--line);
+}
+/* Split, only the group in use marks its tab with the accent: that is where the next file opens. */
+.os-group:not([data-focused]):not(:only-child) .tab[data-active] {
+  box-shadow: none;
+}
+.os-group > .editor {
   flex: 1;
   min-height: 0;
 }

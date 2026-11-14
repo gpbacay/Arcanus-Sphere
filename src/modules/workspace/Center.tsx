@@ -1,14 +1,15 @@
 "use client";
 
-// The Operating System's center: the open files as tabs, with the knowledge graph as the first tab, and the editor. In
-// the Operating System when it has the room (expanded, or in the window's center); otherwise an Artifacts tab.
-import { Code, Eye, FileCode, Globe, MessageSquareText, Play, Save, Trash2, Waypoints, X } from "lucide-react";
+// The Operating System's center: the open files as tabs, with the knowledge graph as the first tab, and the editor,
+// split in two groups side by side like VS Code's once a file is opened to the right. In the Operating System when it
+// has the room (expanded, or in the window's center); otherwise an Artifacts tab.
+import { Code, Columns2, Eye, FileCode, Globe, MessageSquareText, Play, Save, Trash2, Waypoints, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { pin } from "@/shared/pane";
 import { errorText, useStore } from "@/shared/store";
 import { Markdown, WikiLinks } from "@/shared/ui/markdown";
-import { closeFile, discard, editTab, ide, saveTab, togglePreview } from "./ide";
+import { closeFile, discard, editTab, ide, openIn, saveTab, show, togglePreview, type Group } from "./ide";
 import { NoteGraph } from "./NoteGraph";
 import { openNote } from "./notes";
 import { RUNNERS, runFile } from "./TerminalView";
@@ -68,22 +69,37 @@ function commentText(body: string) {
 /** The center. With nothing open it is left out of the Operating System, and says how to open something as an artifact. */
 export function Center({ away = false }: { away?: boolean }) {
   const tabs = useStore(ide, (s) => s.tabs);
-  const active = useStore(ide, (s) => s.active);
   const graphOpen = useStore(ide, (s) => s.graphOpen);
-  const [error, setError] = useState("");
-  const tab = tabs.find((t) => t.path === active);
-  const act = (run: () => Promise<unknown>) => () => run().catch((err) => setError(errorText(err)));
 
-  if (!tab && !graphOpen && !tabs.length)
+  if (!graphOpen && !tabs.length)
     return away ? <p className="pane-note">Open a file in the Operating System, or the knowledge graph from its View menu.</p> : null;
 
   return (
     <div className="os-center">
+      <EditorGroup g={0} />
+      {tabs.some((t) => t.in.includes(1)) ? <EditorGroup g={1} /> : null}
+    </div>
+  );
+}
+
+/** One editor group: its tabs (the left one with the knowledge graph first) and the file it shows. Using it gives it the focus. */
+function EditorGroup({ g }: { g: Group }) {
+  const all = useStore(ide, (s) => s.tabs);
+  const active = useStore(ide, (s) => (g ? s.activeRight : s.active));
+  const focused = useStore(ide, (s) => s.focus === g);
+  const graphOpen = useStore(ide, (s) => s.graphOpen) && g === 0;
+  const [error, setError] = useState("");
+  const tabs = all.filter((t) => t.in.includes(g));
+  const tab = tabs.find((t) => t.path === active);
+  const act = (run: () => Promise<unknown>) => () => run().catch((err) => setError(errorText(err)));
+
+  return (
+    <section className="os-group" data-focused={focused || undefined} aria-label={g ? "Right editor" : "Editor"} onFocus={() => focused || ide.set({ focus: g })}>
       {tabs.length || graphOpen ? (
-        <div className="tabs" role="tablist" aria-label="Open files">
+        <div className="tabs" role="tablist" aria-label={g ? "Files open on the right" : "Open files"}>
           {graphOpen ? (
             <div className="tab" data-active={!tab || undefined}>
-              <button type="button" role="tab" aria-selected={!tab} title="Your notes and the [[links]] between them" onClick={() => ide.set({ active: "" })}>
+              <button type="button" role="tab" aria-selected={!tab} title="Your notes and the [[links]] between them" onClick={() => show(0, "")}>
                 <Waypoints size={12} aria-hidden />
                 <span className="truncate">Knowledge graph</span>
               </button>
@@ -94,11 +110,11 @@ export function Center({ away = false }: { away?: boolean }) {
           ) : null}
           {tabs.map((t) => (
             <div key={t.path} className="tab" data-active={t.path === active || undefined}>
-              <button type="button" role="tab" aria-selected={t.path === active} title={t.path} onClick={() => ide.set({ active: t.path })}>
+              <button type="button" role="tab" aria-selected={t.path === active} title={t.path} onClick={() => show(g, t.path)}>
                 <span className="truncate">{baseName(t.path)}</span>
                 {t.text !== t.saved ? <span className="tab-dirty" role="img" aria-label="unsaved changes" /> : null}
               </button>
-              <button type="button" className="icon-btn" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeFile(t.path)}>
+              <button type="button" className="icon-btn" aria-label={`Close ${baseName(t.path)}`} onClick={() => closeFile(t.path, g)}>
                 <X size={12} />
               </button>
             </div>
@@ -152,6 +168,11 @@ export function Center({ away = false }: { away?: boolean }) {
             >
               <MessageSquareText size={15} />
             </button>
+            {g === 0 ? (
+              <button type="button" className="icon-btn" aria-label="Split right" title="Split right: open this file on the right too. What you open next goes in the side you last used" onClick={() => openIn(1, tab.path)}>
+                <Columns2 size={15} />
+              </button>
+            ) : null}
             <button type="button" className="icon-btn" aria-label={`Delete ${tab.path}`} title="Delete" onClick={act(() => discard(tab.path))}>
               <Trash2 size={15} />
             </button>
@@ -163,7 +184,7 @@ export function Center({ away = false }: { away?: boolean }) {
       ) : graphOpen ? (
         <NoteGraph current={active} />
       ) : null}
-    </div>
+    </section>
   );
 }
 

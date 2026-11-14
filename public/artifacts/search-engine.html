@@ -7,8 +7,8 @@
   same browser, so what Arcanus reads shows here.
 
   It runs sealed, like every artifact (see graph-of-thought.html), and reaches Arcanus through the bridge:
-    arcanus.on("search", (s) => …)    s: { query, options, scope, searching, web, files, browser, reading }
-    arcanus.call("search.set", { query?, options?, scope? }), arcanus.call("search.files"), arcanus.call("search.run")
+    arcanus.on("search", (s) => …)    s: { query, options, searching, web, files, browser, reading }
+    arcanus.call("search.set", { query?, options? }), arcanus.call("search.files"), arcanus.call("search.run")
     arcanus.call("web.go", address), arcanus.call("web.step", -1 | 1), arcanus.call("web.reload")
     arcanus.call("file.open", path), arcanus.call("file.save", title, text), arcanus.call("chat.pin", page | null)
     arcanus.call("live.watch"), then arcanus.on("live", (l) => …)   l: { frame, url, title, back, forward, loading }
@@ -127,7 +127,7 @@
     background: var(--accent-hot);
   }
 
-  /* —— The form: the query with its toggles, the file filters, where to search —— */
+  /* —— The form: one box for files, the web and addresses, with its toggles and Search on its row; the file filters —— */
   .head {
     display: flex;
     align-items: center;
@@ -217,25 +217,19 @@
   label .field {
     height: 30px;
   }
-  .scope {
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  .scope:hover {
-    color: var(--text);
-  }
-  .scope[aria-checked="true"] {
-    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
   .go {
-    height: 26px;
-    margin-left: auto;
+    flex: none;
+    height: 32px;
+    margin-left: 2px;
+  }
+  .why .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   /* —— Results: the files, then the web —— */
@@ -482,7 +476,7 @@
 <div class="info" id="info" popover>
   <p>
     Search my files as you type: notes, memory, books, skills and my own source code, by name and by line. Press Enter and ARC 1 reads what you asked:
-    if it needs the internet, and the device is online, I search the web too. An address opens in the reader. Your chats never go there.
+    if it needs the internet, and the device is online, I search the web too. An address (example.com, localhost:3001) opens in my browser, here. Your chats never go there.
   </p>
 </div>
 
@@ -495,16 +489,11 @@
       <button type="button" class="toggle" data-option="regex" aria-pressed="false" aria-label="Use regular expression" title="Use regular expression" data-icon="regex"></button>
     </div>
     <button type="button" class="icon-btn" id="filter" aria-pressed="false" aria-label="Files to include or exclude" title="Files to include or exclude" data-icon="list-filter"></button>
+    <button type="button" class="btn btn-primary go" id="go" disabled>Search</button>
   </div>
   <div id="filters" hidden>
     <label>files to include <input class="field" data-glob="include" placeholder="e.g. *.md, memory" spellcheck="false" /></label>
     <label>files to exclude <input class="field" data-glob="exclude" placeholder="e.g. *.ts, src/**/exclude" spellcheck="false" /></label>
-  </div>
-  <div class="row" role="radiogroup" aria-label="Where to search">
-    <button type="button" class="scope" role="radio" data-scope="all" aria-checked="true">All</button>
-    <button type="button" class="scope" role="radio" data-scope="files" aria-checked="false">Files</button>
-    <button type="button" class="scope" role="radio" data-scope="web" aria-checked="false">Web</button>
-    <button type="button" class="btn btn-primary go" id="go" disabled>Search</button>
   </div>
 </form>
 
@@ -556,10 +545,10 @@
     arc1: "ARC 1 read this as a web search",
     "no files": "Nothing in my files, so I searched the web",
     offline: "Offline · the web needs a connection, so only my files were searched",
-    "not needed": "ARC 1 read this as a search of my files · press Web to search the internet too",
+    "not needed": 'ARC 1 read this as a search of my files · <button type="button" class="link" data-web>Search the web too</button>',
   };
 
-  let s = { query: "", options: {}, scope: "all", files: null, browser: {}, reading: null }; // the last state Arcanus sent
+  let s = { query: "", options: {}, files: null, browser: {}, reading: null }; // the last state Arcanus sent
   const closed = {}; // file groups you folded
 
   // —— Asking: files are searched as you type (they are on this device); the web waits for Enter ——
@@ -583,7 +572,6 @@
   $("go").addEventListener("click", run);
   for (const el of document.querySelectorAll("[data-option]")) el.addEventListener("click", () => setOptions({ [el.dataset.option]: !s.options[el.dataset.option] }));
   for (const el of document.querySelectorAll("[data-glob]")) el.addEventListener("input", () => setOptions({ [el.dataset.glob]: el.value }));
-  for (const el of document.querySelectorAll("[data-scope]")) el.addEventListener("click", () => arcanus.call("search.set", { scope: el.dataset.scope }).then(findSoon));
   $("filter").addEventListener("click", () => {
     const open = $("filters").hidden;
     $("filters").hidden = !open;
@@ -653,7 +641,7 @@
   function draw() {
     const { view, loading, error, back, forward, here } = s.browser;
     const page = view?.kind === "page" ? view.page : null;
-    const isLive = !!(page && view.live && !loading && s.scope !== "files");
+    const isLive = !!(page && view.live && !loading);
     $("live").hidden = !isLive;
     $("body").hidden = isLive;
     drawLive();
@@ -661,14 +649,13 @@
     if (document.activeElement !== $("query")) $("query").value = s.query;
     $("go").disabled = !s.query.trim();
     for (const el of document.querySelectorAll("[data-option]")) el.setAttribute("aria-pressed", String(!!s.options[el.dataset.option]));
-    for (const el of document.querySelectorAll("[data-scope]")) el.setAttribute("aria-checked", String(s.scope === el.dataset.scope));
     for (const el of document.querySelectorAll("[data-glob]")) if (document.activeElement !== el) el.value = s.options[el.dataset.glob] ?? "";
 
     // What you see here, in your own browser: the page, or the same search on DuckDuckGo (where the results come from).
     const outside = page ? page.url : view?.kind === "results" ? `https://duckduckgo.com/?q=${encodeURIComponent(view.query)}` : "";
-    let html = s.scope !== "web" && s.query.trim() ? filesView() : "";
+    let html = s.query.trim() ? filesView() : "";
     if (WHY[s.web]) html += `<p class="why">${WHY[s.web]}</p>`;
-    if (s.scope !== "files" && (view || loading || error)) {
+    if (view || loading || error) {
       html += `<section aria-label="Web"><h3 class="heading">${icon("globe", 13)} Web<span class="nav">
         <button type="button" class="icon-btn" data-step="-1" aria-label="Back"${back ? "" : " disabled"}>${icon("arrow-left", 14)}</button>
         <button type="button" class="icon-btn" data-step="1" aria-label="Forward"${forward ? "" : " disabled"}>${icon("arrow-right", 14)}</button>
@@ -679,7 +666,7 @@
     $("body").innerHTML = html;
     $("body").setAttribute("aria-busy", String(!!(s.searching || loading)));
 
-    $("actions").hidden = !page || s.scope === "files";
+    $("actions").hidden = !page;
     if (page) {
       const reading = s.reading === (isLive ? L.url || page.url : page.url);
       $("pin").setAttribute("aria-pressed", String(reading));
@@ -689,11 +676,12 @@
   }
 
   $("body").addEventListener("click", (e) => {
-    const at = e.target.closest("[data-go], [data-open], [data-fold], [data-step], #reload");
+    const at = e.target.closest("[data-go], [data-web], [data-open], [data-fold], [data-step], #reload");
     // ↗ falls through to the seal, which opens it in a tab of your browser.
     if (!at) return;
     e.preventDefault(); // a link here opens in the reader, not a tab
     if (at.dataset.go !== undefined) arcanus.call("web.go", at.href).catch(() => {});
+    else if (at.dataset.web !== undefined) arcanus.call("web.go", `search:${s.query.trim()}`).catch(() => {});
     else if (at.dataset.open) arcanus.call("file.open", at.dataset.open).catch(() => {});
     else if (at.dataset.fold) {
       closed[at.dataset.fold] = !closed[at.dataset.fold];

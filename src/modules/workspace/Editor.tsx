@@ -1,6 +1,7 @@
 "use client";
 
-// The code editor: CodeMirror 6, with line numbers, syntax colours, undo, find (Ctrl+F), bracket matching and folding.
+// The code editor: CodeMirror 6, with line numbers, syntax colours, undo, find (Ctrl+F), bracket matching, folding,
+// and a minimap down the right side (click or drag it to scroll).
 // It ships with the app, so it works offline, and it is loaded only when a file is first opened (Files.tsx), so it
 // costs the boot nothing.
 // ponytail: one editor per open file, made new when the tab changes, so undo history and scroll don't survive a tab
@@ -13,6 +14,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { keymap } from "@codemirror/view";
+import { showMinimap } from "@replit/codemirror-minimap";
 import { EditorView, basicSetup } from "codemirror";
 import { useEffect, useRef } from "react";
 
@@ -34,9 +36,12 @@ const look = EditorView.theme(
     ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--text-faint)" },
     ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--surface)" },
     "&.cm-focused": { outline: "none" },
+    ".cm-minimap-gutter": { borderLeft: "1px solid var(--line)" },
   },
   { dark: true },
 );
+
+const minimap = showMinimap.of({ create: () => ({ dom: document.createElement("div") }), displayText: "characters", showOverlay: "always" });
 
 export default function Editor({ path, text, onChange, onSave }: { path: string; text: string; onChange: (text: string) => void; onSave: () => void }) {
   const host = useRef<HTMLDivElement>(null);
@@ -57,6 +62,7 @@ export default function Editor({ path, text, onChange, onSave }: { path: string;
         oneDark,
         EditorView.lineWrapping,
         language(path),
+        minimap,
         EditorView.updateListener.of((update) => update.docChanged && on.current.onChange(update.state.doc.toString())),
       ],
     });

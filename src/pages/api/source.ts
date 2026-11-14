@@ -82,7 +82,8 @@ function kill(child: ChildProcess) {
  * make a build a development one.
  */
 const OWN = /^(?:PORT|NODE_ENV|TURBOPACK|INIT_CWD|NEXT_RUNTIME|NEXT_DEPLOYMENT_ID|NEXT_PRIVATE_\w+|__NEXT_\w+|npm_lifecycle_\w+|npm_package_\w+)$/i;
-const shellEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.test(name)));
+// Next types NODE_ENV as always there; here it is left out on purpose.
+const shellEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.test(name))) as NodeJS.ProcessEnv;
 
 /** One line in this computer's shell (cmd on Windows, sh elsewhere), in `cwd`, its output streamed back as it comes.
  *  Nothing to type into it: a program that asks a question gets no answer. Closing the request (Ctrl+C) kills it. */

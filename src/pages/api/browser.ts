@@ -24,7 +24,7 @@ import { fromThisMachine } from "@/shared/loopback";
 export const config = { api: { responseLimit: false } };
 
 type Json = Record<string, unknown>;
-type Cdp = { send: (method: string, params?: Json) => Promise<Json>; on: (method: string, fn: (params: Json) => void) => void };
+type Cdp = { send: (method: string, params?: Json, ms?: number) => Promise<Json>; on: (method: string, fn: (params: Json) => void) => void };
 type Size = { width: number; height: number; dpr: number };
 /** `closed`: the browser exited or its connection dropped; the next request starts it again. */
 type Session = { chrome: ChildProcess; page: Cdp; loading: boolean; closed: boolean; loaded?: () => void };
@@ -58,10 +58,11 @@ const shared = (state.arcanusBrowser ??= { session: null, watchers: new Set(), s
 
 class Unavailable extends Error {}
 
-/** `promise`, or a failure after `ms`: a browser that stops answering must not hold every request forever. */
-function within<T>(promise: Promise<T>, ms: number, what: string) {
+/** `promise`, or a failure after `ms`: a browser that stops answering must not hold every request forever. Unavailable (the reader is used from then on) only for starting the browser:
+ *  a page that is slow to answer is that page's trouble, not the browser's. */
+function within<T>(promise: Promise<T>, ms: number, what: string, Failure: new (message: string) => Error = Unavailable) {
   return new Promise<T>((ok, fail) => {
-    const timer = setTimeout(() => fail(new Unavailable(`${what} took too long.`)), ms);
+    const timer = setTimeout(() => fail(new Failure(`${what} took too long.`)), ms);
     promise.then(ok, fail).finally(() => clearTimeout(timer));
   });
 }
@@ -88,14 +89,15 @@ function connect(url: string, onClose: () => void): Promise<Cdp> {
     };
     ws.onopen = () =>
       resolve({
-        send: (method, params = {}) =>
+        send: (method, params = {}, ms = 20_000) =>
           within(
             new Promise((ok, fail) => {
               waiting.set(++seq, { ok, fail });
               ws.send(JSON.stringify({ id: seq, method, params }));
             }),
-            20_000,
+            ms,
             method,
+            Error,
           ),
         on: (method, fn) => handlers.set(method, [...(handlers.get(method) ?? []), fn]),
       });
@@ -208,7 +210,11 @@ async function go(s: Session, target: string) {
     s.loaded = done;
     setTimeout(done, 15_000); // a page that never finishes loading is read as it is
   });
-  const { errorText, loaderId } = (await s.page.send("Page.navigate", { url })) as { errorText?: string; loaderId?: string };
+  // Navigate answers once the server starts sending the page. A dev server compiles a page on its first visit, which
+  // can take a minute: it is given two.
+  const { errorText, loaderId } = (await s.page.send("Page.navigate", { url }, 120_000).catch((err: Error) => {
+    throw new Error(/took too long/.test(err.message) ? `${url} didn't answer in two minutes.` : err.message);
+  })) as { errorText?: string; loaderId?: string };
   if (errorText) throw new Error(`${url} didn't open (${errorText}).`);
   if (loaderId) await loaded; // no loader: the same page, moved to an anchor
   return read(s);

@@ -30,6 +30,8 @@ export const browser = new Store({
 export function toTarget(input: string): string {
   const text = input.trim();
   if (/^(?:search|file|disk):/.test(text) || /^https?:\/\/|^data:text\/html[;,]/i.test(text)) return text;
+  // This computer and the network it is on (localhost:3001, 192.168.1.5:8080) answer plain http; the web, https.
+  if (/^(?:localhost|127(?:\.\d+){3}|\[::1\]|10(?:\.\d+){3}|192\.168(?:\.\d+){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d+){2})(:\d+)?(\/\S*)?$/i.test(text)) return `http://${text}`;
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(text)) return `https://${text}`;
   return `search:${text}`;
 }

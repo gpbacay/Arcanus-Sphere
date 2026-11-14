@@ -53,7 +53,7 @@ const route = (name: string) => ROUTES.find((r) => r.route === name)!;
 /** The search engine on my files, said as a reply: how many files hold it, and where. Composed from the results. */
 async function findInFiles(query: string, label: string): Promise<Outcome & { found: number }> {
   // The search engine shows the same search, opened if it wasn't: what Arcanus uses, you see.
-  engine.set({ query, scope: "all" });
+  engine.set({ query });
   void findFiles(query);
   openArtifact(SEARCH);
   try {
