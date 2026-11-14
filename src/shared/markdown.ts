@@ -1,11 +1,22 @@
-// Assistant replies as a small markdown tree. Pure data, no React, so markdown.check.ts can run it in Node.
-// ponytail: a scanner, not a markdown library. Covers what a reply actually uses: links, emphasis,
-// code, headings, lists, quotes. Tables and raw HTML stay text.
+// Markdown as a small tree: assistant replies, and the files previewed in the Operating System. Pure data, no React,
+// so markdown.check.ts can run it in Node.
+// ponytail: a scanner, not a markdown library. Covers what replies and notes use: links and [[links]], emphasis,
+// strikethrough, code, headings, lists and task lists, quotes, rules and tables. Nested lists come out flat; raw HTML
+// and images stay text.
 
-/** `w`: a [[link]] to a note, by the name or path written in it (the workspace resolves it). */
-export type Inline = string | { b: Inline[] } | { i: Inline[] } | { c: string } | { a: string; v: Inline[] } | { w: string; v: Inline[] } | { br: 1 };
+/** `w`: a [[link]] to a note, by the name or path written in it (the workspace resolves it). `task`: a task list's box. */
+export type Inline = string | { b: Inline[] } | { i: Inline[] } | { s: Inline[] } | { c: string } | { a: string; v: Inline[] } | { w: string; v: Inline[] } | { task: boolean } | { br: 1 };
 
-export type Block = { p: Inline[] } | { h: 1 | 2 | 3; v: Inline[] } | { ul: Inline[][] } | { ol: Inline[][] } | { q: Inline[] } | { pre: string };
+export type Align = "left" | "center" | "right" | undefined;
+export type Block =
+  | { p: Inline[] }
+  | { h: 1 | 2 | 3 | 4 | 5 | 6; v: Inline[] }
+  | { ul: Inline[][] }
+  | { ol: Inline[][]; start: number }
+  | { q: Inline[] }
+  | { pre: string }
+  | { hr: 1 }
+  | { table: { head: Inline[][]; align: Align[]; rows: Inline[][][] } };
 
 const OPEN = /[\s([{"']/;
 const CLOSE = /[\s.,;:!?)\]}"']/;
@@ -49,7 +60,7 @@ export function inlines(src: string): Inline[] {
   const out: Inline[] = [];
   let i = 0;
   while (i < src.length) {
-    const at = src.slice(i).search(/[`*_[\n]|https?:\/\//);
+    const at = src.slice(i).search(/[`*_[\n~]|https?:\/\//);
     if (at > 0) {
       push(out, src.slice(i, i + at));
       i += at;
@@ -99,6 +110,14 @@ export function inlines(src: string): Inline[] {
         continue;
       }
     }
+    if (src.startsWith("~~", i)) {
+      const j = src.indexOf("~~", i + 2);
+      if (j > i + 2) {
+        out.push({ s: inlines(src.slice(i + 2, j)) });
+        i = j + 2;
+        continue;
+      }
+    }
     const mark = src.startsWith("**", i) || src.startsWith("__", i) ? src.slice(i, i + 2) : src[i];
     const prev = src[i - 1];
     const next = src[i + mark.length];
@@ -119,57 +138,104 @@ export function inlines(src: string): Inline[] {
   return out;
 }
 
-export function parseMarkdown(src: string): Block[] {
+const ITEM = /^\s*([-*+]|\d+[.)])\s+(.*)$/;
+const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
+const DIVIDER = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+/** A table row's cells: "| a | b |" -> ["a", "b"]. A "\|" stays in its cell. */
+const cells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/(?<!\\)\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, "|"));
+
+function item(text: string): Inline[] {
+  const box = /^\[([ xX])\]\s+/.exec(text);
+  return box ? [{ task: box[1] !== " " }, ...inlines(text.slice(box[0].length))] : inlines(text);
+}
+
+/**
+ * `breaks`: a line break inside a paragraph is kept, as in a chat reply. Off, as in a markdown file, the lines of a
+ * paragraph run together and only a line ending in two spaces or a backslash breaks.
+ */
+export function parseMarkdown(src: string, { breaks = true } = {}): Block[] {
   const blocks: Block[] = [];
   const lines = src.replace(/\r\n/g, "\n").split("\n");
   const para: string[] = [];
   const flush = () => {
     if (!para.length) return;
-    blocks.push({ p: inlines(para.join("\n")) });
+    const text = breaks ? para.join("\n") : para.map((l, k) => (k === para.length - 1 ? l : / {2,}$|\\$/.test(l) ? `${l.replace(/\s+$|\\$/, "")}\n` : `${l} `)).join("");
+    blocks.push({ p: inlines(text.trim()) });
     para.length = 0;
   };
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (/^```/.test(line) && !para.length) {
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) body.push(lines[i++]);
-      if (i < lines.length) i++;
-      blocks.push({ pre: body.join("\n") });
-      continue;
-    }
     if (!line.trim()) {
       flush();
       i++;
       continue;
     }
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (heading && !para.length) {
-      blocks.push({ h: heading[1].length as 1 | 2 | 3, v: inlines(heading[2]) });
+    if (/^\s*```/.test(line)) {
+      flush();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++]);
+      if (i < lines.length) i++;
+      blocks.push({ pre: body.join("\n") });
+      continue;
+    }
+    const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      flush();
+      blocks.push({ h: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6, v: inlines(heading[2]) });
       i++;
       continue;
     }
-    const item = /^(\s*)([-*]|\d+\.)\s+(.+)$/.exec(line);
-    if (item && !para.length) {
-      const ordered = /\d/.test(item[2]);
-      const items: Inline[][] = [];
-      while (i < lines.length) {
-        const next = /^(\s*)([-*]|\d+\.)\s+(.+)$/.exec(lines[i]);
-        if (!next || /\d/.test(next[2]) !== ordered) break;
-        items.push(inlines(next[3]));
-        i++;
-      }
-      blocks.push(ordered ? { ol: items } : { ul: items });
+    if (RULE.test(line)) {
+      flush();
+      blocks.push({ hr: 1 });
+      i++;
       continue;
     }
-    if (line.startsWith(">") && !para.length) {
+    if (line.includes("|") && DIVIDER.test(lines[i + 1] ?? "") && lines[i + 1].includes("-")) {
+      flush();
+      const head = cells(line);
+      const align = cells(lines[i + 1]).map((c): Align => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : undefined));
+      const rows: Inline[][][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(cells(lines[i++]).map(inlines));
+      blocks.push({ table: { head: head.map(inlines), align, rows } });
+      continue;
+    }
+    const first = ITEM.exec(line);
+    // A list may follow a paragraph's line directly, as in "For example:\n- one"; a numbered one only from 1, so a
+    // sentence that wraps onto "2024. Then" stays a sentence.
+    if (first && (!para.length || !/\d/.test(first[1]) || /^1[.)]$/.test(first[1]))) {
+      flush();
+      const ordered = /\d/.test(first[1]);
+      const items: Inline[][] = [];
+      while (i < lines.length) {
+        const next = ITEM.exec(lines[i]);
+        if (next) {
+          if (/\d/.test(next[1]) !== ordered) break;
+          items.push(item(next[2]));
+        } else if (/^\s+\S/.test(lines[i]) && items.length) items[items.length - 1].push(" ", ...inlines(lines[i].trim())); // an item's own next line
+        else break;
+        i++;
+      }
+      blocks.push(ordered ? { ol: items, start: parseInt(first[1], 10) } : { ul: items });
+      continue;
+    }
+    if (/^\s{0,3}>/.test(line)) {
+      flush();
       const quoted: string[] = [];
-      while (i < lines.length && lines[i].startsWith(">")) quoted.push(lines[i++].replace(/^>\s?/, ""));
+      while (i < lines.length && /^\s{0,3}>/.test(lines[i])) quoted.push(lines[i++].replace(/^\s{0,3}>\s?/, ""));
       blocks.push({ q: inlines(quoted.join("\n")) });
       continue;
     }
-    para.push(line);
+    para.push(line.trimStart());
     i++;
   }
   flush();

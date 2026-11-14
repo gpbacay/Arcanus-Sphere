@@ -5,6 +5,7 @@ export { searchFiles, shortPath, type FileResults } from "./search";
 export type { FileHit, FindOptions, LineHit } from "./find";
 export { openFile } from "./ide";
 export { linkedNotes, openNote } from "./notes";
+export { plainLinks } from "./links";
 export { sourceCommand } from "./command";
 export {
   GUARDRAILS,

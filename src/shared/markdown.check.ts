@@ -28,4 +28,20 @@ assert.deepEqual(snake, [{ p: ["search_query stays whole"] }]);
 const wiki = parseMarkdown("See [[ideas/Sky#Blue|the sky]] and [[Plan]].");
 assert.deepEqual(wiki, [{ p: ["See ", { w: "ideas/Sky#Blue", v: ["the sky"] }, " and ", { w: "Plan", v: ["Plan"] }, "."] }]);
 
+// A file: a paragraph's lines run together; two trailing spaces break the line.
+assert.deepEqual(parseMarkdown("one\ntwo  \nthree", { breaks: false }), [{ p: ["one two", { br: 1 }, "three"] }]);
+assert.deepEqual(parseMarkdown("one\ntwo"), [{ p: ["one", { br: 1 }, "two"] }]); // a reply keeps its breaks
+
+// What notes use: deeper headings, rules, strikethrough, task lists, tables, and a list straight after a line.
+assert.deepEqual(parseMarkdown("#### Four"), [{ h: 4, v: ["Four"] }]);
+assert.deepEqual(parseMarkdown("a\n\n---\n\nb"), [{ p: ["a"] }, { hr: 1 }, { p: ["b"] }]);
+assert.deepEqual(parseMarkdown("~~gone~~ stays"), [{ p: [{ s: ["gone"] }, " stays"] }]);
+assert.deepEqual(parseMarkdown("- [x] done\n- [ ] to do"), [{ ul: [[{ task: true }, "done"], [{ task: false }, "to do"]] }]);
+assert.deepEqual(parseMarkdown("| Name | Age |\n|:--|--:|\n| Sam | 7 |"), [
+  { table: { head: [["Name"], ["Age"]], align: ["left", "right"], rows: [[["Sam"], ["7"]]] } },
+]);
+assert.deepEqual(parseMarkdown("For example:\n- one\n- two"), [{ p: ["For example:"] }, { ul: [["one"], ["two"]] }]);
+assert.deepEqual(parseMarkdown("in\n2024. Then"), [{ p: ["in", { br: 1 }, "2024. Then"] }]); // not a list
+assert.deepEqual(parseMarkdown("3. c\n4. d"), [{ ol: [["c"], ["d"]], start: 3 }]);
+
 console.log("markdown ok");

@@ -2,6 +2,8 @@
 
 // Arcanus's own file system. Like .claude/ or .cursor/ in a project, Arcanus keeps its files in a .arcanus/ folder:
 //   .arcanus/ARCANUS.md          standing instructions, read before every reply
+//   .arcanus/SKILL.md            Arcanus's own skill: the brief every agent it leads reads first
+//   .arcanus/AGENTS.md           the roles its agents take (each conversation is an agent), run by /agents and /role
 //   .arcanus/skills/<name>/SKILL.md  skills you or Arcanus wrote, run with /<name>
 //   .arcanus/memory/*.md         notes Arcanus remembers, recalled when a message is about them
 //   .arcanus/knowledge/*.md|txt  books and documents you add; Arcanus answers from their passages (brain/shelf.ts)
@@ -13,9 +15,10 @@
 // list, read, write, rename and remove work on the code that is running.
 // ponytail: OPFS writes use createWritable(), which older Safari lacks; Safari then shows the error in the Operating System.
 import { scopedHome, scopedKey } from "@/modules/account";
-import { BUILT_IN_GUARDRAILS, parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
+import { BUILT_IN_GUARDRAILS, parseAgents, parseSkill, slug, stripComments, type SkillFile } from "@/modules/harness";
 import { kept } from "@/shared/idb";
 import { Store, errorText } from "@/shared/store";
+import { plainLinks } from "./links";
 import { connectSource, source, sourceFs, sourceGit } from "./source";
 
 type Dir = FileSystemDirectoryHandle;
@@ -46,6 +49,10 @@ export const workspace = new Store({
   /** Bumped on every change, so views of the files read them again. */
   version: 0,
   skills: [] as Skill[],
+  /** The roles in AGENTS.md, in order. */
+  agents: [] as Skill[],
+  /** SKILL.md's instructions: what every agent reads before its role. */
+  brief: "",
 });
 
 export const canOpenFolder = () => typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -233,7 +240,8 @@ const ARCANUS_MD = `<!-- ARCANUS.md: your standing instructions. Arcanus reads t
        If you are not sure, say so instead of guessing.
 
      Good lines say who you are, how you want answers to sound, and what to avoid. Keep the file short: the model
-     is small, and every line you add slows each reply a little. Comments like this one are never sent. -->
+     is small, and every line you add slows each reply a little. Comments like this one are never sent.
+     Rules Arcanus must never break go in [[guardrails/rules]], and what it knows about itself is in [[self]]. -->
 `;
 const RULES_MD = `<!-- guardrails/rules.md: guardrails you add. Arcanus reads them before every reply, typed or spoken, ahead of
      ARCANUS.md, and must never break them. Write plain lines below this comment, one rule per line. For example:
@@ -242,7 +250,8 @@ const RULES_MD = `<!-- guardrails/rules.md: guardrails you add. Arcanus reads th
        Never repeat a password, a card number or an address back.
        Keep every reply suitable for children.
 
-     The guardrails already in Arcanus's code are in built-in.md, beside this file. Keep this file short: the model is
+     The guardrails already in Arcanus's code are in [[guardrails/built-in]], beside this file; instructions that are not
+     rules go in [[ARCANUS]]. Keep this file short: the model is
      small, and every line you add slows each reply a little. Comments like this one are never sent. -->
 `;
 const EXAMPLE_SKILL = `---
@@ -253,12 +262,43 @@ description: Explain a topic simply, as if to a five-year-old
 Explain the topic in three short sentences a five-year-old would understand. Use one everyday comparison. No jargon.
 `;
 
+/** SKILL.md: Arcanus's own skill. Its frontmatter says what Arcanus is to any agent reading this folder; its lines are
+ *  the brief every agent Arcanus leads reads before its role. */
+const SKILL_MD = `---
+name: arcanus
+description: A local AI assistant that leads a team of agents. Every conversation is an agent; its role comes from AGENTS.md.
+---
+<!-- SKILL.md: my own skill. The lines below this comment are the brief every agent I lead reads before its role in
+     [[AGENTS]]. Keep it short: the model is small. Comments like this one are never sent. -->
+You are one agent on a team Arcanus leads. Do only your own part of the task, building on what the agent before you handed over. Reply with your work only, short and plain.
+`;
+/** AGENTS.md: the roles Arcanus can give its agents, in the order /agents runs them. */
+const AGENTS_MD = `# Agents
+
+<!-- AGENTS.md: the agents I can put to work. Each "## name" below is a role: its first line says what it does, all
+     of it is the agent's instructions. Every conversation is an agent. /role <name> gives the open one a role, and
+     /agents <task> makes one conversation per role, in the order written here, each handing its work to the next.
+     Add, remove or reorder roles freely. The brief they all share is in [[SKILL]]. Comments are never sent. -->
+
+## planner
+Breaks the task into steps.
+Write a numbered plan of at most five short steps for the task. Do not write the code.
+
+## coder
+Writes the code.
+Write the code that carries out the plan, in one code block, then one sentence saying what it does.
+
+## reviewer
+Checks the work.
+Read what you were handed. List up to three mistakes or risks and how to fix each. If it is right, say so.
+`;
+
 /** lore.md: where Arcanus comes from and why it is called Arcanus, in its own voice. Read when asked (brain, about):
  *  only the section that answers the question, since a small model given all of it answered none of it. */
 const LORE_MD = `<!-- lore.md: my origin and my name, in my own words. I read the section that answers what you asked: "# My name"
      for why I am called Arcanus, "# My origin" for who made me and why. Editing it changes what I say. Write as me
      ("I", "my"), and put the answer in the first sentence of each section: a small model uses that one most.
-     Comments like this one are never read. -->
+     Comments like this one are never read. What I can do is in [[self]]. -->
 # My name
 
 I am named Arcanus after ARCANE, the neuromimetic AI library Gianne Bacay built. He wanted an AI that puts ARCANE to work, so he made me and named me after it. Arcanus is ARCANE made live.
@@ -279,6 +319,9 @@ const SELF_SOURCE_BEFORE = "I am a Next.js app. Open that project folder from th
 const SELF_SOURCE =
   "I am a Next.js app, and my own source code is in my files at .arcanus/source/ whenever I am opened at localhost on the computer I run from. The editor in this pane opens it, saving a file changes the code that is running, and the Git view shows what changed and commits it. From the chat: /source, /open, /find, /replace and /git.";
 
+const LINKING =
+  "Writing `[[a note's name]]` in a note links it to that note, so a subject can be split over small files; the graph button shows every note and its links, and when I read a note I read the notes it links to.";
+
 const SELF_MD = `# Arcanus
 
 I am Arcanus, a local assistant Gianne Bacay made in 2025. Gianne Bacay is a man: he and him, never she or her. I live in this browser as a gold 3D sphere. I am not a person, an employee, or part of a team.
@@ -291,17 +334,19 @@ Hippocampus decides what a message needs. SmolLM2 writes the reply. Paradee spea
 
 This pane is my file manager and my editor. My own files live in .arcanus/:
 
-- ARCANUS.md — standing instructions, read before every reply
-- guardrails/ — my guardrails: built-in.md, the ones in my code, and rules.md, yours
+- [[ARCANUS]] — standing instructions, read before every reply
+- [[SKILL]] — my own skill, the brief every agent I lead reads
+- [[AGENTS]] — the roles my agents take; every conversation is an agent
+- guardrails/ — my guardrails: [[guardrails/built-in]], the ones in my code, and [[guardrails/rules]], yours
 - self.md — this file
-- lore.md — my origin and my name, read when you ask about them
-- skills/ — run with /name
+- [[lore]] — my origin and my name, read when you ask about them
+- skills/ — run with /name, like [[skills/eli5/SKILL|/eli5]]
 - memory/ — notes I recall
 - knowledge/ — books I answer from
 - artifacts/ — replies and pages I saved
 - source/ — my own source code, at localhost
 
-Ctrl+S saves the file that is open. Writing [[a note's name]] in a note links it to that note, so a subject can be split over small files; the graph button shows every note and its links, and when I read a note I read the notes it links to.
+Ctrl+S saves the file that is open. ${LINKING}
 
 ## My source
 
@@ -319,9 +364,27 @@ ${SELF_SOURCE}
 - src/modules/harness — who I am allowed to be
 `;
 
-/** Make .arcanus/ and its starter files when they are missing. Never overwrites. */
+/**
+ * The [[links]] that join the starter files, for homes made before there were links: [file, what it said, what it says].
+ * Each is a sentence or a line swapped in place, so what you wrote around it stays. Most sit in comments, which shape the
+ * graph and what a reply's context follows without reaching the model.
+ */
+const LINKED: [string, string, string][] = [
+  [`${HOME}/ARCANUS.md`, "Comments like this one are never sent. -->", "Comments like this one are never sent.\n     Rules Arcanus must never break go in [[guardrails/rules]], and what it knows about itself is in [[self]]. -->"],
+  [`${GUARDRAILS}/rules.md`, "are in built-in.md, beside this file.", "are in [[guardrails/built-in]], beside this file; instructions that are not\n     rules go in [[ARCANUS]]."],
+  [`${HOME}/lore.md`, "Comments like this one are never read. -->", "Comments like this one are never read. What I can do is in [[self]]. -->"],
+  [`${HOME}/self.md`, "- ARCANUS.md — standing", "- [[ARCANUS]] — standing"],
+  [`${HOME}/self.md`, "my guardrails: built-in.md, the ones in my code, and rules.md, yours", "my guardrails: [[guardrails/built-in]], the ones in my code, and [[guardrails/rules]], yours"],
+  [`${HOME}/self.md`, "- lore.md — my origin", "- [[lore]] — my origin"],
+  [`${HOME}/self.md`, "- skills/ — run with /name\n", "- skills/ — run with /name, like [[skills/eli5/SKILL|/eli5]]\n"],
+  [`${HOME}/self.md`, "Ctrl+S saves the file that is open.\n", `Ctrl+S saves the file that is open. ${LINKING}\n`],
+];
+
+/** Make .arcanus/ and its starter files when they are missing. Never overwrites what you wrote. */
 async function setUp() {
   if ((await read(`${HOME}/ARCANUS.md`)) === null) await write(`${HOME}/ARCANUS.md`, ARCANUS_MD);
+  if ((await read(`${HOME}/SKILL.md`)) === null) await write(`${HOME}/SKILL.md`, SKILL_MD);
+  if ((await read(`${HOME}/AGENTS.md`)) === null) await write(`${HOME}/AGENTS.md`, AGENTS_MD);
   const self = await read(`${HOME}/self.md`);
   // The first seed omitted that Gianne is a man, and a small model then said she. Replace only that seed.
   if (self === null || self.startsWith("I am Arcanus, a local assistant Gianne Bacay made in 2025. I live in this browser")) await write(`${HOME}/self.md`, SELF_MD);
@@ -335,6 +398,10 @@ async function setUp() {
   if ((await read(`${GUARDRAILS}/built-in.md`)) !== BUILT_IN_GUARDRAILS) await write(`${GUARDRAILS}/built-in.md`, BUILT_IN_GUARDRAILS);
   const skills = await list(`${HOME}/skills`).catch(() => null);
   if (!skills) await write(`${HOME}/skills/eli5/SKILL.md`, EXAMPLE_SKILL);
+  for (const [path, before, now] of LINKED) {
+    const text = await read(path).catch(() => null);
+    if (text?.includes(before) && !text.includes(now)) await write(path, text.replace(before, now));
+  }
 }
 
 let reading = 0;
@@ -344,9 +411,15 @@ async function readSkills() {
   for (const entry of await list(`${HOME}/skills`).catch(() => [])) {
     const path = entry.kind === "directory" ? `${HOME}/skills/${entry.name}/SKILL.md` : /\.md$/i.test(entry.name) ? `${HOME}/skills/${entry.name}` : "";
     const text = path ? await read(path).catch(() => null) : null;
-    if (text?.trim()) skills.push({ ...parseSkill(text, entry.name.replace(/\.md$/i, "")), path });
+    if (text?.trim()) {
+      const skill = parseSkill(text, entry.name.replace(/\.md$/i, ""));
+      skills.push({ ...skill, body: plainLinks(skill.body), path });
+    }
   }
-  if (mine === reading) workspace.set({ skills });
+  const [team, own] = await Promise.all([read(`${HOME}/AGENTS.md`).catch(() => null), read(`${HOME}/SKILL.md`).catch(() => null)]);
+  const agents = parseAgents(team ?? "").map((role) => ({ ...role, body: plainLinks(role.body), path: `${HOME}/AGENTS.md` }));
+  const brief = own ? plainLinks(parseSkill(own, "arcanus").body) : "";
+  if (mine === reading) workspace.set({ skills, agents, brief });
 }
 
 function changed() {
@@ -354,14 +427,16 @@ function changed() {
   void readSkills();
 }
 
+/** A file as the model reads it: no comments, and each [[link]] as the name it shows. */
+export const prose = (text: string | null) => plainLinks(stripComments(text ?? ""));
 /** ARCANUS.md without its comments: empty when there are no instructions. */
-export const instructions = async () => stripComments((await read(`${HOME}/ARCANUS.md`).catch(() => null)) ?? "");
+export const instructions = async () => prose(await read(`${HOME}/ARCANUS.md`).catch(() => null));
 /** guardrails/rules.md without its comments: empty when you have added none. */
-export const guardrails = async () => stripComments((await read(`${GUARDRAILS}/rules.md`).catch(() => null)) ?? "");
+export const guardrails = async () => prose(await read(`${GUARDRAILS}/rules.md`).catch(() => null));
 
 /** lore.md's sections, by heading ("my name" -> its text, on one line). Empty when the file is missing or blank. */
 export async function lore(): Promise<Record<string, string>> {
-  const text = stripComments((await read(`${HOME}/lore.md`).catch(() => null)) ?? "");
+  const text = prose(await read(`${HOME}/lore.md`).catch(() => null));
   const sections: Record<string, string> = {};
   for (const part of text.split(/^#+\s*/m)) {
     const [head, ...body] = part.split("\n");
@@ -376,7 +451,7 @@ export async function memories(): Promise<{ id: string; text: string }[]> {
   const notes = [];
   for (const entry of await list(`${HOME}/memory`).catch(() => [])) {
     if (entry.kind !== "file" || !/\.(md|txt)$/i.test(entry.name)) continue;
-    const text = stripComments((await read(`${HOME}/memory/${entry.name}`).catch(() => null)) ?? "");
+    const text = prose(await read(`${HOME}/memory/${entry.name}`).catch(() => null));
     if (text) notes.push({ id: entry.name, text });
   }
   return notes;
@@ -414,10 +489,14 @@ export async function addBooks(files: Iterable<File>) {
 
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
 
-/** Keep a note in .arcanus/memory. Returns its path. */
-export async function remember(note: string) {
+/**
+ * Keep a note in .arcanus/memory. Returns its path. `related`: notes it bears on, linked in a comment, so recalling
+ * one brings the others into the reply's context while the model reads only the note.
+ */
+export async function remember(note: string, related: string[] = []) {
   const path = `${HOME}/memory/${stamp()}-${slug(note.split(/\s+/).slice(0, 6).join(" ")) || "note"}.md`;
-  await write(path, `${note.trim()}\n`);
+  const links = related.map((id) => `[[memory/${id.replace(/\.(md|txt)$/i, "")}]]`).join(" ");
+  await write(path, `${note.trim()}\n${links ? `\n<!-- Related: ${links} -->\n` : ""}`);
   return path;
 }
 

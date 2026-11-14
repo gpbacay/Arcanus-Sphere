@@ -3,19 +3,19 @@
 // their own, so only the reply being written re-renders. When a model is missing, Arcanus answers what it still can.
 import { asksForFact, grounding, lookupQuery, recallNotes, recallPassages, routeNames, teach, think, type Plan } from "@/modules/brain";
 import { account } from "@/modules/account";
-import { addressed, answersCall, asSelf, assemble, keepPronouns, keepYears, CALL_TURNS, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED } from "@/modules/harness";
+import { addressed, answersCall, asSelf, assemble, keepPronouns, keepYears, CALL_TURNS, chatTurns, factsBlock, greeting, liveTurns, ONLY_ASKED, slug } from "@/modules/harness";
 import { listen } from "@/modules/listen";
 import { llm, modelSize, MODELS, type Turn } from "@/modules/llm";
 import { interrupted, revise, settle, thought, type Operation } from "@/modules/mind";
 import { go } from "@/modules/web";
 import { isEcho, spokenLine, takeSentences, voice, wholeSentences } from "@/modules/voice";
-import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, linkedNotes, memories, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
+import { FILE_COMMANDS, HOME, createSkill, fileCommand, guardrails, instructions, linkedNotes, memories, plainLinks, remember, saveArtifact, workspace, type Skill } from "@/modules/workspace";
 import { chatLine, openPane, pane } from "@/shared/pane";
 import { power, setPower } from "@/shared/power";
 import { stageShown, whenShown } from "@/shared/stage";
 import { Store, bootInTurn, engineSettled, errorText, useStore, type Engine } from "@/shared/store";
 import type { ThoughtStep } from "@/shared/ui/chain-of-thought";
-import { MAX, chatStore, currentChat, newChat, push, remove, write, type Msg, type Removal } from "./store";
+import { MAX, chatStore, currentChat, newChat, push, remove, select, write, type Msg, type Removal } from "./store";
 
 export type Live = { chatId: string; trace: ThoughtStep[]; text: string; /** When the reply began: "Thought 17s" is counted from here. */ begun?: number };
 
@@ -123,7 +123,7 @@ async function buildTurns(prior: Msg[], user: Msg, plan: Plan, skill: Skill | un
       { label: STANDING, text: rules, priority: 1 },
       { label: `Instructions for the /${skill?.name} skill`, text: skill?.body ?? "", priority: 0 },
       { label: plan.source ?? "Facts you may use", text: facts, priority: 0 },
-      { label: `What the user is showing you: ${pinned?.label}`, text: pinned?.text ?? "", priority: 2 },
+      { label: `What the user is showing you: ${pinned?.label}`, text: plainLinks(pinned?.text ?? ""), priority: 2 },
       {
         label: `From your user's books (${[...new Set(passages.map((p) => p.book))].join(", ")})`,
         text: passages.length ? `${passages.map((p) => `[${p.book}] ${p.text}`).join("\n\n")}\n\nIf these answer the question, answer from them and name the book.` : "",
@@ -370,7 +370,7 @@ function moment() {
   return `${now.toLocaleDateString([], { weekday: "long" })} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
 }
 
-async function answer(chatId: string, prior: Msg[], user: Msg, skill?: Skill) {
+async function answer(chatId: string, prior: Msg[], user: Msg, skill = agentOf(chatId)) {
   stopGreeting();
   interrupted(); // whatever was still running belonged to the reply this one replaces
   const spoken = viaVoice;
@@ -615,6 +615,72 @@ async function answerCall(chatId: string, user: Msg, decision: string, stale: ()
   return null;
 }
 
+// ------------------------------------------------------------------ agents
+// Every conversation is an agent. One with a role (AGENTS.md) answers as that role, with SKILL.md's brief before it;
+// one without is Arcanus itself. /agents <task> makes a conversation per role and runs them in order, each handed the
+// work of the one before, then reports back in the conversation that asked.
+
+/** The agent a conversation is, as a skill: its role's instructions after the brief every agent reads. */
+function agentOf(chatId: string): Skill | undefined {
+  const name = chatStore.state.chats.find((c) => c.id === chatId)?.role;
+  const role = name ? workspace.state.agents.find((a) => a.name === name) : undefined;
+  return role && { ...role, body: [workspace.state.brief, role.body].filter(Boolean).join("\n\n") };
+}
+
+/** How much of an agent's work the next one is handed: a message stays well inside the model's context budget. */
+const HANDOFF = 1200;
+const roleTitle = (role: string, task: string) => `${role[0].toUpperCase()}${role.slice(1)} · ${task}`.replace(/\s+/g, " ").slice(0, 40);
+
+function roster() {
+  const { agents } = workspace.state;
+  const working = chatStore.state.chats.filter((c) => c.role);
+  return [
+    agents.length
+      ? `Roles in ${HOME}/AGENTS.md. /agents <task> puts them to work in this order, /role <name> makes this conversation one:\n${agents.map((a) => `${a.name.padEnd(10)} ${a.description}`).join("\n")}`
+      : `There are no roles in ${HOME}/AGENTS.md. Add a "## name" section for each.`,
+    working.length ? `Agents:\n${working.map((c) => `${c.title} (${c.role}${agents.some((a) => a.name === c.role) ? "" : ", not in AGENTS.md"})`).join("\n")}` : "No conversation has a role yet.",
+  ].join("\n\n");
+}
+
+/**
+ * Put every role in AGENTS.md to work on `task`: a new conversation each, opened while it works, each handed the task
+ * and the work of the agent before it. Returns the report for the conversation that asked. A message or /stop sent
+ * while they work ends the run there.
+ * ponytail: one language model on this device, so the agents take turns. A model per worker would let them run at once.
+ */
+async function orchestrate(fromId: string, task: string) {
+  const team = workspace.state.agents;
+  if (!team.length) return roster();
+  const quiet = voice.state.state.off;
+  voice.state.set({ off: true }); // their work is read, not heard: saying a plan and its code aloud takes longer than writing it
+  const done: { role: string; title: string; text: string }[] = [];
+  try {
+    for (const role of team) {
+      const title = roleTitle(role.name, task);
+      const id = newChat(title, role.name);
+      const handed = done.at(-1);
+      const text = `Task: ${task}${handed ? `\n\nFrom the ${handed.role}:\n${handed.text.slice(0, HANDOFF)}` : ""}`.slice(0, MAX);
+      const turn = gen;
+      await answer(id, [], { id: crypto.randomUUID(), role: "user", text, at: Date.now() });
+      if (gen !== turn + 1) break; // something else was answered, or stopped, in the meantime
+      const reply = chatStore.state.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant");
+      done.push({ role: role.name, title, text: reply?.text ?? "" });
+    }
+  } finally {
+    voice.state.set({ off: quiet });
+    if (chatStore.state.chats.some((c) => c.id === fromId)) select(fromId);
+  }
+  const report = done.map((d) => `${d.title}\n${d.text.replace(/\s+/g, " ").slice(0, 240)}`).join("\n\n");
+  const last = done.at(-1);
+  return [
+    `${done.length} of ${team.length} agents worked on "${task}", one conversation each${done.length < team.length ? " (stopped early)" : ""}:`,
+    report,
+    last ? `The ${last.role} handed back:\n${last.text}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function stop() {
   const reply = live.state.reply;
   gen++;
@@ -647,6 +713,8 @@ export const COMMANDS = [
   { name: "/skill", hint: "Make a skill: /skill <name> <instructions>" },
   { name: "/save", hint: "Save the last reply to .arcanus/artifacts" },
   { name: "/context", hint: "Show what the last reply read" },
+  { name: "/agents", hint: "Put a team of agents to work, a conversation each: /agents <task>. Alone, lists them" },
+  { name: "/role", hint: "Make this conversation an agent from AGENTS.md: /role <name>, /role none" },
   ...FILE_COMMANDS, // after the older commands, so /re still completes to /remember and /s to /shutdown
   { name: "/help", hint: "List these commands" },
 ];
@@ -702,7 +770,8 @@ function command(chatId: string, input: string) {
   }
   if (name === "/remember") {
     if (!arg) return out("/remember <note> keeps a note. Arcanus recalls it when a message is about it.");
-    return later(async () => `Remembered. Saved to ${await remember(arg)}.`);
+    // The notes most like this one are linked from it: recalling either brings the other into a reply's context.
+    return later(async () => `Remembered. Saved to ${await remember(arg, recallNotes(arg, await memories().catch(() => [])).map((n) => n.id))}.`);
   }
   if (name === "/teach") {
     // A correction for Hippocampus: the last thing you asked should have gone to <route>. Kept in .arcanus/routing.json.
@@ -730,6 +799,24 @@ function command(chatId: string, input: string) {
     const last = chat?.messages.findLast((m) => m.role === "assistant" && !m.kind);
     if (!chat || !last) return out("There's no reply to save yet.");
     return later(async () => `Saved to ${await saveArtifact(arg || chat.title, `${last.text}\n`)}.`);
+  }
+  if (name === "/agents") {
+    if (!arg) return out(roster());
+    if (!power.state.on) return out("Arcanus is off. /run starts it.");
+    voice.unlock();
+    return later(() => orchestrate(chatId, arg));
+  }
+  if (name === "/role") {
+    const now = chatStore.state.chats.find((c) => c.id === chatId)?.role;
+    if (!arg) return out(now ? `This conversation is the ${now} agent. /role none makes it Arcanus again.` : roster());
+    if (/^(none|off|arcanus)$/i.test(arg)) {
+      write(chatId, (c) => ({ ...c, role: undefined }));
+      return out("This conversation is Arcanus itself again.");
+    }
+    const role = workspace.state.agents.find((a) => a.name === slug(arg));
+    if (!role) return out(`There's no ${arg} in ${HOME}/AGENTS.md.\n\n${roster()}`);
+    write(chatId, (c) => ({ ...c, role: role.name }));
+    return out(`This conversation is now the ${role.name} agent: ${role.description}`);
   }
   if (name === "/context") {
     const where = `Workspace: ${workspace.state.name || "not ready"} · ${workspace.state.skills.length} skills in ${HOME}/skills`;

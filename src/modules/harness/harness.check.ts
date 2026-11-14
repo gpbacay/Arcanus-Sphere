@@ -1,6 +1,6 @@
 // Run: node src/modules/harness/harness.check.ts   (Node 22.18+ strips the types)
 import assert from "node:assert/strict";
-import { addressed, answersCall, argsFor, asSelf, assemble, BUILT_IN_GUARDRAILS, callTool, stripComments, featuresReply, greeting, identityBrief, introduction, keepPronouns, keepYears, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
+import { addressed, answersCall, argsFor, asSelf, assemble, BUILT_IN_GUARDRAILS, callTool, stripComments, featuresReply, greeting, identityBrief, introduction, keepPronouns, keepYears, liveTurns, LIVE_SYSTEM, matchTool, ONLY_ASKED, parseAgents, parseMcpBody, parseSkill, PERSONALITY_REPLIES, personalityReply, registerPlugin, slug } from "./index.ts";
 
 assert.equal(slug("  Explain Like I'm 5! "), "explain-like-i-m-5");
 assert.deepEqual(parseSkill("---\nname: ELI5\ndescription: \"Explain simply\"\n---\n<!-- for you -->\nUse small words.\n", "x"), {
@@ -111,4 +111,9 @@ assert.match(await callTool("missing", "x"), /No tool/);
 // guardrails/built-in.md says what the code enforces: the identity and answer rules themselves, and its comment never reaches the model.
 assert.ok(BUILT_IN_GUARDRAILS.includes(identityBrief) && BUILT_IN_GUARDRAILS.includes(ONLY_ASKED));
 assert.ok(stripComments(BUILT_IN_GUARDRAILS).startsWith("# My guardrails"));
+// AGENTS.md: roles in file order; a "## " inside a comment is not a role, and a heading with no instructions is skipped.
+assert.deepEqual(parseAgents("# Agents\n<!-- ## fake\nnot a role -->\n## Planner\nPlans it.\nFive steps.\n\n## empty\n\n## Code Reviewer\nChecks it.\n"), [
+  { name: "planner", description: "Plans it.", body: "Plans it.\nFive steps." },
+  { name: "code-reviewer", description: "Checks it.", body: "Checks it." },
+]);
 console.log("harness ok");

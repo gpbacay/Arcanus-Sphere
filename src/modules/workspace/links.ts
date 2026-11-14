@@ -9,21 +9,31 @@ export type Graph = { nodes: Node[]; edges: [from: string, to: string][] };
 
 const WIKI = /\[\[([^\]|#\n]*)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 
-/** The targets a note links to, in order, once each. Links inside code are not links. */
+/**
+ * The targets a note links to, in order, once each. Links inside code are not links. Links inside an HTML comment
+ * are: the model never reads comments, so a link there shapes the graph (and what a reply's context follows) without
+ * costing the prompt a word.
+ */
 export function wikiLinks(text: string): string[] {
-  const prose = text.replace(/```[\s\S]*?```|`[^`\n]*`|<!--[\s\S]*?-->/g, "");
+  const prose = text.replace(/```[\s\S]*?```|`[^`\n]*`/g, "");
   return [...new Set([...prose.matchAll(WIKI)].map((m) => m[1].trim()).filter(Boolean))];
 }
 
+/** A note as the model reads it: [[target|shown]] is "shown", [[target]] is "target". */
+export const plainLinks = (text: string) => text.replace(/\[\[([^\]|\n]*?)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g, (_, target: string, shown?: string) => (shown ?? target.split("/").pop() ?? target).trim());
+
 const key = (path: string) => path.toLowerCase().replace(/\.(md|markdown)$/, "");
 export const noteName = (path: string) => (path.split("/").pop() ?? path).replace(/\.(md|markdown)$/i, "");
+const shared = (a: string, b: string) => a.split("/").findIndex((part, i) => part !== b.split("/")[i]);
 
-/** The file a link means, or null. As Obsidian: the path itself, else the nearest file whose path ends with it. */
-export function resolve(target: string, paths: string[]): string | null {
+/** The file a link in `from` means, or null. As Obsidian: the path itself, else a file whose path ends with it,
+ *  the one nearest `from` first (in the same folder, then the most folders in common), then the shortest. */
+export function resolve(target: string, paths: string[], from = ""): string | null {
   const want = key(target.replace(/#.*$/, "").trim());
   if (!want) return null;
   const hits = paths.filter((p) => key(p) === want || key(p).endsWith(`/${want}`));
-  return hits.sort((a, b) => a.length - b.length)[0] ?? null;
+  const near = (p: string) => (shared(p, from) < 0 ? 99 : shared(p, from));
+  return hits.sort((a, b) => near(b) - near(a) || a.length - b.length)[0] ?? null;
 }
 
 export function linkGraph(notes: Note[]): Graph {
@@ -33,7 +43,7 @@ export function linkGraph(notes: Note[]): Graph {
   const ghosts = new Map<string, Node>();
   for (const n of notes) {
     for (const target of wikiLinks(n.text)) {
-      let to = resolve(target, paths);
+      let to = resolve(target, paths, n.path);
       if (!to) {
         to = `?${key(target)}`;
         if (!ghosts.has(to)) ghosts.set(to, { id: to, name: noteName(target), missing: true });

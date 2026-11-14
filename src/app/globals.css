@@ -605,6 +605,49 @@ textarea.field {
   border-left: 1px solid var(--line-strong);
   color: var(--text-muted);
 }
+.md :where(h4, h5, h6, hr, .md-table) {
+  margin: 0;
+}
+.md :where(h4, h5, h6) {
+  font-size: 13px;
+  font-weight: 600;
+}
+.md h6 {
+  color: var(--text-muted);
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+}
+.md del {
+  color: var(--text-muted);
+}
+.md li:has(> .md-task:first-child) {
+  list-style: none;
+  margin-left: -1.15em;
+}
+.md .md-task {
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  accent-color: var(--accent);
+}
+.md .md-table {
+  overflow-x: auto;
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.md :where(th, td) {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.md th {
+  font-weight: 600;
+  background: var(--surface-2);
+}
 .msg[data-role="user"] .msg-bubble {
   padding: 5px 10px;
   border: 1px solid rgba(111, 224, 255, 0.34);
@@ -1596,6 +1639,30 @@ textarea.field {
 }
 .pop-menu .menu-item {
   justify-content: flex-start;
+}
+/* What is in .arcanus: behind the Operating System's info button, in the middle of the window. */
+.os-info {
+  position: fixed;
+  inset: 0;
+  width: min(360px, calc(100vw - 32px));
+  height: fit-content;
+  margin: auto;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  background: var(--glass-sheen), #0a0f16;
+}
+.os-info:not(:popover-open) {
+  display: none;
+}
+.os-info ul {
+  margin: 6px 0 8px;
+  padding-left: 16px;
+}
+.os-info code {
+  font-family: var(--font-mono);
+  color: var(--text);
 }
 .pop-menu .menu-item svg {
   flex: none;
@@ -3363,7 +3430,7 @@ button.md-wiki:hover {
 }
 .note-graph text {
   fill: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   text-anchor: middle;
   pointer-events: none;
 }
@@ -3419,14 +3486,35 @@ button.md-wiki:hover {
 .md-preview h3 {
   font-size: 14px;
 }
-/* An HTML comment in a previewed file: shown as a quiet note, its own line breaks kept. */
+/* An HTML comment in a previewed file: shown as a quiet note, in markdown like the rest. */
 .md-note {
   padding: 6px 10px;
   border-left: 1px solid var(--line-strong);
   background: var(--surface);
   font-size: 12px;
   color: var(--text-muted);
-  white-space: pre-wrap;
+}
+/* A skill's front matter: its properties, key beside value. */
+.md-props {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.md-props > div {
+  display: flex;
+  gap: 10px;
+}
+.md-props dt {
+  flex: none;
+  width: 88px;
+  color: var(--text-faint);
+}
+.md-props dd {
+  margin: 0;
+  color: var(--text);
 }
 
 /* The explorer's tree, as an editor's: rows 24px tall, a chevron on each folder, a guide line per level, the picked row

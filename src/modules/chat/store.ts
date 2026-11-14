@@ -24,6 +24,8 @@ export interface Chat {
   id: string;
   title: string;
   messages: Msg[];
+  /** The agent this conversation is: a role from .arcanus/AGENTS.md. None: Arcanus itself. */
+  role?: string;
 }
 
 export type Removal = { kind: "message"; id: string } | { kind: "chat"; id: string } | { kind: "all" };
@@ -81,6 +83,7 @@ function fromSaved(data: unknown): { chats: Chat[]; currentId: string } {
       chats.push({
         id: item.id,
         title: typeof item.title === "string" && item.title.trim() ? item.title.slice(0, 40) : "Untitled",
+        role: typeof item.role === "string" ? item.role : undefined,
         messages: item.messages.flatMap((m: Partial<Msg>): Msg[] =>
           m && (m.role === "user" || m.role === "assistant") && typeof m.text === "string" && typeof m.id === "string"
             ? [
@@ -170,9 +173,11 @@ export function select(id: string) {
   commit({ currentId: id, replyTo: null, editingId: null });
 }
 
-export function newChat() {
-  const chat = blankChat();
+/** Start a conversation and open it. With a role it is that agent (conversation.ts, /agents). Returns its id. */
+export function newChat(title = "Untitled", role?: string) {
+  const chat: Chat = { ...blankChat(), title, role };
   commit({ chats: [chat, ...chatStore.state.chats], currentId: chat.id, replyTo: null, editingId: null, undo: null });
+  return chat.id;
 }
 
 export function rename(title: string) {

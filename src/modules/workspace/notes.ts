@@ -3,7 +3,7 @@
 // The notes in Arcanus's file system and the [[links]] between them (links.ts), read once per change of the files.
 // The graph view draws them, a [[link]] in a previewed note opens its file, and a reply's context follows them: a note
 // Arcanus reads brings the notes it links to, so a subject split over small files is read whole.
-import { HOME, read, workspace, write } from "./fs";
+import { HOME, prose, read, workspace, write } from "./fs";
 import { openFile } from "./ide";
 import { linkGraph, neighbors, resolve, type Graph, type Note } from "./links";
 import { walk } from "./search";
@@ -32,7 +32,7 @@ export const noteGraph = async (): Promise<Graph> => linkGraph(await allNotes())
 /** Open what a [[link]] in `from` means. A link no file answers yet makes that file, beside `from`, as Obsidian does. */
 export async function openNote(target: string, from: string) {
   const notes = await allNotes();
-  const found = resolve(target, notes.map((n) => n.path));
+  const found = resolve(target, notes.map((n) => n.path), from);
   if (found) return openFile(found);
   const name = target.replace(/#.*$/, "").trim();
   const path = [from.split("/").slice(0, -1).join("/"), MD.test(name) ? name : `${name}.md`].filter(Boolean).join("/");
@@ -40,10 +40,10 @@ export async function openNote(target: string, from: string) {
   await openFile(path);
 }
 
-/** The notes linked to or from these files, not counting them: one step out in the graph. */
+/** The notes linked to or from these files, not counting them: one step out in the graph. As the model reads them. */
 export async function linkedNotes(paths: string[]): Promise<Note[]> {
   const notes = await allNotes();
   const graph = linkGraph(notes);
   const near = new Set(paths.flatMap((p) => neighbors(p, graph)).filter((p) => !paths.includes(p)));
-  return [...near].flatMap((p) => notes.filter((n) => n.path === p));
+  return [...near].flatMap((p) => notes.filter((n) => n.path === p).map((n) => ({ path: n.path, text: prose(n.text) })).filter((n) => n.text));
 }

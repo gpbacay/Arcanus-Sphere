@@ -42,6 +42,8 @@ Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.a
 ```
 .arcanus/
   ARCANUS.md            standing instructions, read before every reply (like CLAUDE.md); <!-- comments --> are never sent
+  SKILL.md              Arcanus's own skill: what it is, and the brief every agent it leads reads before its role
+  AGENTS.md             the roles its agents take, one "## name" section each, in the order /agents runs them
   skills/<name>/SKILL.md  a skill: frontmatter `name` and `description`, then instructions. Run it with /<name> <message>
   memory/*.md           notes; the ones a message is about are recalled into the reply's context
   artifacts/            what Arcanus saved: replies (/save) and web pages
@@ -51,6 +53,15 @@ Like `.claude/` or `.cursor/` in a project, Arcanus keeps its own files in a `.a
 By default the folder lives privately in the browser (the Origin Private File System). **Open a folder** in the Operating System (Chrome and Edge) and Arcanus works in that folder on your device instead, creating `<folder>/.arcanus/`; it asks for access again after a reload. You can open and edit any file there, and **Ask Arcanus** hands a file to the model to read with your messages.
 
 From the chat: `/skill <name> <instructions>` makes a skill, `/remember <note>` keeps a note, `/save` saves the last reply, `/context` shows what the last reply read, `/teach <route>` corrects where your last message was routed (kept in `.arcanus/routing.json`). `/ls`, `/open`, `/read`, `/write`, `/replace`, `/mkdir`, `/mv` and `/rm` manage any file.
+
+### Agents
+
+Every conversation is an agent. A conversation with no role is Arcanus itself. One with a role answers as that role: its section of `AGENTS.md`, after the brief in `SKILL.md`, is in the context of every reply, the way a skill's instructions are.
+
+- `/agents <task>` puts a team to work: Arcanus makes one conversation per role in `AGENTS.md` (planner, coder and reviewer to start with), opens each while it works, and hands each the task and the work of the agent before it. It then reports back in the conversation you asked from, with what each agent did and the last agent's work in full. Each agent's conversation stays in the list to read or keep talking to. A message or Stop while they work ends the run there.
+- `/agents` alone lists the roles and which conversations have one. `/role <name>` makes the open conversation that agent, `/role none` makes it Arcanus again.
+
+Add, remove or reorder roles by editing `AGENTS.md`. There is one language model on the device, so the agents take turns rather than writing at once, and their voice stays quiet while they work. SmolLM2 is small: the team's plans and reviews are useful sketches, its code rarely runs as written.
 
 ### Its own source, editor and git
 

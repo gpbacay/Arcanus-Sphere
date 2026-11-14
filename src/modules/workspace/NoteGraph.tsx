@@ -137,8 +137,8 @@ export function NoteGraph({ current }: { current: string }) {
               onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open(n.id))}
             >
               <title>{n.missing ? `${n.name} (not written yet)` : n.id}</title>
-              <circle r={4 + Math.sqrt(degree.get(n.id) ?? 0) * 2} />
-              <text y={16}>{n.name}</text>
+              <circle r={5 + Math.sqrt(degree.get(n.id) ?? 0) * 2.5} />
+              <text y={20}>{n.name}</text>
             </g>
           );
         })}

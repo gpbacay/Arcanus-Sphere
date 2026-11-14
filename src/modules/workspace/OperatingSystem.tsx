@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, ChevronsDownUp, Code, Eye, FilePlus, FolderPlus, House, MessageSquareText, Monitor, RotateCw, Save, Trash2, Waypoints, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronsDownUp, Code, Eye, FilePlus, FolderPlus, House, Info, MessageSquareText, Monitor, RotateCw, Save, Trash2, Waypoints, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { chatLine, closePane, pin, toggleExpand, usePlace, type Section } from "@/shared/pane";
@@ -32,15 +32,45 @@ export function OperatingSystem() {
  */
 function Preview({ text }: { text: string }) {
   if (!text.trim()) return <p className="pane-note">This file is empty.</p>;
-  return text.split(/(<!--[\s\S]*?-->)/).map((part, i) =>
-    part.startsWith("<!--") ? (
-      <aside key={i} className="md-note" aria-label="Comment">
-        {part.slice(4, -3).trim()}
-      </aside>
-    ) : part.trim() ? (
-      <Markdown key={i} text={part} />
-    ) : null
+  // A skill's front matter (name, description) shows as its properties, the way a notes app shows them.
+  const front = /^---\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/.exec(text);
+  const props = front ? front[1].split(/\r?\n/).map((line) => /^([\w-]+):\s*(.*)$/.exec(line)).filter((m) => m !== null) : [];
+  return (
+    <>
+      {props.length ? (
+        <dl className="md-props" aria-label="Properties">
+          {props.map(([, key, value]) => (
+            <div key={key}>
+              <dt>{key}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {text
+        .slice(props.length ? front![0].length : 0)
+        .split(/(<!--[\s\S]*?-->)/)
+        .map((part, i) =>
+          part.startsWith("<!--") ? (
+            <aside key={i} className="md-note md" aria-label="Comment">
+              <Markdown text={commentText(part.slice(4, -3))} file />
+            </aside>
+          ) : part.trim() ? (
+            <Markdown key={i} text={part} file />
+          ) : null
+        )}
+    </>
   );
+}
+
+/**
+ * A comment as markdown. Its lines are wrapped and indented to sit under "<!--": the indent they share is taken off
+ * so the wrapped lines run together, and a line indented further (an example) keeps a line of its own, as a quote.
+ */
+function commentText(body: string) {
+  const [first, ...rest] = body.trim().split("\n");
+  const indent = Math.min(...rest.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)![0].length));
+  return [first, ...rest.map((l) => l.slice(Number.isFinite(indent) ? indent : 0))].map((l) => (/^\s+\S/.test(l) ? `> ${l.trim()}` : l)).join("\n");
 }
 
 const baseName = (path: string) => path.split("/").pop() ?? path;
@@ -307,20 +337,6 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
         onDelete={(path) => void act(() => discard(path))()}
         onError={setError}
       />
-      {!dir ? (
-        <p className="pane-note">
-          Arcanus keeps its own files in <code>.arcanus/</code>. <code>self.md</code> is what it knows about itself, and <code>lore.md</code> where it comes from and why it is called Arcanus. <code>ARCANUS.md</code> is read
-          before every reply. <code>guardrails/</code> holds the rules Arcanus never breaks: <code>built-in.md</code> the ones in its code, <code>rules.md</code> yours. <code>skills/</code> run with /name, or Run in the menu. <code>memory/</code>, <code>artifacts/</code> and <code>knowledge/</code> hold notes,
-          saved replies and books (File, then Add books).{" "}
-          {hasSource ? (
-            <>
-              <code>source/</code> is the code Arcanus is running: save a file there and it runs a moment later.
-            </>
-          ) : (
-            "Its source code appears here when Arcanus is opened at localhost on the computer it runs from."
-          )}
-        </p>
-      ) : null}
     </div>
   );
 
@@ -384,6 +400,26 @@ function OperatingSystemPane({ at, wide }: { at: Section | null; wide: boolean }
           >
             <Waypoints size={15} />
           </button>
+          <button type="button" className="icon-btn" aria-label="What is in .arcanus" title="What is in .arcanus" popoverTarget="os-info">
+            <Info size={15} />
+          </button>
+          <div id="os-info" popover="auto" className="menu os-info">
+            <p>
+              Arcanus keeps its own files in <code>.arcanus/</code>:
+            </p>
+            <ul>
+              <li><code>self.md</code>: what it knows about itself</li>
+              <li><code>lore.md</code>: where it comes from and its name</li>
+              <li><code>ARCANUS.md</code>: read before every reply</li>
+              <li><code>guardrails/</code>: rules it never breaks, <code>built-in.md</code> from its code and <code>rules.md</code> yours</li>
+              <li><code>skills/</code>: run with /name, or Run in the menu</li>
+              <li><code>memory/</code>, <code>artifacts/</code>, <code>knowledge/</code>: notes, saved replies, books (File, then Add books)</li>
+              <li>{hasSource ? <><code>source/</code>: the code Arcanus is running; save a file and it runs a moment later</> : <><code>source/</code>: its source code, when opened at localhost on the computer it runs from</>}</li>
+            </ul>
+            <p>
+              Write <code>[[a note&apos;s name]]</code> in a note to link it to another; the graph button shows the links, and Arcanus reads a note&apos;s links with it.
+            </p>
+          </div>
         </div>
       ) : null}
       <input

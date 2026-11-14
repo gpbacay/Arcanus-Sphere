@@ -316,6 +316,18 @@ export function parseSkill(text: string, fallbackName: string): SkillFile {
   return { name: slug(meta.name || fallbackName) || "skill", description: meta.description || body.split("\n")[0].slice(0, 90), body };
 }
 
+/** AGENTS.md: a role per "## name" section, its first line what it does, all of it the role's instructions. In order. */
+export function parseAgents(text: string): SkillFile[] {
+  return stripComments(text)
+    .split(/^##[ \t]+/m)
+    .slice(1)
+    .map((part) => {
+      const [head, ...body] = part.split("\n");
+      return parseSkill(body.join("\n"), head.trim());
+    })
+    .filter((role) => role.body);
+}
+
 // ------------------------------------------------------------------ typed chat
 // What a typed reply is written from. Here, not in the chat module, so llm/reply.eval.ts builds the very prompt the
 // app sends and scores what SmolLM2 writes from it.
@@ -335,7 +347,8 @@ export const GROUNDED_SYSTEM = `${FIRST_PERSON} Answer the user's question direc
  * code on purpose: a file anyone (or /write) can edit must never be able to switch them off.
  */
 export const BUILT_IN_GUARDRAILS = `<!-- guardrails/built-in.md: the guardrails written into my code. I rewrite this file from my code every time I
-     start, so editing it changes nothing. To add a guardrail of your own, write it in guardrails/rules.md. -->
+     start, so editing it changes nothing. To add a guardrail of your own, write it in [[guardrails/rules]]. What I am is
+     in [[self]]. -->
 # My guardrails
 
 ## Who I am

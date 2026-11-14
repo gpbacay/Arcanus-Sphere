@@ -22,6 +22,8 @@ function nodes(list: Inline[], key: string): ReactNode[] {
     if ("c" in node) return <code key={id}>{node.c}</code>;
     if ("b" in node) return <strong key={id}>{nodes(node.b, id)}</strong>;
     if ("i" in node) return <em key={id}>{nodes(node.i, id)}</em>;
+    if ("s" in node) return <del key={id}>{nodes(node.s, id)}</del>;
+    if ("task" in node) return <input key={id} type="checkbox" className="md-task" checked={node.task} readOnly disabled aria-label={node.task ? "Done" : "To do"} />;
     if ("w" in node)
       return (
         <WikiLink key={id} target={node.w}>
@@ -47,7 +49,7 @@ function block(item: Block, index: number, caret: boolean) {
     );
   }
   if ("h" in item) {
-    const Tag = `h${item.h}` as "h1" | "h2" | "h3";
+    const Tag = `h${item.h}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
     return (
       <Tag key={index}>
         {nodes(item.v, String(index))}
@@ -69,7 +71,7 @@ function block(item: Block, index: number, caret: boolean) {
   }
   if ("ol" in item) {
     return (
-      <ol key={index}>
+      <ol key={index} start={item.start === 1 ? undefined : item.start}>
         {item.ol.map((line, i) => (
           <li key={i}>
             {nodes(line, `${index}-${i}`)}
@@ -77,6 +79,37 @@ function block(item: Block, index: number, caret: boolean) {
           </li>
         ))}
       </ol>
+    );
+  }
+  if ("hr" in item) return <hr key={index} />;
+  if ("table" in item) {
+    const { head, align, rows } = item.table;
+    return (
+      <div key={index} className="md-table">
+        <table>
+          <thead>
+            <tr>
+              {head.map((cell, i) => (
+                <th key={i} style={{ textAlign: align[i] }}>
+                  {nodes(cell, `${index}-h${i}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r}>
+                {head.map((_, i) => (
+                  <td key={i} style={{ textAlign: align[i] }}>
+                    {nodes(row[i] ?? [], `${index}-${r}-${i}`)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {last}
+      </div>
     );
   }
   if ("q" in item) {
@@ -95,9 +128,12 @@ function block(item: Block, index: number, caret: boolean) {
   );
 }
 
-/** Markdown as text on the page: an assistant reply, or a file previewed. `caret` is the streaming cursor, kept on the last line. */
-export function Markdown({ text, caret = false }: { text: string; caret?: boolean }) {
-  const blocks = parseMarkdown(text);
+/**
+ * Markdown as text on the page: an assistant reply, or a file previewed. `caret` is the streaming cursor, kept on the
+ * last line. `file`: read as a markdown file is, where the lines of a paragraph run together.
+ */
+export function Markdown({ text, caret = false, file = false }: { text: string; caret?: boolean; file?: boolean }) {
+  const blocks = parseMarkdown(text, { breaks: !file });
   if (!blocks.length) return caret ? <span className="caret" aria-hidden /> : null;
   return blocks.map((item, index) => block(item, index, caret && index === blocks.length - 1));
 }

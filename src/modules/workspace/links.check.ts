@@ -1,15 +1,17 @@
 // Run: node src/modules/workspace/links.check.ts
 import assert from "node:assert/strict";
-import { layout, linkGraph, neighbors, resolve, wikiLinks } from "./links.ts";
+import { layout, linkGraph, neighbors, plainLinks, resolve, wikiLinks } from "./links.ts";
 
 assert.deepEqual(wikiLinks("See [[Plan]], [[ideas/Sky#Blue|the sky]] and [[Plan]] again."), ["Plan", "ideas/Sky"]);
-assert.deepEqual(wikiLinks("`[[not]]`\n```\n[[nor]]\n```\n<!-- [[nor this]] -->"), []);
+assert.deepEqual(wikiLinks("`[[not]]`\n```\n[[nor]]\n```\n<!-- see [[self]] -->"), ["self"]); // code isn't linked; a comment is
+assert.equal(plainLinks("Read [[guardrails/rules]] and [[self#Files|what I am]]."), "Read rules and what I am.");
 
 const paths = [".arcanus/memory/plan.md", ".arcanus/notes/ideas/sky.md", ".arcanus/sky.md"];
 assert.equal(resolve("Plan", paths), ".arcanus/memory/plan.md");
 assert.equal(resolve("ideas/Sky", paths), ".arcanus/notes/ideas/sky.md");
 assert.equal(resolve("sky.md", paths), ".arcanus/sky.md"); // the nearest of two
 assert.equal(resolve("nowhere", paths), null);
+assert.equal(resolve("sky", paths, ".arcanus/notes/ideas/plan.md"), ".arcanus/notes/ideas/sky.md"); // the one beside the link wins
 
 const g = linkGraph([
   { path: "a.md", text: "[[b]] and [[c]] and [[a]]" },
